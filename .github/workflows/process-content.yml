@@ -94,11 +94,11 @@ jobs:
         esac
 
     - name: Upload artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: generated-content
-        path: ./output/${{ github.event.inputs.content_id }}
-        retention-days: 1
+        path: ./output/${{ github.event.inputs.content_id }}/*
+        if-no-files-found: error
 
     # Add a step here to update your database or notify your application
     # about the completion of the job
