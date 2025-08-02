@@ -1,0 +1,111 @@
+name: Process Content with Pandoc
+
+on:
+  workflow_dispatch:
+    inputs:
+      content_id:
+        description: 'Content ID'
+        required: true
+      format:
+        description: 'Output format (epub, mobi, pdf, html, docx)'
+        required: true
+        default: 'pdf'
+      metadata:
+        description: 'Additional metadata as JSON string'
+        required: false
+        default: '{}'
+
+jobs:
+  process-content:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Pandoc and Calibre (for epub/mobi)
+      uses: r-lib/actions/setup-pandoc@v2
+      with:
+        pandoc-version: '3.1.1'
+        
+    - name: Install Calibre (for epub/mobi conversion)
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y calibre
+        
+    - name: Set up Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Process content
+      id: process
+      run: |
+        # Parse inputs
+        CONTENT_ID=${{ github.event.inputs.content_id }}
+        FORMAT=${{ github.event.inputs.format }}
+        METADATA='${{ github.event.inputs.metadata }}'
+        
+        # Create output directory
+        mkdir -p ./output/$CONTENT_ID
+        
+        # Create content directory and file
+        mkdir -p ./output/$CONTENT_ID
+        echo "# $TITLE" > ./output/$CONTENT_ID/content.md
+        echo "$CONTENT" >> ./output/$CONTENT_ID/content.md
+        
+        # Generate the requested format
+        case "$FORMAT" in
+          epub|mobi)
+            # First create EPUB, then convert to MOBI if needed
+            pandoc \
+              -f markdown \
+              -t epub \
+              -o ./output/$CONTENT_ID/output.epub \
+              --metadata title="$TITLE" \
+              ./output/$CONTENT_ID/content.md
+            
+            if [ "$FORMAT" = "mobi" ]; then
+              # Convert EPUB to MOBI using Calibre's ebook-convert
+              ebook-convert \
+                ./output/$CONTENT_ID/output.epub \
+                ./output/$CONTENT_ID/output.mobi
+            fi
+            ;;
+            
+          pdf|html|docx)
+            # Direct conversion for these formats
+            pandoc \
+              -f markdown \
+              -t $FORMAT \
+              -o ./output/$CONTENT_ID/output.$FORMAT \
+              --metadata title="$TITLE" \
+              ./output/$CONTENT_ID/content.md
+            ;;
+            
+          *)
+            echo "Unsupported format: $FORMAT"
+            exit 1
+            ;;
+        esac
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: generated-content
+        path: ./output/${{ github.event.inputs.content_id }}
+        retention-days: 1
+
+    # Add a step here to update your database or notify your application
+    # about the completion of the job
+    - name: Notify completion
+      env:
+        JOB_TOKEN: ${{ fromJSON(github.event.inputs.metadata).jobToken || '' }}
+      run: |
+        # Here you would typically make an API call back to your application
+        # to update the status of the content generation job
+        echo "Processing complete for content ID: ${{ github.event.inputs.content_id }}"
