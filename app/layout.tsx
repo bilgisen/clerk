@@ -3,6 +3,7 @@ import type { Appearance } from "@clerk/types";
 import "./globals.css";
 import Script from "next/script";
 import localFont from "next/font/local";
+import { ThemeProvider } from "next-themes";
 import { templateMetadata } from "./_template/content/metadata";
 
 export const metadata = templateMetadata;
@@ -41,15 +42,24 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={`${geistSans.variable} ${geistMono.variable}`}>
+    <html lang="en" className={`${geistSans.variable} ${geistMono.variable}`} suppressHydrationWarning>
+      <head>
+        <Script 
+          src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-core.min.js" 
+          strategy="afterInteractive"
+        />
+        <Script 
+          src="https://cdn.jsdelivr.net/npm/prismjs@1/plugins/autoloader/prism-autoloader.min.js" 
+          strategy="afterInteractive"
+        />
+      </head>
       <ClerkProvider appearance={clerkAppearanceObject}>
-        <body className={`min-h-screen flex flex-col antialiased`}>
-          {children}
+        <body className="min-h-screen flex flex-col antialiased" suppressHydrationWarning>
+          <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+            {children}
+          </ThemeProvider>
         </body>
       </ClerkProvider>
-
-      <Script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-core.min.js" />
-      <Script src="https://cdn.jsdelivr.net/npm/prismjs@1/plugins/autoloader/prism-autoloader.min.js" />
     </html>
   );
 }

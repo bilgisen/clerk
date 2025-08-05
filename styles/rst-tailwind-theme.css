@@ -1,0 +1,67 @@
+/* Row arka planı ve kenarlık */
+.rst__rowContents {
+  background-color: #ffffff;
+  border: 1px solid #e5e7eb; /* Tailwind gray-200 */
+  color: #111827; /* Tailwind gray-900 */
+}
+
+.dark .rst__rowContents {
+  background-color: #1f2937; /* Tailwind gray-800 */
+  border: 1px solid #374151; /* Tailwind gray-700 */
+  color: #f9fafb; /* Tailwind gray-100 */
+}
+
+/* Sürükleme tutacağı */
+.rst__moveHandle {
+  background-color: #e5e7eb;
+  border: 1px solid #d1d5db;
+}
+
+.dark .rst__moveHandle {
+  background-color: #374151;
+  border: 1px solid #4b5563;
+}
+
+/* Katlama butonu */
+.rst__collapseButton {
+  background-color: #f3f4f6;
+  border: 1px solid #d1d5db;
+}
+
+.dark .rst__collapseButton {
+  background-color: #4b5563;
+  border: 1px solid #6b7280;
+}
+
+/* Yazı rengi override (dark modda açık yap) */
+.rst__rowTitle span {
+  color: #111827;
+}
+
+.dark .rst__rowTitle span {
+  color: #f9fafb;
+}
+
+/* Light mode (isteğe bağlı override) */
+.rst__lineBlock::before,
+.rst__lineBlock::after,
+.rst__lineHalfHorizontalRight::before,
+.rst__lineHalfHorizontalRight::after,
+.rst__lineFullVertical::before,
+.rst__lineFullVertical::after,
+.rst__lineHalfVerticalTop::before,
+.rst__lineHalfVerticalTop::after {
+  background-color: #d1d5db; /* Tailwind gray-300 */
+}
+
+/* ✅ Dark mode için bağlantı çizgileri */
+.dark .rst__lineBlock::before,
+.dark .rst__lineBlock::after,
+.dark .rst__lineHalfHorizontalRight::before,
+.dark .rst__lineHalfHorizontalRight::after,
+.dark .rst__lineFullVertical::before,
+.dark .rst__lineFullVertical::after,
+.dark .rst__lineHalfVerticalTop::before,
+.dark .rst__lineHalfVerticalTop::after {
+  background-color: #4b5563; /* Tailwind gray-600 */
+}
