@@ -5,10 +5,66 @@ import { useParams, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 
+// Polling interval in milliseconds
+const POLL_INTERVAL = 10000; // 10 seconds
+
 export default function GenerateEbookPage() {
   const { slug } = useParams();
   const router = useRouter();
   const [isGenerating, setIsGenerating] = useState(false);
+  const [polling, setPolling] = useState(false);
+  
+  // Function to start polling for completion
+  const startPollingForCompletion = (bookId: string) => {
+    if (polling) return; // Prevent multiple polling instances
+    
+    setPolling(true);
+    const poll = async () => {
+      try {
+        const response = await fetch(`/api/books/${bookId}`);
+        if (response.ok) {
+          const book = await response.json();
+          if (book.epubUrl) {
+            // EPUB is ready
+            toast.success('EPUB generated successfully!', {
+              description: (
+                <div className="flex flex-col space-y-2">
+                  <span>Your EPUB is ready to download.</span>
+                  <a 
+                    href={book.epubUrl} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="text-blue-500 hover:underline"
+                  >
+                    Download EPUB
+                  </a>
+                </div>
+              ),
+              duration: 10000, // Keep the toast open longer
+            });
+            setPolling(false);
+            return;
+          }
+        }
+        
+        // Continue polling if not found yet
+        if (polling) {
+          setTimeout(poll, POLL_INTERVAL);
+        }
+      } catch (error) {
+        console.error('Error polling for EPUB:', error);
+        setPolling(false);
+      }
+    };
+    
+    // Start polling
+    setTimeout(poll, POLL_INTERVAL);
+    
+    // Cleanup function
+    return () => {
+      setPolling(false);
+    };
+  };
 
   const handleGenerateEPUB = async () => {
     if (!slug) return;
@@ -16,28 +72,68 @@ export default function GenerateEbookPage() {
     setIsGenerating(true);
     
     try {
-      const response = await fetch(`/api/books/by-slug/${slug}/publish`, {
+      // First, get the book data and payload
+      const [bookResponse, payloadResponse] = await Promise.all([
+        fetch(`/api/books/by-slug/${slug}`),
+        fetch(`/api/books/by-slug/${slug}/payload`)
+      ]);
+      
+      if (!bookResponse.ok) {
+        throw new Error('Failed to fetch book data');
+      }
+      if (!payloadResponse.ok) {
+        throw new Error('Failed to fetch book payload');
+      }
+      
+      const book = await bookResponse.json();
+      const payload = await payloadResponse.json();
+      
+      // Trigger GitHub Actions workflow
+      const response = await fetch('/api/trigger-workflow', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
+        body: JSON.stringify({
+          content_id: book.id,
+          format: 'epub',
+          metadata: {
+            book_id: book.id,
+            slug: book.slug,
+            title: book.title,
+          },
+        }),
       });
-      
-      const data = await response.json();
       
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to start EPUB generation');
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.message || 'Failed to start EPUB generation');
       }
       
-      toast.success('EPUB generation started successfully!', {
-        description: 'Your book is being processed. You will be notified when it\'s ready.',
+      const { workflowRunId, workflowUrl } = await response.json();
+      
+      toast.success('EPUB generation started!', {
+        description: (
+          <div className="flex flex-col space-y-2">
+            <span>Your book is being processed in the background.</span>
+            <a 
+              href={workflowUrl} 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="text-blue-500 hover:underline"
+            >
+              View workflow progress
+            </a>
+          </div>
+        ),
+        duration: 10000, // Keep the toast open longer
       });
       
-      // Optionally, you could redirect to a status page or update the UI
-      // router.push(`/dashboard/books/${slug}/publish/status`);
+      // Start polling for completion
+      startPollingForCompletion(book.id);
       
     } catch (error) {
-      console.error('Error generating EPUB:', error);
+      console.error('Error starting EPUB generation:', error);
       toast.error('Failed to start EPUB generation', {
         description: error instanceof Error ? error.message : 'An unknown error occurred',
       });

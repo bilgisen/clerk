@@ -124,6 +124,7 @@ export const books = pgTable('books', {
   
   // Media
   coverImageUrl: text('cover_image_url'),
+  epubUrl: text('epub_url'), // Using snake_case to match database column name
   
   // Metadata
   isPublished: boolean('is_published').default(false).notNull(),

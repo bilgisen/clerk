@@ -68,10 +68,10 @@ jobs:
           FORMAT: ${{ github.event.inputs.format }}
         run: |
           # Install required tools
-          echo "Installing jq and jose-cli..."
+          echo "Installing jq and jsonwebtoken..."
           sudo apt-get update
           sudo apt-get install -y jq
-          npm install -g @panva/jose-cli
+          npm install -g jsonwebtoken-cli
           
           # Generate JWT token
           echo "Generating JWT token..."
@@ -97,18 +97,16 @@ jobs:
               format: $format
             }')
           
-          # Sign the token with HS256
-          JWT_TOKEN=$(jose jwt sign \
-            --secret "$JWT_SECRET" \
-            --alg HS256 \
-            --iss "$JWT_ISSUER" \
-            --aud "$JWT_AUDIENCE" \
-            --sub "github-action" \
-            --exp "$EXPIRY" \
-            -- "$JWT_PAYLOAD")
+          # Sign the token with HS256 using jsonwebtoken-cli
+          JWT_TOKEN=$(echo "$JWT_PAYLOAD" | jwt -e -a HS256 -s "$JWT_SECRET")
+          
+          if [ -z "$JWT_TOKEN" ]; then
+            echo "Failed to generate JWT token"
+            exit 1
+          fi
           
           echo "JWT_TOKEN=$JWT_TOKEN" >> $GITHUB_ENV
-          echo "JWT_HEADER=Bearer $JWT_TOKEN" >> $GITHUB_ENV
+          echo "JWT_HEADER=***" >> $GITHUB_ENV
           echo "Generated JWT token"
       
       - name: Fetch Book Payload
