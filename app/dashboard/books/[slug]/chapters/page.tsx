@@ -5,9 +5,11 @@ import { useEffect, useState, useCallback } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
-import { Loader2, Plus, AlertCircle, RefreshCw, FileText } from 'lucide-react';
+import { Loader2, Plus, AlertCircle } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
 import dynamic from 'next/dynamic';
+import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
+import { BooksMenu } from '@/components/books/books-menu';
 
 // Ensure process.env is typed
 declare const process: {
@@ -18,19 +20,16 @@ declare const process: {
 };
 
 
-type ChapterNode = {
-  id: string;
-  title: string;
-  slug: string;
-  order: number;
-  level: number;
-  parent_chapter_id: string | null;
-  book_id: string;
+// Import the ChapterNode type from dnd.ts to ensure consistency
+import type { ChapterNode } from '@/types/dnd';
+
+// Extend the ChapterNode type to include additional fields used in this component
+type ExtendedChapterNode = ChapterNode & {
   bookId?: string;
   created_at: string;
   updated_at: string;
   content?: string;
-  children?: ChapterNode[];
+  children?: ExtendedChapterNode[];
 };
 
 interface Book {
@@ -40,23 +39,19 @@ interface Book {
   userId: string;
 }
 
-const ChapterTree = dynamic<{
-  chapters: ChapterNode[];
-  onSave: (chapters: ChapterNode[]) => Promise<void>;
-  onEdit?: (id: string) => void;
-  onView?: (id: string) => void;
-  onDelete?: (id: string) => void;
-  className?: string;
-  isSaving?: boolean;
-}>(
-  () => import('@/components/books/chapters/chapter-tree-wrapper').then((mod) => mod.ChapterTreeWrapper),
+// Import the ChapterTreeWrapper props type
+import type { ChapterTreeWrapperProps } from '@/components/books/chapters/chapter-tree-wrapper';
+
+// Dynamically import the ChapterTree component to avoid SSR issues with DnD
+const ChapterTree = dynamic<ChapterTreeWrapperProps>(
+  () => import('@/components/books/chapters/chapter-tree-wrapper').then(mod => mod.ChapterTreeWrapper),
   { 
-    ssr: false, 
+    ssr: false,
     loading: () => (
-      <div className="flex items-center justify-center p-8">
-        <Loader2 className="h-6 w-6 animate-spin" />
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="h-8 w-8 animate-spin" />
       </div>
-    ) 
+    )
   }
 );
 
@@ -68,7 +63,8 @@ export default function ChaptersPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [book, setBook] = useState<Book | null>(null);
-  const [chapters, setChapters] = useState<ChapterNode[]>([]);
+  const [chapters, setChapters] = useState<ExtendedChapterNode[]>([]);
+  const [showSuccessAlert, setShowSuccessAlert] = useState(false);
   
   // Fetch book and chapters data with cache busting
   const fetchData = useCallback(async (force = false) => {
@@ -119,12 +115,12 @@ export default function ChaptersPage() {
         return processedChapter;
       });
       // Order'a göre sıralama ekle
-      processedChapters.sort((a: ChapterNode, b: ChapterNode) => (a.order ?? 0) - (b.order ?? 0));
+      processedChapters.sort((a: ExtendedChapterNode, b: ExtendedChapterNode) => (a.order ?? 0) - (b.order ?? 0));
       // Hiyerarşi oluştur: parent_chapter_id'ye göre children dizisi ekle
-      const chapterMap: Record<string, ChapterNode> = {};
-      processedChapters.forEach((ch: ChapterNode) => { chapterMap[ch.id] = { ...ch, children: [] }; });
-      const rootChapters: ChapterNode[] = [];
-      processedChapters.forEach((ch: ChapterNode) => {
+      const chapterMap: Record<string, ExtendedChapterNode> = {};
+      processedChapters.forEach((ch: ExtendedChapterNode) => { chapterMap[ch.id] = { ...ch, children: [] }; });
+      const rootChapters: ExtendedChapterNode[] = [];
+      processedChapters.forEach((ch: ExtendedChapterNode) => {
         if (ch.parent_chapter_id && chapterMap[ch.parent_chapter_id]) {
           chapterMap[ch.parent_chapter_id].children!.push(chapterMap[ch.id]);
         } else {
@@ -154,16 +150,25 @@ export default function ChaptersPage() {
     router.push(`/dashboard/books/${bookSlug}/chapters/new`);
   }, [bookSlug, router]);
   
+  // Show success alert and hide it after 3 seconds
+  const showSuccessMessage = useCallback(() => {
+    setShowSuccessAlert(true);
+    const timer = setTimeout(() => {
+      setShowSuccessAlert(false);
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, []);
+
   // Handle saving chapter order
-  const handleSave = useCallback(async (updatedChapters: ChapterNode[]) => {
+  const handleSave = useCallback(async (updatedChapters: ChapterNode[]): Promise<ChapterNode[] | void> => {
     if (!bookSlug || !book) return;
     
     try {
       setIsSaving(true);
       const toastId = toast.loading('Updating chapter order...');
       
-      // Create a deep copy of the updated chapters to avoid mutating the original
-      const chaptersCopy = JSON.parse(JSON.stringify(updatedChapters));
+      // Create a deep copy of the updated chapters and cast to ExtendedChapterNode
+      const chaptersCopy = JSON.parse(JSON.stringify(updatedChapters)) as ExtendedChapterNode[];
       
       // Flatten the chapters hierarchy for the API
       const flattenChapters = (chapters: ChapterNode[], parentId: string | null = null, level = 1): Omit<ChapterNode, 'children'>[] => {
@@ -172,12 +177,17 @@ export default function ChaptersPage() {
         
         const walk = (nodes: ChapterNode[], parentId: string | null, level: number) => {
           nodes.forEach((chapter) => {
-            const flatChapter = {
+            // Ensure required fields are present
+            const flatChapter: ChapterNode = {
               ...chapter,
-              order: orderCounter++, // global order
-              level: level,
-              parent_chapter_id: parentId,
+              id: chapter.id,
+              title: chapter.title || 'Untitled Chapter',
+              slug: chapter.slug || '',
               book_id: book.id,
+              parent_chapter_id: parentId,
+              order: orderCounter++,
+              level: level,
+              created_at: (chapter as any).created_at || new Date().toISOString(),
               updated_at: new Date().toISOString(),
             };
             
@@ -187,8 +197,8 @@ export default function ChaptersPage() {
             console.log(`Flattening chapter ${chapter.id}:`, chapterWithoutChildren);
             result.push(chapterWithoutChildren);
             
-            if (chapter.children && chapter.children.length > 0) {
-              walk(chapter.children, chapter.id, level + 1);
+            if ((chapter as any).children && (chapter as any).children.length > 0) {
+              walk((chapter as any).children, chapter.id, level + 1);
             }
           });
         };
@@ -219,7 +229,7 @@ export default function ChaptersPage() {
       const result = await updateChapterOrder(flatChapters, bookSlug);
       
       if (result.success) {
-        // Immediately update the local state with the new order
+        // Update the local state with the new order
         setChapters(chaptersCopy);
         
         // Get the public revalidation secret from environment
@@ -233,22 +243,19 @@ export default function ChaptersPage() {
           revalidateUrl.searchParams.append('secret', publicSecret);
         }
         
-        // Trigger revalidation in the background
-        fetch(revalidateUrl.toString(), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-        }).catch(console.error);
-        
         // Show success message
         toast.success('Chapter order updated successfully', { id: toastId });
+        showSuccessMessage();
+        
+        // Return the saved chapters to match the expected return type
+        return chaptersCopy as unknown as ChapterNode[];
       } else {
-        // If update failed, revert to the original order
-        await fetchData(true);
-        toast.error(result.error || 'Failed to update chapter order', { id: toastId });
+        throw new Error('Failed to save chapter order');
       }
     } catch (error) {
       console.error('Error updating chapter order:', error);
-      toast.error('An unexpected error occurred while updating chapter order');
+      toast.error(error instanceof Error ? error.message : 'Failed to update chapter order');
+      throw error;
     } finally {
       setIsSaving(false);
     }
@@ -338,6 +345,14 @@ export default function ChaptersPage() {
 
   return (
     <div className="container mx-auto py-10 px-8">
+      {showSuccessAlert && (
+        <Alert className="mb-6 bg-green-50 dark:bg-green-900/30 border-green-200 dark:border-green-800">
+          <AlertTitle className="text-green-800 dark:text-green-200">Success</AlertTitle>
+          <AlertDescription className="text-green-700 dark:text-green-300">
+            Chapter order saved successfully!
+          </AlertDescription>
+        </Alert>
+      )}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
         <div>
           <h1 className="text-2xl font-bold">
@@ -347,7 +362,7 @@ export default function ChaptersPage() {
             Organize your book's chapters with drag and drop
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
           <Button
             onClick={() => fetchData(true)}
             variant="outline"
@@ -365,6 +380,7 @@ export default function ChaptersPage() {
             <Plus className="h-4 w-4 mr-2" />
             New Chapter
           </Button>
+          <BooksMenu slug={bookSlug} />
         </div>
       </div>
 
@@ -373,6 +389,7 @@ export default function ChaptersPage() {
       <ChapterTree
         chapters={chapters}
         onSave={handleSave}
+        onSaveSuccess={showSuccessMessage}
         onEdit={handleEdit}
         onView={handleView}
         onDelete={handleDelete}

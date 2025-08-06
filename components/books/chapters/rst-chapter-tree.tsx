@@ -4,17 +4,18 @@
 import React, { useCallback, useMemo, useState, useEffect } from 'react';
 import { Tree, NodeModel, DropOptions, DragLayerMonitorProps } from '@minoru/react-dnd-treeview';
 import { Button } from '@/components/ui/button';
-import { Save } from 'lucide-react';
 import { Eye, Pencil, Trash2, ChevronRight, ChevronDown, GripVertical } from 'lucide-react';
 import { cn } from '@/lib/services/utils';
 import { ChapterNode, calculateLevelsAndOrders, treeToChapters, sortTreeDataByVisualOrder } from '@/lib/services/chapter-tree';
+import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 
 export interface RdtChapterTreeProps {
   chapters: ChapterNode[];
   onSave: (chapters: ChapterNode[]) => Promise<ChapterNode[] | void>;
+  onSaveSuccess?: () => void;
   onEdit?: (id: string) => void;
   onView?: (id: string) => void;
-  onDelete?: (id: string) => void;
+  onDelete?: (id: string) => void | Promise<void>;
   className?: string;
   isSaving?: boolean;
   dndContext?: React.ReactNode; // Allow passing DnD context from parent
@@ -23,6 +24,7 @@ export interface RdtChapterTreeProps {
 export function RdtChapterTree({
   chapters,
   onSave,
+  onSaveSuccess,
   onEdit,
   onView,
   onDelete,
@@ -124,6 +126,11 @@ export function RdtChapterTree({
               }))
             );
             setTreeData(savedTreeData);
+            
+            // Call the success callback if provided
+            if (onSaveSuccess) {
+              onSaveSuccess();
+            }
           }
           setHasChanges(false);
         } catch (error) {
@@ -194,7 +201,7 @@ export function RdtChapterTree({
   const CustomDragPreview = useCallback(({ monitorProps }: { monitorProps: DragLayerMonitorProps<ChapterNode> }) => {
     const item = monitorProps.item;
     return (
-      <div className="bg-background border rounded-md shadow-lg opacity-90 p-2 max-w-xs">
+      <div className="bg-background">
         <div className="flex items-center gap-2">
           <GripVertical className="h-4 w-4 text-muted-foreground" />
           <span className="truncate">{item.text}</span>
@@ -384,20 +391,7 @@ export function RdtChapterTree({
   );
 
   return (
-    <div className={cn('flex flex-col h-[600px] border rounded-lg bg-background', className)}>
-      <div className="flex justify-between items-center p-2 border-b">
-        <h3 className="font-medium">Chapters</h3>
-        <Button 
-          onClick={handleSaveClick} 
-          disabled={!hasChanges || isSaving || isSavingState}
-          size="sm"
-          className="gap-2"
-          type="button"
-        >
-          <Save className="h-4 w-4" />
-          {isSaving || isSavingState ? 'Saving...' : 'Save Order'}
-        </Button>
-      </div>
+    <div className={cn('flex flex-col h-[600px] border rounded-sm bg-background/50', className)}>
       <div className="flex-1 overflow-auto">
         {renderTree()}
       </div>

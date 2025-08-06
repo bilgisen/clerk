@@ -4,14 +4,15 @@ import { useEffect, useState } from 'react';
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 import { RdtChapterTree } from './rst-chapter-tree';
-import { ChapterNode } from '@/lib/utils/chapter-tree';
+import { ChapterNode } from '@/lib/services/chapter-tree';
 
-interface ChapterTreeWrapperProps {
+export interface ChapterTreeWrapperProps {
   chapters: ChapterNode[];
   onSave: (chapters: ChapterNode[]) => Promise<ChapterNode[] | void>;
+  onSaveSuccess?: () => void;
   onEdit?: (id: string) => void;
   onView?: (id: string) => void;
-  onDelete?: (id: string) => void;
+  onDelete?: (id: string) => void | Promise<void>;
   className?: string;
   isSaving?: boolean;
 }

@@ -4,10 +4,10 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import Link from "next/link";
 import { createBook } from "@/actions/books/create-book";
 import { BookInfoForm, BookFormValues } from "@/components/books/forms/book-info-form";
 import { Separator } from "@/components/ui/separator";
+import { BooksMenu } from "@/components/books/books-menu";
 
 export default function NewBookPage() {
   const router = useRouter();
@@ -56,13 +56,13 @@ export default function NewBookPage() {
     <div className="p-8 w-full mx-auto">
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-xl font-semibold">Create New Book</h1>
-        <Link
-          href="/dashboard/books"
-          className="px-4 py-2 rounded bg-foreground text-background hover:bg-foreground/90 dark:bg-primary dark:text-primary-foreground dark:hover:bg-primary/90 transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
-          aria-label="Books"
-        >
-          Books
-        </Link>
+        <div className="flex items-center">
+          <BooksMenu 
+            slug="new" 
+            hideEdit={true}
+            onView={() => window.location.href = '/dashboard/books'}
+          />
+        </div>
       </div>
       <Separator className="mb-6" />
       <BookInfoForm 

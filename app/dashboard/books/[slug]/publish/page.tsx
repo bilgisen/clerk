@@ -1,8 +1,13 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { BookOpen, FileText, Headphones } from 'lucide-react';
+import { BookOpen, FileText, Headphones, Loader2 } from 'lucide-react';
+import { Separator } from '@/components/ui/separator';
+import { BooksMenu } from '@/components/books/books-menu';
+import { getBookBySlug } from '@/actions/books/get-book-by-slug';
+import type { Book } from '@/types/book';
 
 type FormatCardProps = {
   title: string;
@@ -37,6 +42,27 @@ export default function PublishPage() {
   const router = useRouter();
   const params = useParams();
   const slug = Array.isArray(params.slug) ? params.slug[0] : params.slug || '';
+  const [book, setBook] = useState<Book | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Fetch book data
+  useEffect(() => {
+    const fetchBook = async () => {
+      if (!slug) return;
+      
+      try {
+        setIsLoading(true);
+        const bookData = await getBookBySlug(slug);
+        setBook(bookData);
+      } catch (error) {
+        console.error('Error fetching book:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchBook();
+  }, [slug]);
 
   const formats = [
     {
@@ -63,13 +89,26 @@ export default function PublishPage() {
   ];
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold mb-2">Publish Your Book</h1>
-        <p className="text-muted-foreground">
-          Choose a format to publish your book
-        </p>
+    <div className="p-8 w-full mx-auto">
+      <div className="flex justify-between items-center mb-8">
+        <div>
+          <h1 className="text-2xl font-bold mb-2">Publish Your Book</h1>
+          <p className="text-muted-foreground">
+            {isLoading ? (
+              <span className="inline-flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading book details...
+              </span>
+            ) : book ? (
+              `Publishing: ${book.title}`
+            ) : (
+              'Choose a format to publish your book'
+            )}
+          </p>
+        </div>
+        <BooksMenu slug={slug} />
       </div>
+      <Separator className="mb-8" />
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {formats.map((format) => (

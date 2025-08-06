@@ -203,7 +203,7 @@ const ChapterContentForm = React.forwardRef<HTMLFormElement, ChapterContentFormP
           <Button
             type="submit"
             disabled={disabled || isSubmitting || loading}
-            className="w-full sm:w-auto"
+            className="w-full sm:w-auto bg-primary text-primary-foreground hover:bg-primary/90"
           >
             {(isSubmitting || loading) ? (
               <>
