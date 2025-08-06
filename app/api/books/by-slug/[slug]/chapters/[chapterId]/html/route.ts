@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { headers } from 'next/headers';
 import { currentUser } from '@clerk/nextjs/server';
 import { db } from '@/db/drizzle';
 import { books, chapters } from '@/db/schema';
@@ -56,40 +57,47 @@ export async function GET(
     };
     console.log('Request details:', JSON.stringify(requestInfo, null, 2));
 
-    const authHeader = request.headers.get('authorization');
+    // Get headers
+    const headersList = await headers();
+    const authHeader = headersList.get('authorization') || '';
+    
+    // Verify authentication
     let userId: string | null = null;
+    let isServiceAccount = false;
 
     if (authHeader?.startsWith('Bearer ')) {
       const token = authHeader.split(' ')[1];
-      const payload = await verifyToken(token);
-      if (payload) {
-        userId = payload.userId;
-        console.log('Authenticated via JWT with user ID:', userId);
+      
+      try {
+        // First try to verify as a JWT token
+        const decoded = await verifyToken(token);
+        if (decoded) {
+          userId = decoded.userId;
+          isServiceAccount = true;
+          console.log('Authenticated via JWT with user ID:', userId);
+        }
+      } catch (error) {
+        console.error('JWT verification failed:', error);
+        // If JWT verification fails, try Clerk authentication
+        const user = await currentUser();
+        if (user) {
+          userId = user.id;
+        }
+      }
+    } else {
+      // If no token, try to get current user from Clerk
+      const user = await currentUser();
+      if (user) {
+        userId = user.id;
       }
     }
 
     if (!userId) {
-      const clerkUser = await currentUser();
-      if (!clerkUser) {
-        console.error('No authenticated user');
-        return new NextResponse('Unauthorized', { status: 401 });
-      }
-      
-      // Get the database user ID for this Clerk user
-      const dbUser = await db.query.users.findFirst({
-        where: (users, { eq }) => eq(users.clerkId, clerkUser.id),
-        columns: {
-          id: true
-        }
-      });
-      
-      if (!dbUser) {
-        console.error('No database user found for Clerk ID:', clerkUser.id);
-        return new NextResponse('User not found in database', { status: 404 });
-      }
-      
-      userId = dbUser.id;
-      console.log('Authenticated via Clerk with user ID:', clerkUser.id, '(DB ID:', userId, ')');
+      console.error('No valid authentication provided');
+      return new NextResponse(
+        JSON.stringify({ error: 'Unauthorized - No valid authentication provided' }),
+        { status: 401, headers: { 'Content-Type': 'application/json' } }
+      );
     }
 
     // Find the book by slug with owner info
