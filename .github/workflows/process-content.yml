@@ -67,47 +67,12 @@ jobs:
           CONTENT_ID: ${{ github.event.inputs.content_id }}
           FORMAT: ${{ github.event.inputs.format }}
         run: |
-          # Install required tools
-          echo "Installing jq and jsonwebtoken..."
-          sudo apt-get update
-          sudo apt-get install -y jq
-          npm install -g jsonwebtoken-cli
-          
-          # Generate JWT token
-          echo "Generating JWT token..."
-          NOW=$(date +%s)
-          EXPIRY=$((NOW + 3600)) # 1 hour from now
-          
-          # Create JWT payload
-          JWT_PAYLOAD=$(jq -n \
-            --arg sub "github-action" \
-            --arg iat "$NOW" \
-            --arg exp "$EXPIRY" \
-            --arg iss "$JWT_ISSUER" \
-            --arg aud "$JWT_AUDIENCE" \
-            --arg contentId "$CONTENT_ID" \
-            --arg format "$FORMAT" \
-            '{
-              sub: $sub,
-              iat: ($iat | tonumber),
-              exp: ($exp | tonumber),
-              iss: $iss,
-              aud: $aud,
-              contentId: $contentId,
-              format: $format
-            }')
-          
-          # Sign the token with HS256 using jsonwebtoken-cli
-          JWT_TOKEN=$(echo "$JWT_PAYLOAD" | jwt -e -a HS256 -s "$JWT_SECRET")
-          
-          if [ -z "$JWT_TOKEN" ]; then
-            echo "Failed to generate JWT token"
-            exit 1
-          fi
-          
+          npm install jsonwebtoken
+          node scripts/generate-jwt.js
+
+          JWT_TOKEN=$(cat jwt-token.txt)
           echo "JWT_TOKEN=$JWT_TOKEN" >> $GITHUB_ENV
-          echo "JWT_HEADER=***" >> $GITHUB_ENV
-          echo "Generated JWT token"
+          echo "JWT_HEADER=Bearer $JWT_TOKEN" >> $GITHUB_ENV
       
       - name: Fetch Book Payload
         id: fetch-payload
