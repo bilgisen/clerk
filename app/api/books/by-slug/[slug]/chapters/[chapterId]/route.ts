@@ -1,19 +1,31 @@
 import { NextResponse } from 'next/server';
 import { currentUser } from '@clerk/nextjs/server';
-import { db } from '@/db';
+import { db } from '@/db/drizzle';
+import { and, eq } from 'drizzle-orm';
 import { books, chapters, users } from '@/db/schema';
-import { eq, and } from 'drizzle-orm';
+
+// Configure the route to handle UUIDs with hyphens
+export const dynamic = 'force-dynamic';
+export const dynamicParams = true;
+export const revalidate = 0;
+
+// This ensures the full path is captured
+export const config = {
+  api: {
+    bodyParser: false,
+  },
+};
 
 // GET: Get a single chapter by ID for a book by slug
 export async function GET(
-  _req: Request,
-  { params }: { params: Promise<{ slug: string; chapterId: string }> }
+  request: Request,
+  { params }: { params: { slug: string; chapterId: string } }
 ) {
   try {
     const user = await currentUser();
     if (!user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
 
-    const { slug, chapterId } = await params;
+    const { slug, chapterId } = params;
     if (!slug || !chapterId) {
       return NextResponse.json({ error: 'Book slug and chapter ID are required' }, { status: 400 });
     }
@@ -41,13 +53,13 @@ export async function GET(
 // PATCH: Update a chapter
 export async function PATCH(
   request: Request,
-  { params }: { params: Promise<{ slug: string; chapterId: string }> }
+  { params }: { params: { slug: string; chapterId: string } }
 ) {
   try {
     const user = await currentUser();
     if (!user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
 
-    const { slug, chapterId } = await params;
+    const { slug, chapterId } = params;
     if (!slug || !chapterId) {
       return NextResponse.json({ error: 'Book slug and chapter ID are required' }, { status: 400 });
     }
@@ -107,13 +119,13 @@ export async function PATCH(
 // DELETE: Delete a chapter
 export async function DELETE(
   _req: Request,
-  { params }: { params: Promise<{ slug: string; chapterId: string }> }
+  { params }: { params: { slug: string; chapterId: string } }
 ) {
   try {
     const user = await currentUser();
     if (!user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
 
-    const { slug, chapterId } = await params;
+    const { slug, chapterId } = params;
     if (!slug || !chapterId) {
       return NextResponse.json({ error: 'Book slug and chapter ID are required' }, { status: 400 });
     }

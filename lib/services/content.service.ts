@@ -30,7 +30,12 @@ export class ContentService {
     }
 
     // Create a JWT token for this content generation job
-    const jobToken = await createToken();
+    const jobToken = await createToken({
+      sub: userId,
+      contentId: contentId,
+      format: params.format,
+      metadata: params.metadata || {}
+    });
 
     // Prepare content for processing
     const contentData = {

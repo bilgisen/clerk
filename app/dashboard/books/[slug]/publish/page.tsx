@@ -1,22 +1,21 @@
 'use client';
 
-import { useGetBookBySlug } from '@/queries/books/get-book-by-slug';
-import { useParams, useRouter } from 'next/navigation';
+import { useRouter, useParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Loader2, FileText, BookOpen, FileCode, FileType } from 'lucide-react';
-
+import { BookOpen, FileText, Headphones } from 'lucide-react';
 
 type FormatCardProps = {
   title: string;
   description: string;
   icon: React.ReactNode;
-  onClick: () => void;
+  active?: boolean;
+  onClick?: () => void;
 };
 
-const FormatCard = ({ title, description, icon, onClick }: FormatCardProps) => (
+const FormatCard = ({ title, description, icon, active = true, onClick }: FormatCardProps) => (
   <Card 
-    className="cursor-pointer transition-all hover:shadow-md hover:border-primary/50 h-full flex flex-col"
-    onClick={onClick}
+    className={`transition-all ${active ? 'hover:shadow-md hover:border-primary/50 cursor-pointer' : 'opacity-50'}`}
+    onClick={active ? onClick : undefined}
   >
     <CardHeader className="pb-2">
       <div className="flex items-center gap-3">
@@ -26,7 +25,7 @@ const FormatCard = ({ title, description, icon, onClick }: FormatCardProps) => (
         <CardTitle className="text-lg">{title}</CardTitle>
       </div>
     </CardHeader>
-    <CardContent className="flex-1">
+    <CardContent>
       <CardDescription className="text-sm">
         {description}
       </CardDescription>
@@ -38,95 +37,49 @@ export default function PublishPage() {
   const router = useRouter();
   const params = useParams();
   const slug = Array.isArray(params.slug) ? params.slug[0] : params.slug || '';
-  
-  // Call the hook at the top level, but pass an empty string if slug is undefined
-  const { data: bookWithChapters, isLoading, error } = useGetBookBySlug(slug || '');
-  
-  // If there's no slug, show an error
-  if (!slug) {
-    return (
-      <div className="p-6 max-w-4xl mx-auto">
-        <div className="text-red-600">
-          Book slug is missing from the URL
-        </div>
-      </div>
-    );
-  }
-
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center min-h-[50vh]">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      </div>
-    );
-  }
-
-  if (error || !bookWithChapters) {
-    return (
-      <div className="p-6 max-w-4xl mx-auto">
-        <div className="text-red-600">
-          {error?.message || 'Book not found'}
-        </div>
-      </div>
-    );
-  }
 
   const formats = [
     {
-      id: 'epub',
-      title: 'EPUB',
-      description: 'Standard format for most e-readers and mobile devices',
+      id: 'ebook',
+      title: 'E-book',
+      description: 'Publish in EPUB and MOBI formats for e-readers',
       icon: <BookOpen className="h-5 w-5" />,
-    },
-    {
-      id: 'mobi',
-      title: 'MOBI',
-      description: 'Compatible with Amazon Kindle devices',
-      icon: <FileText className="h-5 w-5" />,
+      active: true
     },
     {
       id: 'pdf',
       title: 'PDF',
-      description: 'Fixed-layout document for printing or digital distribution',
-      icon: <FileType className="h-5 w-5" />,
-    },
-    {
-      id: 'html',
-      title: 'HTML',
-      description: 'Web version of your book',
-      icon: <FileCode className="h-5 w-5" />,
-    },
-    {
-      id: 'md',
-      title: 'Markdown',
-      description: 'Plain text format with simple formatting',
+      description: 'Coming soon - Publish as a printable PDF document',
       icon: <FileText className="h-5 w-5" />,
+      active: false
     },
     {
-      id: 'doc',
-      title: 'Word Document',
-      description: 'Editable document for further editing',
-      icon: <FileText className="h-5 w-5" />,
+      id: 'audiobook',
+      title: 'Audio Book',
+      description: 'Coming soon - Create an audio version of your book',
+      icon: <Headphones className="h-5 w-5" />,
+      active: false
     },
   ];
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
+    <div className="p-6 max-w-4xl mx-auto">
       <div className="mb-8">
-        <h1 className="text-3xl font-bold mb-2">Publish &ldquo;{bookWithChapters.title}&rdquo;</h1>
+        <h1 className="text-2xl font-bold mb-2">Publish Your Book</h1>
         <p className="text-muted-foreground">
-          Select a format to publish your book
+          Choose a format to publish your book
         </p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {formats.map((format) => (
-          <div key={format.id} className="h-full">
+          <div key={format.id}>
             <FormatCard
-              title={`Publish as ${format.title}`}
+              title={format.title}
               description={format.description}
               icon={format.icon}
-              onClick={() => router.push(`/dashboard/books/${slug}/publish/${format.id}`)}
+              active={format.active}
+              onClick={() => format.active && router.push(`/dashboard/books/${slug}/publish/ebook`)}
             />
           </div>
         ))}

@@ -6,7 +6,8 @@ import { useAuth } from "@clerk/nextjs";
 
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { Loader2, ArrowLeft, Edit, Plus } from "lucide-react";
+import { Loader2, ArrowLeft, Edit, Plus, Download } from "lucide-react";
+import { generateCompleteChapterHTML, generateChapterWithChildrenHTML } from "@/lib/generateChapterHTML";
 
 interface Chapter {
   id: string;
@@ -153,6 +154,36 @@ export default function ChapterDetailPage() {
     router.push(`/dashboard/books/${bookSlug}/chapters`);
   };
 
+  const handleExportHTML = useCallback(() => {
+    if (!chapter || !chapters) return;
+    
+    try {
+      // Generate HTML content for the current chapter
+      const chapterHTML = generateChapterWithChildrenHTML(chapter, flattenChapters(chapters), parentTitle || null);
+      
+      // Generate complete HTML document
+      const fullHTML = generateCompleteChapterHTML(chapter.title, chapterHTML);
+      
+      // Create a blob and download link
+      const blob = new Blob([fullHTML], { type: 'text/html' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${chapter.title.replace(/[^\w\s]/gi, '').replace(/\s+/g, '_').toLowerCase()}.html`;
+      document.body.appendChild(a);
+      a.click();
+      
+      // Cleanup
+      setTimeout(() => {
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+      }, 0);
+    } catch (error) {
+      console.error('Error exporting HTML:', error);
+      setError('Failed to export chapter as HTML');
+    }
+  }, [chapter, chapters, parentTitle, flattenChapters]);
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -200,6 +231,15 @@ export default function ChapterDetailPage() {
             >
               <Edit className="h-4 w-4 mr-2" />
               Edit Chapter
+            </Button>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={handleExportHTML}
+              disabled={!chapter}
+            >
+              <Download className="h-4 w-4 mr-2" />
+              Export HTML
             </Button>
             <Button 
               variant="default" 
