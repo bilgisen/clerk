@@ -74,22 +74,30 @@ export async function GET(
         const decoded = await verifyToken(token);
         if (decoded) {
           userId = decoded.userId;
-          isServiceAccount = true;
+          isServiceAccount = true; // Mark as service account for authorization
           console.log('Authenticated via JWT with user ID:', userId);
         }
       } catch (error) {
         console.error('JWT verification failed:', error);
         // If JWT verification fails, try Clerk authentication
-        const user = await currentUser();
-        if (user) {
-          userId = user.id;
+        try {
+          const user = await currentUser();
+          if (user) {
+            userId = user.id;
+          }
+        } catch (clerkError) {
+          console.error('Clerk authentication failed:', clerkError);
         }
       }
     } else {
       // If no token, try to get current user from Clerk
-      const user = await currentUser();
-      if (user) {
-        userId = user.id;
+      try {
+        const user = await currentUser();
+        if (user) {
+          userId = user.id;
+        }
+      } catch (clerkError) {
+        console.error('Clerk authentication failed:', clerkError);
       }
     }
 
@@ -121,8 +129,8 @@ export async function GET(
       );
     }
 
-    // Verify ownership
-    if (bookResult.userId !== userId) {
+    // Verify ownership - skip for service accounts
+    if (!isServiceAccount && bookResult.userId !== userId) {
       console.error(`Access denied - User ${userId} does not own book ${bookResult.id} (${bookResult.title})`);
       return NextResponse.json(
         { 
