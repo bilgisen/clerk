@@ -30,6 +30,8 @@ const bookSchema = z.object({
   title: z.string().min(1, { message: "Title is required" }),
   author: z.string().min(1, { message: "Author is required" }),
   publisher: z.string().min(1, { message: "Publisher is required" }),
+  contributor: z.string().optional(),
+  translator: z.string().optional(),
   
   // Auto-generated fields
   slug: z.string().optional(),
@@ -86,6 +88,8 @@ type FormValues = NonNullableFields<{
   title: string;
   author: string;
   publisher: string;
+  contributor?: string;
+  translator?: string;
   slug: string;
   subtitle?: string;
   description?: string;
@@ -239,26 +243,49 @@ export function BookInfoForm({
             </div>
           </div>
 
-          {/* Author & Publisher */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-muted-foreground/50">Author *</label>
-              <input
-                type="text"
-                {...register("author")}
-                className="w-full border px-3 py-2 rounded text-md mt-1"
-                placeholder="Author name"
-              />
-              {errors.author && <p className="text-red-500 text-sm mt-1">{errors.author.message}</p>}
+          {/* Author Information */}
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-muted-foreground/50">Author *</label>
+                <input
+                  type="text"
+                  {...register("author")}
+                  className="w-full border px-3 py-2 rounded text-md mt-1"
+                  placeholder="Author name"
+                />
+                {errors.author && <p className="text-red-500 text-sm mt-1">{errors.author.message}</p>}
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-muted-foreground/50">Publisher</label>
+                <input
+                  type="text"
+                  {...register("publisher")}
+                  className="w-full border px-3 py-2 rounded text-md mt-1"
+                  placeholder="Publisher name"
+                />
+              </div>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-muted-foreground/50">Publisher</label>
-              <input
-                type="text"
-                {...register("publisher")}
-                className="w-full border px-3 py-2 rounded text-md mt-1"
-                placeholder="Publisher name"
-              />
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-muted-foreground/50">Contributor</label>
+                <input
+                  type="text"
+                  {...register("contributor")}
+                  className="w-full border px-3 py-2 rounded text-md mt-1"
+                  placeholder="Contributor name"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-muted-foreground/50">Translator</label>
+                <input
+                  type="text"
+                  {...register("translator")}
+                  className="w-full border px-3 py-2 rounded text-md mt-1"
+                  placeholder="Translator name"
+                />
+              </div>
             </div>
           </div>
 

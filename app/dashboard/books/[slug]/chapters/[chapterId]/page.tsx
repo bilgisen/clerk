@@ -76,9 +76,18 @@ interface ChapterWithChildren {
   children?: ChapterWithChildren[];
 }
 
-// Extend the Book type to include chapters
-interface BookWithChapters extends Omit<Book, 'chapters'> {
+// Extend the Book type to include chapters and snake_case timestamps
+interface BookWithChapters extends Omit<Book, 'chapters' | 'createdAt' | 'updatedAt' | 'created_at' | 'updated_at'> {
   chapters: Chapter[];
+  // Use Date objects for timestamps
+  createdAt: Date;
+  updatedAt: Date;
+  publishedAt: Date | null;
+  // Snake case aliases for backward compatibility
+  created_at: string;
+  updated_at: string;
+  // Alias for cover_image_url
+  coverImage?: string | null;
 }
 
 export default function ChapterDetailPage() {
@@ -267,9 +276,9 @@ export default function ChapterDetailPage() {
       // Create a book object that matches the BookWithChapters interface
       const bookWithChapters: BookWithChapters = {
         id: book.id,
+        userId: book.userId,
         title: book.title,
         slug: book.slug,
-        userId: book.userId,
         author: book.author || '',
         subtitle: book.subtitle || null,
         description: book.description || null,
@@ -283,13 +292,22 @@ export default function ChapterDetailPage() {
         seriesIndex: book.seriesIndex || null,
         tags: book.tags || null,
         coverImageUrl: book.coverImageUrl || null,
+        epubUrl: book.epubUrl || null,
         isPublished: book.isPublished || false,
         isFeatured: book.isFeatured || false,
         viewCount: book.viewCount || 0,
+        contributor: book.contributor || null,
+        translator: book.translator || null,
         chapters: flatChapters,
-        createdAt: new Date(book.createdAt),
-        updatedAt: new Date(book.updatedAt),
-        publishedAt: book.publishedAt ? new Date(book.publishedAt) : null
+        // Use Date objects for timestamps
+        createdAt: book.createdAt ? new Date(book.createdAt) : new Date(),
+        updatedAt: book.updatedAt ? new Date(book.updatedAt) : new Date(),
+        publishedAt: book.publishedAt ? new Date(book.publishedAt) : null,
+        // Snake case aliases for backward compatibility
+        created_at: book.createdAt ? new Date(book.createdAt).toISOString() : new Date().toISOString(),
+        updated_at: book.updatedAt ? new Date(book.updatedAt).toISOString() : new Date().toISOString(),
+        // Alias for cover_image_url
+        coverImage: book.coverImageUrl || null,
       };
 
           // Create chapter data with required fields

@@ -5,13 +5,17 @@ export type BookGenre = 'FICTION' | 'NON_FICTION' | 'SCIENCE_FICTION' | 'FANTASY
   'CHILDREN' | 'YOUNG_ADULT' | 'COOKBOOK' | 'TRAVEL' | 'HUMOR' | 'POETRY' |
   'BUSINESS' | 'TECHNOLOGY' | 'SCIENCE' | 'PHILOSOPHY' | 'RELIGION' | 'OTHER';
 
-export interface Book extends Omit<DBBook, 'userId' | 'createdAt' | 'updatedAt' | 'publishedAt'> {
+export interface Book extends Omit<DBBook, 'userId' | 'createdAt' | 'updatedAt' | 'publishedAt' | 'created_at' | 'updated_at'> {
   // Core fields
   id: string;
   userId: string;
   title: string;
   slug: string;
   author: string;
+  
+  // Author Information
+  contributor: string | null;
+  translator: string | null;
   
   // Optional fields
   subtitle: string | null;
@@ -26,6 +30,7 @@ export interface Book extends Omit<DBBook, 'userId' | 'createdAt' | 'updatedAt' 
   seriesIndex: number | null;
   tags: string[] | null;
   coverImageUrl: string | null;
+  epubUrl: string | null;
   isPublished: boolean;
   isFeatured: boolean;
   viewCount: number;
@@ -34,6 +39,7 @@ export interface Book extends Omit<DBBook, 'userId' | 'createdAt' | 'updatedAt' 
   createdAt: string;
   updatedAt: string;
   publishedAt: string | null;
+  // Snake case aliases for backward compatibility
   created_at: string;
   updated_at: string;
 };
@@ -57,13 +63,15 @@ export type Chapter = {
 };
 
 // Book with chapters type
-type BookWithChapters = Omit<Book, 'created_at' | 'updated_at'> & {
+type BookWithChapters = Omit<Book, 'createdAt' | 'updatedAt' | 'created_at' | 'updated_at'> & {
   chapters: Chapter[];
-  // Keep both camelCase and snake_case for backward compatibility
-  createdAt: string;
-  updatedAt: string;
-  created_at?: string;
-  updated_at?: string;
+  // Use Date objects for consistency with Chapter type
+  createdAt: Date;
+  updatedAt: Date;
+  publishedAt: Date | null;
+  // Snake case aliases for backward compatibility
+  created_at: string;
+  updated_at: string;
   // Alias for cover_image_url
   coverImage?: string | null;
 };
