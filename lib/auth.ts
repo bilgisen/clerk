@@ -2,7 +2,7 @@ import { auth } from "@clerk/nextjs/server";
 import { SignJWT, jwtVerify } from "jose";
 
 // Get the JWT secret from environment variables
-const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key-please-change-this-in-production";
+const JWT_SECRET = process.env.CLERK_JWT_KEY || process.env.JWT_SECRET || "your-secret-key-please-change-this-in-production";
 
 export interface JWTPayload {
   userId: string;

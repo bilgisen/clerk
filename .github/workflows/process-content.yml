@@ -28,8 +28,12 @@ env:
   JWT_AUDIENCE: ${{ vars.JWT_AUDIENCE || 'clerk' }}
   
   # Secrets - these should be set in GitHub repository secrets
-  JWT_SECRET: ${{ secrets.CLERK_JWT_KEY || secrets.JWT_SECRET }}
+  CLERK_JWT_KEY: ${{ secrets.CLERK_JWT_KEY }}
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN || github.token }}
+  
+  # Required for the workflow
+  GITHUB_REPO_OWNER: bilgisen
+  GITHUB_REPO_NAME: clerk
 
 jobs:
   build-epub:
@@ -87,13 +91,14 @@ jobs:
           echo "Fetching book payload for content ID: $CONTENT_ID"
           mkdir -p ./book-content/chapters
           
-          # Fetch the book payload using the internal API
-          PAYLOAD_URL="$BASE_URL/api/books/by-slug/$CONTENT_ID/payload"
+          # Fetch the book payload using the internal API with book ID
+          PAYLOAD_URL="$BASE_URL/api/books/by-id/$CONTENT_ID/payload"
           echo "Fetching payload from: $PAYLOAD_URL"
           
           if ! curl -s -f -o ./book-content/payload.json \
                     -H "Accept: application/json" \
-                    -H "Authorization: $JWT_HEADER"; then
+                    -H "Authorization: $JWT_HEADER" \
+                    "$PAYLOAD_URL"; then
             echo "::error::Failed to download book payload"
             exit 1
           fi
