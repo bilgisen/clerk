@@ -28,7 +28,7 @@ env:
   JWT_AUDIENCE: ${{ vars.JWT_AUDIENCE || 'clerk' }}
   
   # Secrets - these should be set in GitHub repository secrets
-  CLERK_JWT_KEY: ${{ secrets.CLERK_JWT_KEY }}
+  JWT_SECRET: ${{ secrets.JWT_SECRET }}
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN || github.token }}
   
   # Required for the workflow

@@ -1,3 +1,4 @@
+// app/api/books/by-slug/[slug]/chapters/[chapterId]/html/route.ts
 import { NextResponse } from 'next/server';
 import { headers } from 'next/headers';
 import { currentUser } from '@clerk/nextjs/server';
