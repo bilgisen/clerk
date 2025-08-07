@@ -1,53 +1,79 @@
 const fs = require('fs');
-const jwt = require('jsonwebtoken');
+const { SignJWT } = require('jose');
+const { createSecretKey } = require('crypto');
 
 // Required environment variables
-const JWT_SECRET = process.env.JWT_SECRET;
-const JWT_ISSUER = 'clerk.clerko.v1';
-const JWT_AUDIENCE = 'https://api.clerko.com';
-const TEMPLATE_NAME = 'matbu';
+const JWT_SECRET = process.env.JWT_SECRET || process.env.CLERK_SECRET_KEY;
+const JWT_ISSUER = process.env.JWT_ISSUER || 'clerk.clerko.v1';
+const JWT_AUDIENCE = process.env.JWT_AUDIENCE || 'https://api.clerko.com';
 
 if (!JWT_SECRET) {
-  console.error('❌ Missing required environment variable: JWT_SECRET');
+  console.error('❌ Missing required environment variables: JWT_SECRET or CLERK_SECRET_KEY');
   process.exit(1);
 }
 
-const now = Math.floor(Date.now() / 1000);
-const tokenExpiry = 3600; // 1 hour
+async function generateToken() {
+  try {
+    const now = Math.floor(Date.now() / 1000);
+    const tokenExpiry = 3600; // 1 hour
 
-// Create the JWT payload with Clerk template and required claims
-const payload = {
-  // Standard JWT claims
-  iss: JWT_ISSUER,
-  aud: JWT_AUDIENCE,
-  sub: 'github-actions',
-  iat: now,
-  exp: now + tokenExpiry,
-  nbf: now,
-  
-  // Clerk template identifier
-  template: TEMPLATE_NAME,
-  
-  // Clerk user identification
-  user: {
-    id: 'github-actions',
-    email: 'actions@github.com',
-    username: 'github-actions'
-  },
-  
-  // Custom claims for your application
-  metadata: {
-    source: 'github-actions',
-    workflow: process.env.GITHUB_WORKFLOW || 'unknown',
-    run_id: process.env.GITHUB_RUN_ID || 'unknown',
-    service: 'github-actions',
-    role: 'service-account'
-  },
-  
-  // Required for Clerk template
-  organization: null,
-  session_id: `github-${process.env.GITHUB_RUN_ID || 'unknown'}`
-};
+    // Create a secret key instance from the secret string
+    const secretKey = createSecretKey(Buffer.from(JWT_SECRET, 'utf8'));
+
+    // Create the JWT token with Clerk's expected format
+    const token = await new SignJWT({
+      // Clerk session claims
+      azp: JWT_AUDIENCE,
+      sub: 'github-actions',
+      iat: now,
+      exp: now + tokenExpiry,
+      nbf: now,
+      
+      // Custom claims for your application
+      metadata: {
+        source: 'github-actions',
+        workflow: process.env.GITHUB_WORKFLOW || 'unknown',
+        run_id: process.env.GITHUB_RUN_ID || 'unknown',
+        service: 'github-actions',
+        role: 'service-account'
+      },
+      
+      // Required for Clerk
+      sid: `github-${process.env.GITHUB_RUN_ID || 'unknown'}`,
+      org_id: null,
+      role: 'service-account',
+      session_state: 'active',
+      updated_at: now
+    })
+    .setProtectedHeader({ 
+      alg: 'HS256',
+      typ: 'JWT',
+      kid: process.env.CLERK_KEY_ID || 'github-actions-1'
+    })
+    .setIssuedAt()
+    .setIssuer(JWT_ISSUER)
+    .setAudience(JWT_AUDIENCE)
+    .setSubject('github-actions')
+    .setExpirationTime(now + tokenExpiry)
+    .sign(secretKey);
+
+    return token;
+  } catch (error) {
+    console.error('❌ Error generating JWT token:', error);
+    process.exit(1);
+  }
+}
+
+// Generate and save the token
+generateToken()
+  .then(token => {
+    fs.writeFileSync('jwt-token.txt', token);
+    console.log('✅ JWT token generated and saved to jwt-token.txt');
+  })
+  .catch(error => {
+    console.error('❌ Failed to generate JWT token:', error);
+    process.exit(1);
+  });
 
 console.log('🛠️ Generating JWT with the following claims:');
 console.log(JSON.stringify({

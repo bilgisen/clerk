@@ -5,6 +5,8 @@ import { books, chapters } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 import { auth, currentUser } from '@clerk/nextjs/server';
 
+type Headers = ReturnType<typeof headers>;
+
 export const dynamic = 'force-dynamic';
 export const dynamicParams = true;
 
@@ -99,26 +101,80 @@ export async function GET(
   request: Request,
   { params }: { params: { slug: string } }
 ) {
+  console.log('=== Payload Route Debug ===');
+  console.log('Request URL:', request.url);
+  
   try {
     // Get the slug from params
     const { slug } = await Promise.resolve(params);
+    console.log('Requested slug:', slug);
     
     // Get user ID from Clerk session
     let userId: string | null = null;
     
+    // Log all headers for debugging
+    const headersList = await headers();
+    console.log('Request Headers:');
+    // Convert headers to a plain object for logging
+    const headersObj: Record<string, string> = {};
+    // Convert headers to an array of entries and iterate
+    for (const [key, value] of headersList.entries()) {
+      headersObj[key] = key.toLowerCase().includes('cookie') ? '[REDACTED]' : value;
+    }
+    console.log(headersObj);
+    
     try {
       // Get the current user from Clerk
+      console.log('Getting current user from Clerk...');
       const user = await currentUser();
+      
       if (!user) {
-        console.error('No authenticated user found');
-        return NextResponse.json(
-          { error: 'Unauthorized - Please sign in to access this resource' },
-          { status: 401 }
-        );
+        console.error('No authenticated user found - checking auth()...');
+        // Try to get the session
+        const session = await auth();
+        console.log('Auth session:', session ? 'Found' : 'Not found');
+        
+        if (!session?.userId) {
+          console.error('No active session found - returning 401');
+          return NextResponse.json(
+            { 
+              error: 'Unauthorized',
+              message: 'Please sign in to access this resource',
+              debug: {
+                timestamp: new Date().toISOString(),
+                nodeEnv: process.env.NODE_ENV,
+                clerkDebug: process.env.NEXT_PUBLIC_CLERK_DEBUG,
+                hasSession: !!session,
+                userId: session?.userId || 'none'
+              }
+            },
+            { 
+              status: 401,
+              headers: {
+                'WWW-Authenticate': 'Bearer error="invalid_token"',
+                'Cache-Control': 'no-store',
+                'Pragma': 'no-cache'
+              }
+            }
+          );
+        }
+        
+        userId = session.userId;
+        console.log('Using session userId:', userId);
+      } else {
+        userId = user.id;
+        console.log('Current user:', {
+          id: user.id,
+          email: user.emailAddresses[0]?.emailAddress,
+          hasImage: !!user.imageUrl,
+          createdAt: user.createdAt
+        });
       }
       
-      userId = user.id;
-      console.log('Authenticated user:', { userId, email: user.emailAddresses[0]?.emailAddress });
+      console.log('Authenticated user:', { 
+        userId, 
+        email: user ? user.emailAddresses[0]?.emailAddress : 'No email' 
+      });
       
     } catch (error) {
       console.error('Authentication error:', error);
@@ -132,13 +188,20 @@ export async function GET(
       );
     }
 
-    // Get the book with chapters
+    console.log('Fetching book from database...');
     const book = await db.query.books.findFirst({
       where: eq(books.slug, slug),
       with: {
         chapters: true,
       },
     });
+    
+    console.log('Book query result:', book ? {
+      id: book.id,
+      slug: book.slug,
+      title: book.title,
+      chapterCount: book.chapters?.length || 0
+    } : 'No book found');
 
     if (!book) {
       return NextResponse.json(
@@ -154,7 +217,7 @@ export async function GET(
     const chapterTree = buildChapterTree(book.chapters);
     console.log('Chapter tree:', JSON.stringify(chapterTree, null, 2));
     
-    const flattenedChapters = flattenChapterTree(chapterTree, book.slug, 1, null, authToken);
+    const flattenedChapters = flattenChapterTree(chapterTree, book.slug, 1, null, '');
     console.log('Flattened chapters:', JSON.stringify(flattenedChapters, null, 2));
     
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';

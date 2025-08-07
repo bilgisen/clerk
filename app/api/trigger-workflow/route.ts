@@ -46,6 +46,17 @@ export async function POST(request: Request) {
       );
     }
 
+    // Prepare the inputs for the workflow
+    const inputs: Record<string, string> = {
+      content_id: content_id.toString(),
+      format: format || 'epub',
+      metadata: JSON.stringify({
+        ...(metadata || {}),
+        user_id: userId,
+        timestamp: new Date().toISOString(),
+      }),
+    };
+
     // Trigger the workflow
     const response = await octokit.actions.createWorkflowDispatch({
       // @ts-ignore - Type definition issue with octokit
@@ -53,18 +64,7 @@ export async function POST(request: Request) {
       repo,
       workflow_id: workflowFile,
       ref: 'main',
-      inputs: {
-        content_id: content_id.toString(),
-        format: format || 'epub',
-        // Include JWT configuration in the workflow inputs
-        jwt_issuer: process.env.JWT_ISSUER || 'clerk.clerko.v1',
-        jwt_audience: process.env.JWT_AUDIENCE || 'https://api.clerko.com',
-        metadata: JSON.stringify({
-          ...(metadata || {}),
-          user_id: userId,
-          timestamp: new Date().toISOString(),
-        }),
-      },
+      inputs,
     }) as { data: WorkflowResponse };
 
     // Get the workflow run ID and URL

@@ -21,12 +21,16 @@ export default function GenerateEbookPage() {
   useEffect(() => {
     const fetchToken = async () => {
       try {
-        // Get the session token
+        console.log('Fetching session token...');
         const token = await getToken();
+        console.log('Got token:', token ? '[TOKEN_RECEIVED]' : 'No token received');
+        
         if (!token) {
           throw new Error('No session token available');
         }
+        
         setAuthToken(token);
+        console.log('Auth token set in state');
       } catch (error) {
         console.error('Error getting auth token:', error);
         toast.error('Authentication error', {
@@ -110,7 +114,7 @@ export default function GenerateEbookPage() {
     setIsGenerating(true);
     
     try {
-      // First, get the book data and payload
+      // Prepare headers for the request
       const headers = new Headers({
         'Content-Type': 'application/json',
       });
@@ -120,36 +124,49 @@ export default function GenerateEbookPage() {
         headers.append('Authorization', `Bearer ${authToken}`);
       }
       
-      console.log('Fetching book data and payload...');
+      // Log request details for debugging
+      console.log('=== Request Details ===');
+      console.log('URLs:', {
+        book: `/api/books/by-slug/${slug}`,
+        payload: `/api/books/by-slug/${slug}/payload`
+      });
+      console.log('Headers:', Object.fromEntries(headers.entries()));
+      console.log('Auth token present:', !!authToken);
+      
+      // Make parallel requests
+      console.log('Starting parallel requests...');
+      const startTime = Date.now();
+      
       const [bookResponse, payloadResponse] = await Promise.all([
         fetch(`/api/books/by-slug/${slug}`, { 
           headers,
-          credentials: 'include' // Include cookies for session
+          credentials: 'include',
+          cache: 'no-store' // Ensure fresh request
         }),
         fetch(`/api/books/by-slug/${slug}/payload`, { 
           headers,
-          credentials: 'include' // Include cookies for session
+          credentials: 'include',
+          cache: 'no-store' // Ensure fresh request
         })
       ]);
       
-      if (!bookResponse.ok) {
-        const errorText = await bookResponse.text();
-        console.error('Failed to fetch book data:', {
-          status: bookResponse.status,
-          statusText: bookResponse.statusText,
-          error: errorText
-        });
-        throw new Error(`Failed to fetch book data: ${bookResponse.status} ${bookResponse.statusText}`);
-      }
+      const endTime = Date.now();
+      console.log(`Requests completed in ${endTime - startTime}ms`);
+      console.log('Book response status:', bookResponse.status);
+      console.log('Payload response status:', payloadResponse.status);
       
-      if (!payloadResponse.ok) {
-        const errorText = await payloadResponse.text();
-        console.error('Failed to fetch book payload:', {
-          status: payloadResponse.status,
-          statusText: payloadResponse.statusText,
-          error: errorText
+      if (!bookResponse.ok || !payloadResponse.ok) {
+        const bookError = await bookResponse.text().catch(() => 'No error details');
+        const payloadError = await payloadResponse.text().catch(() => 'No error details');
+        
+        console.error('API Error Details:', {
+          bookStatus: bookResponse.status,
+          bookError,
+          payloadStatus: payloadResponse.status,
+          payloadError
         });
-        throw new Error(`Failed to fetch book payload: ${payloadResponse.status} ${payloadResponse.statusText}`);
+        
+        throw new Error(`Failed to fetch book data: ${bookResponse.status} ${payloadResponse.status}`);
       }
       
       const book = await bookResponse.json();
