@@ -61,22 +61,39 @@ function buildChapterTree(chapterList: Chapter[], parentId: string | null = null
     }));
 }
 
-function flattenChapterTree(chapters: ChapterWithChildren[], bookSlug: string, level = 1, parentId: string | null = null): PayloadChapter[] {
-  return chapters.flatMap((chapter, index) => {
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
-    const result: PayloadChapter = {
+function flattenChapterTree(chapters: ChapterWithChildren[], bookSlug: string, level = 1, parentId: string | null = null, authToken: string = ''): PayloadChapter[] {
+  const result: PayloadChapter[] = [];
+  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
+  
+  chapters.forEach((chapter, index) => {
+    // Create the chapter URL with auth token if available
+    let chapterUrl = `${baseUrl}/api/books/by-slug/${bookSlug}/chapters/${chapter.id}/html`;
+    if (authToken) {
+      chapterUrl += `?token=${encodeURIComponent(authToken)}`;
+    }
+    
+    // Create the current chapter
+    const currentChapter: PayloadChapter = {
       id: chapter.id,
       title: chapter.title,
-      url: `${baseUrl}/api/books/by-slug/${bookSlug}/chapters/${chapter.id}/html`,
+      url: chapterUrl,
       level: level,
       order: index,
       parent: parentId,
       title_tag: `h${Math.min(level + 1, 6)}` as const,
     };
-
-    const children = flattenChapterTree(chapter.children, bookSlug, level + 1, chapter.id);
-    return [result, ...children];
+    
+    // Add the current chapter to the result
+    result.push(currentChapter);
+    
+    // Process children recursively if they exist
+    if (chapter.children && chapter.children.length > 0) {
+      const childChapters = flattenChapterTree(chapter.children, bookSlug, level + 1, chapter.id, authToken);
+      result.push(...childChapters);
+    }
   });
+  
+  return result;
 }
 
 export async function GET(
@@ -87,23 +104,34 @@ export async function GET(
     // Get the slug from params
     const { slug } = await Promise.resolve(params);
     
-    // Get headers
+    // Get headers and extract the authorization token
     const headersList = await headers();
     const authHeader = headersList.get('authorization') || '';
+    let authToken = '';
     
-    // Verify authentication
+    // Verify authentication and get user ID
     let userId: string | null = null;
     if (authHeader?.startsWith('Bearer ')) {
-      const token = authHeader.split(' ')[1];
-      const decoded = await verifyToken(token);
-      if (decoded) {
-        userId = decoded.userId;
+      authToken = authHeader.split(' ')[1];
+      try {
+        const decoded = await verifyToken(authToken);
+        if (decoded) {
+          userId = decoded.userId;
+        }
+      } catch (error) {
+        console.error('Token verification failed:', error);
       }
-    } else {
-      // If no token, try to get current user from Clerk
-      const user = await currentUser();
-      if (user) {
-        userId = user.id;
+    } 
+    
+    // If no token or token verification failed, try to get current user from Clerk
+    if (!userId) {
+      try {
+        const user = await currentUser();
+        if (user) {
+          userId = user.id;
+        }
+      } catch (error) {
+        console.error('Failed to get current user:', error);
       }
     }
 
@@ -129,9 +157,15 @@ export async function GET(
       );
     }
 
+    // Log the raw chapters for debugging
+    console.log('Raw chapters from DB:', JSON.stringify(book.chapters, null, 2));
+    
     // Build chapter tree
     const chapterTree = buildChapterTree(book.chapters);
-    const flattenedChapters = flattenChapterTree(chapterTree, book.slug);
+    console.log('Chapter tree:', JSON.stringify(chapterTree, null, 2));
+    
+    const flattenedChapters = flattenChapterTree(chapterTree, book.slug, 1, null, authToken);
+    console.log('Flattened chapters:', JSON.stringify(flattenedChapters, null, 2));
     
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
 
