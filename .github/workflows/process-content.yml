@@ -12,6 +12,8 @@ on:
         required: false
         default: 'epub'
         type: string
+  repository_dispatch:
+    types: [build_book]
   push:
     branches: [main]
 
@@ -31,6 +33,9 @@ jobs:
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v3
+        with:
+          # Use the same ref that triggered the workflow
+          ref: ${{ github.event.client_payload.ref || github.ref }}
 
       - name: 🛠️ Set up Node.js
         uses: actions/setup-node@v3
@@ -75,8 +80,8 @@ jobs:
       - name: Fetch Book Payload
         id: fetch-payload
         env:
-          CONTENT_ID: ${{ github.event.inputs.content_id }}
-          FORMAT: ${{ github.event.inputs.format }}
+          CONTENT_ID: ${{ github.event.inputs.content_id || github.event.client_payload.content_id }}
+          FORMAT: ${{ github.event.inputs.format || github.event.client_payload.format || 'epub' }}
           BASE_URL: ${{ env.BASE_URL }}
           JWT_HEADER: "Bearer $(cat jwt-token.txt)"
         run: |
