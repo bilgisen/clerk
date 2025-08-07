@@ -56,6 +56,9 @@ export async function POST(request: Request) {
       inputs: {
         content_id: content_id.toString(),
         format: format || 'epub',
+        // Include JWT configuration in the workflow inputs
+        jwt_issuer: process.env.JWT_ISSUER || 'clerk.clerko.v1',
+        jwt_audience: process.env.JWT_AUDIENCE || 'https://api.clerko.com',
         metadata: JSON.stringify({
           ...(metadata || {}),
           user_id: userId,

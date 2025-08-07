@@ -1,9 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
+import { useAuth } from '@clerk/nextjs';
 
 // Polling interval in milliseconds
 const POLL_INTERVAL = 10000; // 10 seconds
@@ -11,8 +12,27 @@ const POLL_INTERVAL = 10000; // 10 seconds
 export default function GenerateEbookPage() {
   const { slug } = useParams();
   const router = useRouter();
+  const { getToken } = useAuth();
   const [isGenerating, setIsGenerating] = useState(false);
   const [polling, setPolling] = useState(false);
+  const [authToken, setAuthToken] = useState<string | null>(null);
+  
+  // Get the auth token when component mounts
+  useEffect(() => {
+    const fetchToken = async () => {
+      try {
+        const token = await getToken();
+        setAuthToken(token);
+      } catch (error) {
+        console.error('Error getting auth token:', error);
+        toast.error('Authentication error', {
+          description: 'Failed to get authentication token. Please try logging in again.'
+        });
+      }
+    };
+    
+    fetchToken();
+  }, [getToken]);
   
   // Function to start polling for completion
   const startPollingForCompletion = (bookId: string) => {
@@ -67,22 +87,55 @@ export default function GenerateEbookPage() {
   };
 
   const handleGenerateEPUB = async () => {
-    if (!slug) return;
+    if (!slug) {
+      console.error('No slug provided');
+      toast.error('Error', {
+        description: 'No book slug provided. Please try again.'
+      });
+      return;
+    }
+    
+    if (!authToken) {
+      console.error('No authentication token available');
+      toast.error('Authentication Required', {
+        description: 'Please sign in to generate EPUB.'
+      });
+      return;
+    }
     
     setIsGenerating(true);
     
     try {
       // First, get the book data and payload
+      const headers = {
+        'Authorization': `Bearer ${authToken}`,
+        'Content-Type': 'application/json'
+      };
+      
+      console.log('Fetching book data and payload...');
       const [bookResponse, payloadResponse] = await Promise.all([
-        fetch(`/api/books/by-slug/${slug}`),
-        fetch(`/api/books/by-slug/${slug}/payload`)
+        fetch(`/api/books/by-slug/${slug}`, { headers }),
+        fetch(`/api/books/by-slug/${slug}/payload`, { headers })
       ]);
       
       if (!bookResponse.ok) {
-        throw new Error('Failed to fetch book data');
+        const errorText = await bookResponse.text();
+        console.error('Failed to fetch book data:', {
+          status: bookResponse.status,
+          statusText: bookResponse.statusText,
+          error: errorText
+        });
+        throw new Error(`Failed to fetch book data: ${bookResponse.status} ${bookResponse.statusText}`);
       }
+      
       if (!payloadResponse.ok) {
-        throw new Error('Failed to fetch book payload');
+        const errorText = await payloadResponse.text();
+        console.error('Failed to fetch book payload:', {
+          status: payloadResponse.status,
+          statusText: payloadResponse.statusText,
+          error: errorText
+        });
+        throw new Error(`Failed to fetch book payload: ${payloadResponse.status} ${payloadResponse.statusText}`);
       }
       
       const book = await bookResponse.json();
@@ -133,9 +186,21 @@ export default function GenerateEbookPage() {
       startPollingForCompletion(book.id);
       
     } catch (error) {
-      console.error('Error starting EPUB generation:', error);
-      toast.error('Failed to start EPUB generation', {
-        description: error instanceof Error ? error.message : 'An unknown error occurred',
+      console.error('Error in handleGenerateEPUB:', error);
+      
+      let errorMessage = 'Failed to start EPUB generation';
+      if (error instanceof Error) {
+        console.error('Error details:', {
+          name: error.name,
+          message: error.message,
+          stack: error.stack
+        });
+        errorMessage += `: ${error.message}`;
+      }
+      
+      toast.error('EPUB Generation Failed', {
+        description: errorMessage,
+        duration: 10000
       });
     } finally {
       setIsGenerating(false);
