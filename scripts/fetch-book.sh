@@ -1,34 +1,99 @@
 #!/bin/bash
-set -e
+set -e  # Exit on error
 
-echo "📥 Fetching book payload for content ID: $CONTENT_ID"
+# Debug: Print all environment variables (filtered for sensitive data)
+echo "🔧 Environment variables:"
+printenv | sort | grep -v -E 'SECRET|TOKEN|PASSWORD|KEY' | while read -r line; do
+  if [[ $line == JWT_* || $line == GITHUB_* || $line == NODE_* ]]; then
+    key="${line%%=*}"
+    value="${line#*=}"
+    # Truncate long values
+    if [ ${#value} -gt 50 ]; then
+      value="${value:0:20}...${value: -10}"
+    fi
+    echo "- $key: $value"
+  fi
+done
+
+# Required environment variables
+REQUIRED_VARS=("CONTENT_ID" "BASE_URL" "JWT_HEADER" "JWT_TOKEN")
+for var in "${REQUIRED_VARS[@]}"; do
+  if [ -z "${!var}" ]; then
+    echo "::error::❌ Missing required environment variable: $var"
+    exit 1
+  fi
+done
 
 # Create necessary directories
 mkdir -p ./book-content/chapters
 
-# Set up the payload URL
+# Set the payload URL
 PAYLOAD_URL="$BASE_URL/api/books/by-id/$CONTENT_ID/payload"
-echo "🔗 Payload URL: $PAYLOAD_URL"
+echo "\n🌐 Attempting to fetch payload from: $PAYLOAD_URL"
+
+# Debug: Print the JWT token header and payload
+if command -v jq &> /dev/null; then
+  echo "\n🔑 JWT Token Analysis:"
+  echo "$JWT_TOKEN" | cut -d'.' -f1 | base64 -d 2>/dev/null | jq '.' || echo "Failed to decode JWT header"
+  echo "..."
+  echo "$JWT_TOKEN" | cut -d'.' -f2 | base64 -d 2>/dev/null | jq '.' || echo "Failed to decode JWT payload"
+fi
 
 # Debug: Print environment info
-echo "🔧 Environment:"
-echo "- BASE_URL: $BASE_URL"
-echo "- JWT_ISSUER: ${JWT_ISSUER:-Not set}"
-echo "- JWT_AUDIENCE: ${JWT_AUDIENCE:-Not set}"
 
-# Make the request with verbose output and save headers for debugging
-echo "🔐 Making request with JWT token..."
-if ! curl -v -s -f -L -o ./book-content/payload.json \
-     -H "Authorization: $JWT_HEADER" \
-     -H "Accept: application/json" \
-     -D ./response_headers.txt \
-     "$PAYLOAD_URL" 2> curl_debug.log; then
+# Make the request with verbose output and save debug info
+set -x
+curl -v -s -f -D ./headers.txt -o ./book-content/payload.json \
+  -H "Accept: application/json" \
+  -H "Authorization: $JWT_HEADER" \
+  "$PAYLOAD_URL" 2> ./curl-debug.log || {
+    CURL_EXIT_CODE=$?
+    set +x
+    echo "\n❌ Curl failed with exit code: $CURL_EXIT_CODE"
+    echo "\n📝 Response headers:"
+    cat ./headers.txt
+    
+    echo "\n🔍 Curl debug log:"
+    cat ./curl-debug.log
+    
+    # Try to decode the JWT for debugging
+    if [ -n "$JWT_TOKEN" ]; then
+      echo "\n🔑 JWT Token Analysis:"
+      echo "- Token length: ${#JWT_TOKEN} characters"
+      
+      # Try to decode the JWT payload
+      if command -v jq &> /dev/null; then
+        echo -n "- Payload: "
+        echo "$JWT_TOKEN" | cut -d'.' -f2 | base64 -d 2>/dev/null | jq -c '{iss, aud, sub, iat, exp}' || echo "Failed to decode JWT payload"
+      fi
+    fi
+    
+    exit 1
+}
+set +x
+
+echo "\n✅ Received response. Analyzing..."
+
+# Check if the response is a redirect
+if grep -q "^HTTP/.* 30[0-9]" ./headers.txt; then
+  echo "\n🔄 Detected redirect response:"
+  grep "^Location:" ./headers.txt || echo "No Location header found"
   
-  echo "::error::❌ Failed to fetch book payload"
-  echo "=== Response Headers ==="
-  cat ./response_headers.txt 2>/dev/null || echo "No response headers"
-  echo -e "\n=== cURL Debug Log ==="
-  cat curl_debug.log 2>/dev/null || echo "No debug log"
+  # Print response body if it exists and is not empty
+  if [ -s "./book-content/payload.json" ]; then
+    echo "\n📦 Response body:"
+    cat ./book-content/payload.json
+  fi
+  
+  echo "::error::❌ Authentication failed: Server returned a redirect response"
+  exit 1
+fi
+
+# Check if we got a valid JSON response
+if ! jq empty ./book-content/payload.json 2>/dev/null; then
+  echo "\n❌ Response is not valid JSON. Raw response (first 200 chars):"
+  head -c 200 ./book-content/payload.json
+  echo -e "\n..."
   exit 1
 fi
 

@@ -86,72 +86,124 @@ export async function createToken(payload: Omit<JWTPayload, 'iat' | 'exp'>) {
 // Verify a JWT token
 export async function verifyToken(token: string): Promise<JWTPayload | null> {
   const startTime = Date.now();
+  const tokenPrefix = token ? `${token.substring(0, 10)}...` : 'empty-token';
   const logContext = {
     operation: 'verifyToken',
-    tokenPrefix: token ? `${token.substring(0, 10)}...` : 'empty-token',
+    token: tokenPrefix,
+    env: {
+      JWT_ISSUER,
+      JWT_AUDIENCE,
+      NODE_ENV: process.env.NODE_ENV,
+    },
   };
 
   try {
     if (!token) {
-      console.warn(`${LOG_PREFIX} Empty token provided`, logContext);
+      console.error(`${LOG_PREFIX} ❌ No token provided`, logContext);
       return null;
     }
 
-    console.log(`${LOG_PREFIX} Verifying token`, logContext);
-    
-    const secret = new TextEncoder().encode(JWT_SECRET);
-    const { payload } = await jwtVerify(token, secret, {
-      algorithms: ["HS256"],
-      issuer: JWT_ISSUER,
-      audience: JWT_AUDIENCE,
-      clockTolerance: 30, // 30 seconds leeway for clock skew
-    });
+    console.log(`${LOG_PREFIX} 🔍 Verifying token: ${tokenPrefix}`, logContext);
 
-    // For GitHub Actions, we might get a 'sub' claim instead of 'userId'
-    const userId = payload.userId || payload.sub;
-    if (!userId) {
-      console.error(`${LOG_PREFIX} Token missing userId/sub`, { ...logContext, payload });
+    // Basic token format validation
+    const tokenParts = token.split('.');
+    if (tokenParts.length !== 3) {
+      console.error(`${LOG_PREFIX} ❌ Invalid token format`, { ...logContext, parts: tokenParts.length });
       return null;
     }
 
-    const result = {
-      userId: String(userId),
-      bookId: payload.bookId ? String(payload.bookId) : undefined,
-      iat: Number(payload.iat) || Math.floor(Date.now() / 1000),
-      exp: Number(payload.exp) || Math.floor(Date.now() / 1000) + 3600,
-      // Include any additional claims from the token
-      ...payload
-    };
-    
-    // Log token validation success with basic info (don't log the full token for security)
-    console.log(`${LOG_PREFIX} Token validated`, {
-      userId: result.userId,
-      issuer: payload.iss,
-      audience: payload.aud,
-      expiresIn: result.exp - Math.floor(Date.now() / 1000)
-    });
+    // Try to decode the token for debugging
+    let decodedPayload: any = null;
+    try {
+      const header = JSON.parse(Buffer.from(tokenParts[0], 'base64').toString());
+      decodedPayload = JSON.parse(Buffer.from(tokenParts[1], 'base64').toString());
+      console.log(`${LOG_PREFIX} 🔑 Decoded token`, {
+        header,
+        payload: {
+          ...decodedPayload,
+          iat: decodedPayload.iat ? new Date(decodedPayload.iat * 1000).toISOString() : null,
+          exp: decodedPayload.exp ? new Date(decodedPayload.exp * 1000).toISOString() : null,
+          nbf: decodedPayload.nbf ? new Date(decodedPayload.nbf * 1000).toISOString() : null,
+        },
+      });
+    } catch (decodeError) {
+      console.warn(`${LOG_PREFIX} ⚠️ Failed to decode token for debugging`, { 
+        error: decodeError instanceof Error ? decodeError.message : 'Unknown error' 
+      });
+    }
+
+    // Verify the JWT token
+    const { payload } = await jwtVerify(
+      token,
+      new TextEncoder().encode(JWT_SECRET),
+      {
+        issuer: JWT_ISSUER,
+        audience: JWT_AUDIENCE,
+        algorithms: ['HS256'],
+        clockTolerance: 30, // 30 seconds tolerance for clock skew
+      }
+    );
+
+    // Type assertion since we know the payload structure
+    const jwtPayload = payload as JWTPayload;
+
+    // Additional validation for required fields
+    if (!jwtPayload.userId) {
+      console.error(`${LOG_PREFIX} ❌ Token missing userId`, { 
+        ...logContext, 
+        payload: JSON.stringify(jwtPayload, null, 2) 
+      });
+      return null;
+    }
+
+    // Validate issuer and audience
+    if (jwtPayload.iss !== JWT_ISSUER) {
+      console.error(`${LOG_PREFIX} ❌ Invalid issuer`, { 
+        ...logContext, 
+        expected: JWT_ISSUER, 
+        received: jwtPayload.iss 
+      });
+      return null;
+    }
+
+    if (jwtPayload.aud !== JWT_AUDIENCE) {
+      console.error(`${LOG_PREFIX} ❌ Invalid audience`, { 
+        ...logContext, 
+        expected: JWT_AUDIENCE, 
+        received: jwtPayload.aud 
+      });
+      return null;
+    }
 
     const duration = Date.now() - startTime;
-    console.log(`${LOG_PREFIX} Token verified successfully`, { 
+    console.log(`${LOG_PREFIX} ✅ Token verified successfully`, {
       ...logContext,
-      userId: result.userId,
-      expiresIn: result.exp - Math.floor(Date.now() / 1000),
-      durationMs: duration
+      userId: jwtPayload.userId,
+      iat: jwtPayload.iat ? new Date(jwtPayload.iat * 1000).toISOString() : 'no-iat',
+      exp: jwtPayload.exp ? new Date(jwtPayload.exp * 1000).toISOString() : 'no-exp',
+      duration: `${duration}ms`,
     });
 
-    return result;
+    // Return the verified payload with default values for required fields
+    return {
+      ...jwtPayload,  // Spread first to allow overrides below
+      userId: jwtPayload.userId,
+      bookId: jwtPayload.bookId,
+      iat: jwtPayload.iat || Math.floor(Date.now() / 1000),
+      exp: jwtPayload.exp || Math.floor(Date.now() / 1000) + 3600
+    };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     const errorCode = error instanceof Error ? error.name : 'UNKNOWN_ERROR';
     const isExpired = errorMessage.includes('expired');
     
-    console.error(`${LOG_PREFIX} Token verification failed`, { 
+    console.error(`${LOG_PREFIX} ❌ Token verification failed`, { 
       ...logContext,
       error: errorMessage,
       errorCode,
       isExpired,
       durationMs: Date.now() - startTime,
-      stack: error instanceof Error ? error.stack : undefined
+      stack: error instanceof Error ? error.stack?.split('\n').slice(0, 3).join('\n') : undefined
     });
 
     return null;

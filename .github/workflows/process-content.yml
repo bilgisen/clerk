@@ -103,13 +103,33 @@ jobs:
       - name: Fetch Book Payload
         id: fetch-payload
         env:
-          CONTENT_ID: ${{ github.event.inputs.content_id }}
-          FORMAT: ${{ github.event.inputs.format }}
-          BASE_URL: ${{ env.NEXT_PUBLIC_APP_URL }}
+          JWT_TOKEN: ${{ env.JWT_TOKEN }}
           JWT_HEADER: ${{ env.JWT_HEADER }}
+          CONTENT_ID: ${{ github.event.inputs.content_id }}
+          BASE_URL: ${{ env.NEXT_PUBLIC_APP_URL }}
+          JWT_ISSUER: ${{ env.JWT_ISSUER }}
+          JWT_AUDIENCE: ${{ env.JWT_AUDIENCE }}
         run: |
-          echo "Fetching book payload for content ID: $CONTENT_ID"
-          mkdir -p ./book-content/chapters
+          # Print environment info for debugging
+          echo "🔍 Environment variables in fetch-payload step:"
+          echo "- JWT_TOKEN: ${JWT_TOKEN:0:10}..."
+          echo "- JWT_HEADER: ${JWT_HEADER:0:20}..."
+          echo "- CONTENT_ID: $CONTENT_ID"
+          echo "- BASE_URL: $BASE_URL"
+          echo "- JWT_ISSUER: $JWT_ISSUER"
+          echo "- JWT_AUDIENCE: $JWT_AUDIENCE"
+          
+          # Make sure the script is executable
+          chmod +x ./scripts/fetch-book.sh
+          
+          # Run the fetch script with all required environment variables
+          JWT_TOKEN="$JWT_TOKEN" \
+          JWT_HEADER="$JWT_HEADER" \
+          CONTENT_ID="$CONTENT_ID" \
+          BASE_URL="$BASE_URL" \
+          JWT_ISSUER="$JWT_ISSUER" \
+          JWT_AUDIENCE="$JWT_AUDIENCE" \
+            ./scripts/fetch-book.sh
 
           PAYLOAD_URL="$BASE_URL/api/books/by-id/$CONTENT_ID/payload"
           echo "Fetching payload from: $PAYLOAD_URL"
