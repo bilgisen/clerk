@@ -17,10 +17,14 @@ const now = Math.floor(Date.now() / 1000);
 
 const payload = {
   sub: 'github-action',
+  userId: 'github-action',  // Add userId claim required by verifyToken
   iss: JWT_ISSUER,
   aud: JWT_AUDIENCE,
   iat: now,
-  exp: now + 300 // 5 dakika geçerli
+  exp: now + 3600, // 1 hour validity
+  // Add any additional claims needed by your application
+  role: 'service-account',
+  service: 'github-actions'
 };
 
 console.log("🛠️ Generating JWT with payload:");

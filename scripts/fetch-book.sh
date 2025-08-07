@@ -3,26 +3,51 @@ set -e
 
 echo "📥 Fetching book payload for content ID: $CONTENT_ID"
 
+# Create necessary directories
 mkdir -p ./book-content/chapters
 
+# Set up the payload URL
 PAYLOAD_URL="$BASE_URL/api/books/by-id/$CONTENT_ID/payload"
 echo "🔗 Payload URL: $PAYLOAD_URL"
-echo "🔐 Using JWT_HEADER: $JWT_HEADER"
 
-if ! curl -s -f -L -o ./book-content/payload.json \
+# Debug: Print environment info
+echo "🔧 Environment:"
+echo "- BASE_URL: $BASE_URL"
+echo "- JWT_ISSUER: ${JWT_ISSUER:-Not set}"
+echo "- JWT_AUDIENCE: ${JWT_AUDIENCE:-Not set}"
+
+# Make the request with verbose output and save headers for debugging
+echo "🔐 Making request with JWT token..."
+if ! curl -v -s -f -L -o ./book-content/payload.json \
      -H "Authorization: $JWT_HEADER" \
      -H "Accept: application/json" \
-     "$PAYLOAD_URL"; then
+     -D ./response_headers.txt \
+     "$PAYLOAD_URL" 2> curl_debug.log; then
+  
   echo "::error::❌ Failed to fetch book payload"
+  echo "=== Response Headers ==="
+  cat ./response_headers.txt 2>/dev/null || echo "No response headers"
+  echo -e "\n=== cURL Debug Log ==="
+  cat curl_debug.log 2>/dev/null || echo "No debug log"
   exit 1
 fi
 
-echo "✅ Payload fetched. Checking for redirect or empty content..."
-head -n 20 ./book-content/payload.json
+# Check for empty response
+if [ ! -s "./book-content/payload.json" ]; then
+  echo "::error::❌ Received empty payload"
+  echo "=== Response Headers ==="
+  cat ./response_headers.txt 2>/dev/null || echo "No response headers"
+  exit 1
+fi
 
+# Check for redirect in response
+echo -e "\n✅ Payload received. Checking content..."
 if grep -q "redirect" ./book-content/payload.json; then
-  echo "::error::🔁 Redirect detected - token may be invalid"
+  echo "::error::🔁 Redirect detected - authentication may have failed"
+  echo "=== Response Content ==="
   cat ./book-content/payload.json
+  echo -e "\n=== Response Headers ==="
+  cat ./response_headers.txt 2>/dev/null || echo "No response headers"
   exit 5
 fi
 

@@ -61,14 +61,25 @@ jobs:
       - name: Generate JWT Token
         id: generate-token
         env:
-          CONTENT_ID: ${{ github.event.inputs.content_id }}
-          FORMAT: ${{ github.event.inputs.format }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          JWT_ISSUER: 'clerk.clerko.v1'
+          JWT_AUDIENCE: 'https://api.clerko.com'
         run: |
+          echo "🔑 Generating JWT token with the following settings:"
+          echo "- Issuer: $JWT_ISSUER"
+          echo "- Audience: $JWT_AUDIENCE"
+          echo "- Secret: ${JWT_SECRET:0:5}...${JWT_SECRET: -5}"
+          
           npm install jsonwebtoken
           node scripts/generate-jwt.js
+          
           JWT_TOKEN=$(cat jwt-token.txt)
           echo "JWT_TOKEN=$JWT_TOKEN" >> $GITHUB_ENV
           echo "JWT_HEADER=Bearer $JWT_TOKEN" >> $GITHUB_ENV
+          
+          # Debug: Decode the token to verify its contents
+          echo "🔍 Decoded JWT payload:"
+          echo $JWT_TOKEN | cut -d'.' -f2 | base64 -d 2>/dev/null | jq . || echo "Failed to decode JWT"
 
       - name: Fetch Book Payload
         id: fetch-payload
