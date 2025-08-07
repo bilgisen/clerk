@@ -21,8 +21,8 @@ on:
 env:
   NEXT_PUBLIC_APP_URL: ${{ vars.NEXT_PUBLIC_APP_URL || 'https://matbu.vercel.app' }}
   NODE_ENV: production
-  JWT_ISSUER: ${{ vars.JWT_ISSUER || 'clerk.matbu.vercel.app' }}
-  JWT_AUDIENCE: ${{ vars.JWT_AUDIENCE || 'clerk' }}
+  JWT_ISSUER: 'clerk.clerko.v1'  # Must match the issuer in auth.ts
+  JWT_AUDIENCE: 'https://api.clerko.com'  # Must match the audience in auth.ts
   JWT_SECRET: ${{ secrets.JWT_SECRET }}
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN || github.token }}
   GITHUB_REPO_OWNER: bilgisen
