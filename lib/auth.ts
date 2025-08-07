@@ -3,6 +3,8 @@ import { SignJWT, jwtVerify } from "jose";
 
 // Get the JWT secret from environment variables
 const JWT_SECRET = process.env.CLERK_JWT_KEY || process.env.JWT_SECRET || "your-secret-key-please-change-this-in-production";
+const JWT_ISSUER = process.env.JWT_ISSUER || "clerk.clerko.v1";
+const JWT_AUDIENCE = process.env.JWT_AUDIENCE || "https://api.clerko.com";
 
 // Validate JWT secret
 if (!JWT_SECRET || JWT_SECRET === "your-secret-key-please-change-this-in-production") {
@@ -10,6 +12,9 @@ if (!JWT_SECRET || JWT_SECRET === "your-secret-key-please-change-this-in-product
 }
 
 const LOG_PREFIX = '[Auth]';
+
+// Environment variable to bypass auth in development
+const DISABLE_AUTH = process.env.NODE_ENV === 'development' && process.env.DISABLE_AUTH === 'true';
 
 export interface JWTPayload {
   userId: string;
@@ -97,20 +102,34 @@ export async function verifyToken(token: string): Promise<JWTPayload | null> {
     const secret = new TextEncoder().encode(JWT_SECRET);
     const { payload } = await jwtVerify(token, secret, {
       algorithms: ["HS256"],
+      issuer: JWT_ISSUER,
+      audience: JWT_AUDIENCE,
+      clockTolerance: 30, // 30 seconds leeway for clock skew
     });
 
-    if (!payload.userId) {
-      console.error(`${LOG_PREFIX} Token missing userId`, { ...logContext, payload });
+    // For GitHub Actions, we might get a 'sub' claim instead of 'userId'
+    const userId = payload.userId || payload.sub;
+    if (!userId) {
+      console.error(`${LOG_PREFIX} Token missing userId/sub`, { ...logContext, payload });
       return null;
     }
 
     const result = {
-      userId: String(payload.userId),
+      userId: String(userId),
       bookId: payload.bookId ? String(payload.bookId) : undefined,
       iat: Number(payload.iat) || Math.floor(Date.now() / 1000),
       exp: Number(payload.exp) || Math.floor(Date.now() / 1000) + 3600,
+      // Include any additional claims from the token
       ...payload
     };
+    
+    // Log token validation success with basic info (don't log the full token for security)
+    console.log(`${LOG_PREFIX} Token validated`, {
+      userId: result.userId,
+      issuer: payload.iss,
+      audience: payload.aud,
+      expiresIn: result.exp - Math.floor(Date.now() / 1000)
+    });
 
     const duration = Date.now() - startTime;
     console.log(`${LOG_PREFIX} Token verified successfully`, { 
@@ -183,20 +202,51 @@ export async function getCurrentUser(token?: string) {
 
 // Helper to get user ID from request
 export async function getUserIdFromRequest(request: Request): Promise<string | null> {
+  // In development, allow bypassing auth if DISABLE_AUTH is set
+  if (DISABLE_AUTH) {
+    console.warn(`${LOG_PREFIX} WARNING: Authentication is disabled (development mode)`);
+    return 'dev-user';
+  }
+
   const authHeader = request.headers.get('authorization');
   
+  // Check for Bearer token
   if (authHeader?.startsWith('Bearer ')) {
     const token = authHeader.split(' ')[1];
-    const payload = await verifyToken(token);
-    return payload?.userId || null;
+    try {
+      const payload = await verifyToken(token);
+      if (payload) {
+        console.log(`${LOG_PREFIX} Authenticated via JWT token`, { userId: payload.userId });
+        return payload.userId;
+      }
+    } catch (error) {
+      console.error(`${LOG_PREFIX} JWT verification failed`, { 
+        error: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined
+      });
+      return null;
+    }
   }
   
-  // Fallback to Clerk session
+  // Fallback to Clerk session for web requests
   try {
-    const session = await auth();
-    return session?.userId || null;
+    const session = await auth().catch(error => {
+      console.warn(`${LOG_PREFIX} Clerk auth failed`, { error: error.message });
+      return null;
+    });
+    
+    if (session?.userId) {
+      console.log(`${LOG_PREFIX} Authenticated via Clerk session`, { userId: session.userId });
+      return session.userId;
+    }
+    
+    console.warn(`${LOG_PREFIX} No valid authentication found`);
+    return null;
   } catch (error) {
-    console.error(`${LOG_PREFIX} Error getting user from session`, { error });
+    console.error(`${LOG_PREFIX} Error getting user from session`, { 
+      error: error instanceof Error ? error.message : 'Unknown error',
+      stack: error instanceof Error ? error.stack : undefined
+    });
     return null;
   }
 }

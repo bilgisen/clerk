@@ -1,4 +1,4 @@
-name: Build and Publish EPUB
+name: Build Book
 
 on:
   workflow_dispatch:
@@ -9,44 +9,44 @@ on:
         type: string
       format:
         description: 'Output format (epub, mobi, pdf, html, docx)'
-        required: true
-        default: 'epub'
-        type: string
-      metadata:
-        description: 'Additional metadata as JSON string'
         required: false
-        default: '{}'
+        default: 'epub'
         type: string
 
 env:
-  NEXT_PUBLIC_APP_URL: ${{ vars.NEXT_PUBLIC_APP_URL || 'https://matbu.vercel.app' }}
   NODE_ENV: production
+  JWT_SECRET: ${{ secrets.JWT_SECRET }}
   JWT_ISSUER: ${{ vars.JWT_ISSUER || 'clerk.matbu.vercel.app' }}
   JWT_AUDIENCE: ${{ vars.JWT_AUDIENCE || 'clerk' }}
-  JWT_SECRET: ${{ secrets.JWT_SECRET }}
-  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN || github.token }}
-  GITHUB_REPO_OWNER: bilgisen
-  GITHUB_REPO_NAME: clerk
+  BASE_URL: ${{ vars.NEXT_PUBLIC_APP_URL || 'https://matbu.vercel.app' }}
 
 jobs:
-  build-epub:
-    name: Build EPUB
+  build-book:
+    name: Build Book
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
+      - name: 📥 Checkout repository
         uses: actions/checkout@v3
 
-      - name: Set up Node.js
+      - name: 🛠️ Set up Node.js
         uses: actions/setup-node@v3
         with:
           node-version: '18.x'
           cache: 'npm'
 
-      - name: Install dependencies
-        run: npm install --legacy-peer-deps
+      - name: 🔐 Install JWT dependencies
+        run: npm install jsonwebtoken
 
-      - name: Install system tools
+      - name: 🔑 Generate JWT token
+        run: node scripts/generate-jwt.js
+
+      - name: 🧪 Debug JWT token
+        run: |
+          echo "JWT token:"
+          cat jwt-token.txt
+
+      - name: 🛠️ Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -58,25 +58,24 @@ jobs:
             wget \
             parallel
 
-      - name: Generate JWT Token
-        id: generate-token
-        env:
-          CONTENT_ID: ${{ github.event.inputs.content_id }}
-          FORMAT: ${{ github.event.inputs.format }}
+      - name: 📚 Fetch and build book
+        id: fetch-and-build
         run: |
-          npm install jsonwebtoken
-          node scripts/generate-jwt.js
-          JWT_TOKEN=$(cat jwt-token.txt)
-          echo "JWT_TOKEN=$JWT_TOKEN" >> $GITHUB_ENV
-          echo "JWT_HEADER=Bearer $JWT_TOKEN" >> $GITHUB_ENV
+          echo "Starting book build process..."
+          bash scripts/fetch-book.sh
+        env:
+          JWT_HEADER: "Bearer $(cat jwt-token.txt)"
+          CONTENT_ID: ${{ github.event.inputs.content_id }}
+          FORMAT: ${{ github.event.inputs.format || 'epub' }}
+          BASE_URL: ${{ env.BASE_URL }}
 
       - name: Fetch Book Payload
         id: fetch-payload
         env:
           CONTENT_ID: ${{ github.event.inputs.content_id }}
           FORMAT: ${{ github.event.inputs.format }}
-          BASE_URL: ${{ env.NEXT_PUBLIC_APP_URL }}
-          JWT_HEADER: ${{ env.JWT_HEADER }}
+          BASE_URL: ${{ env.BASE_URL }}
+          JWT_HEADER: "Bearer $(cat jwt-token.txt)"
         run: |
           echo "Fetching book payload for content ID: $CONTENT_ID"
           mkdir -p ./book-content/chapters
