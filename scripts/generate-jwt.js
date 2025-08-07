@@ -5,6 +5,7 @@ const jwt = require('jsonwebtoken');
 const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_ISSUER = 'clerk.clerko.v1';
 const JWT_AUDIENCE = 'https://api.clerko.com';
+const TEMPLATE_NAME = 'matbu';
 
 if (!JWT_SECRET) {
   console.error('❌ Missing required environment variable: JWT_SECRET');
@@ -14,27 +15,38 @@ if (!JWT_SECRET) {
 const now = Math.floor(Date.now() / 1000);
 const tokenExpiry = 3600; // 1 hour
 
-// Create the JWT payload with all required claims
+// Create the JWT payload with Clerk template and required claims
 const payload = {
-  // Standard claims
+  // Standard JWT claims
   iss: JWT_ISSUER,
   aud: JWT_AUDIENCE,
   sub: 'github-actions',
   iat: now,
   exp: now + tokenExpiry,
+  nbf: now,
   
-  // Custom claims
-  userId: 'github-actions',
-  name: 'GitHub Actions Workflow',
-  role: 'service-account',
-  service: 'github-actions',
+  // Clerk template identifier
+  template: TEMPLATE_NAME,
   
-  // Add any additional claims needed by your application
+  // Clerk user identification
+  user: {
+    id: 'github-actions',
+    email: 'actions@github.com',
+    username: 'github-actions'
+  },
+  
+  // Custom claims for your application
   metadata: {
     source: 'github-actions',
     workflow: process.env.GITHUB_WORKFLOW || 'unknown',
-    run_id: process.env.GITHUB_RUN_ID || 'unknown'
-  }
+    run_id: process.env.GITHUB_RUN_ID || 'unknown',
+    service: 'github-actions',
+    role: 'service-account'
+  },
+  
+  // Required for Clerk template
+  organization: null,
+  session_id: `github-${process.env.GITHUB_RUN_ID || 'unknown'}`
 };
 
 console.log('🛠️ Generating JWT with the following claims:');

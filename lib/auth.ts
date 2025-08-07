@@ -96,6 +96,16 @@ export async function verifyToken(token: string): Promise<JWTPayload | null> {
       NODE_ENV: process.env.NODE_ENV,
     },
   };
+  
+  // In development, allow bypassing auth if DISABLE_AUTH is set
+  if (DISABLE_AUTH) {
+    console.warn(`${LOG_PREFIX} WARNING: Authentication is disabled (development mode)`);
+    return {
+      userId: 'dev-user',
+      iat: Math.floor(Date.now() / 1000),
+      exp: Math.floor(Date.now() / 1000) + 3600,
+    };
+  }
 
   try {
     if (!token) {
@@ -148,10 +158,21 @@ export async function verifyToken(token: string): Promise<JWTPayload | null> {
     const jwtPayload = payload as JWTPayload;
 
     // Additional validation for required fields
-    if (!jwtPayload.userId) {
+    const userId = jwtPayload.userId || (jwtPayload.user && jwtPayload.user.id);
+    if (!userId) {
       console.error(`${LOG_PREFIX} ❌ Token missing userId`, { 
         ...logContext, 
         payload: JSON.stringify(jwtPayload, null, 2) 
+      });
+      return null;
+    }
+    
+    // Verify template if present
+    if (jwtPayload.template && jwtPayload.template !== 'matbu') {
+      console.error(`${LOG_PREFIX} ❌ Invalid template`, {
+        ...logContext,
+        expected: 'matbu',
+        received: jwtPayload.template
       });
       return null;
     }

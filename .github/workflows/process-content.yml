@@ -58,10 +58,12 @@ jobs:
             wget \
             parallel
 
-      - name: Generate JWT Token
+      - name: Generate JWT Token with matbu template
         id: generate-token
         env:
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          JWT_ISSUER: ${{ env.JWT_ISSUER }}
+          JWT_AUDIENCE: ${{ env.JWT_AUDIENCE }}
           GITHUB_WORKFLOW: ${{ github.workflow }}
           GITHUB_RUN_ID: ${{ github.run_id }}
         run: |
@@ -69,8 +71,11 @@ jobs:
           echo "🔧 Installing required tools..."
           npm install jsonwebtoken
           
-          # Generate JWT token
-          echo "🔑 Generating JWT token..."
+          # Generate JWT token using matbu template
+          echo "🔑 Generating JWT token with matbu template..."
+          echo "- JWT_ISSUER: $JWT_ISSUER"
+          echo "- JWT_AUDIENCE: $JWT_AUDIENCE"
+          
           node scripts/generate-jwt.js
           
           # Read the generated token
@@ -95,9 +100,16 @@ jobs:
             echo "::warning::jq not installed, skipping token inspection"
           else
             echo "\n📋 Token contents:"
-            echo $JWT_TOKEN | cut -d'.' -f1 | base64 -d 2>/dev/null | jq '.' || echo "Failed to decode header"
-            echo "..."
-            echo $JWT_TOKEN | cut -d'.' -f2 | base64 -d 2>/dev/null | jq '.' || echo "Failed to decode payload"
+            echo "Header:"
+            echo $JWT_TOKEN | cut -d'.' -f1 | base64 -d 2>/dev/null | jq '.' 2>/dev/null || echo "Failed to decode header"
+            echo "\nPayload:"
+            echo $JWT_TOKEN | cut -d'.' -f2 | base64 -d 2>/dev/null | jq '.' 2>/dev/null || echo "Failed to decode payload"
+            
+            # Verify template name
+            TEMPLATE=$(echo $JWT_TOKEN | cut -d'.' -f2 | base64 -d 2>/dev/null | jq -r '.template // empty' 2>/dev/null)
+            if [ "$TEMPLATE" != "matbu" ]; then
+              echo "::warning::Token template is '$TEMPLATE', expected 'matbu'"
+            fi
           fi
 
       - name: Fetch Book Payload
