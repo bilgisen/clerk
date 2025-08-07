@@ -3,8 +3,7 @@ import { headers } from 'next/headers';
 import { db } from '@/db/drizzle';
 import { books, chapters } from '@/db/schema';
 import { eq } from 'drizzle-orm';
-import { verifyToken } from '@/lib/auth';
-import { currentUser } from '@clerk/nextjs/server';
+import { auth, currentUser } from '@clerk/nextjs/server';
 
 export const dynamic = 'force-dynamic';
 export const dynamicParams = true;
@@ -109,36 +108,42 @@ export async function GET(
     const authHeader = headersList.get('authorization') || '';
     let authToken = '';
     
-    // Verify authentication and get user ID
+    // Get user ID from Clerk session
     let userId: string | null = null;
-    if (authHeader?.startsWith('Bearer ')) {
-      authToken = authHeader.split(' ')[1];
-      try {
-        const decoded = await verifyToken(authToken);
-        if (decoded) {
-          userId = decoded.userId;
-        }
-      } catch (error) {
-        console.error('Token verification failed:', error);
-      }
-    } 
     
-    // If no token or token verification failed, try to get current user from Clerk
-    if (!userId) {
-      try {
-        const user = await currentUser();
-        if (user) {
-          userId = user.id;
+    try {
+      // First try to get the current user from Clerk
+      const user = await currentUser();
+      if (user) {
+        userId = user.id;
+      } else if (authHeader?.startsWith('Bearer ')) {
+        // Fallback to token verification if no user session
+        authToken = authHeader.split(' ')[1];
+        if (authToken) {
+          try {
+            // This is a Clerk session token, not a JWT
+            const session = await auth();
+            if (session?.userId) {
+              userId = session.userId;
+            }
+          } catch (error) {
+            console.error('Session verification failed:', error);
+          }
         }
-      } catch (error) {
-        console.error('Failed to get current user:', error);
       }
-    }
-
-    if (!userId) {
+      
+      if (!userId) {
+        console.error('No authenticated user found');
+        return NextResponse.json(
+          { error: 'Unauthorized - Please sign in to access this resource' },
+          { status: 401 }
+        );
+      }
+    } catch (error) {
+      console.error('Authentication error:', error);
       return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
+        { error: 'Authentication failed', details: error instanceof Error ? error.message : 'Unknown error' },
+        { status: 500 }
       );
     }
 

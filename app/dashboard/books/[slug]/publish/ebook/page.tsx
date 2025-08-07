@@ -21,7 +21,11 @@ export default function GenerateEbookPage() {
   useEffect(() => {
     const fetchToken = async () => {
       try {
-        const token = await getToken();
+        // Get the session token with template name if needed
+        const token = await getToken({ template: 'matbu' });
+        if (!token) {
+          throw new Error('No session token available');
+        }
         setAuthToken(token);
       } catch (error) {
         console.error('Error getting auth token:', error);
@@ -109,7 +113,8 @@ export default function GenerateEbookPage() {
       // First, get the book data and payload
       const headers = {
         'Authorization': `Bearer ${authToken}`,
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'X-Clerk-Token': authToken // Some Clerk endpoints might need this
       };
       
       console.log('Fetching book data and payload...');
