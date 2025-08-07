@@ -98,19 +98,43 @@ export async function GET(
     if (authHeader?.startsWith('Bearer ')) {
       const token = authHeader.split(' ')[1];
       
+      console.log('🔑 JWT Token received, starting verification...');
+      console.log('Token:', token.substring(0, 20) + '...');
+      
       try {
         // First try to verify as a JWT token
         const decoded = await verifyToken(token);
         if (decoded) {
+          console.log('✅ JWT Token verified successfully:', {
+            userId: decoded.userId,
+            issuer: decoded.iss,
+            audience: decoded.aud,
+            expiresAt: new Date(decoded.exp * 1000).toISOString(),
+            isExpired: Date.now() >= decoded.exp * 1000
+          });
+          
+          if (decoded.aud !== 'https://api.clerko.com' || decoded.iss !== 'clerk.clerko.v1') {
+            console.error('❌ JWT validation failed: Invalid issuer or audience', {
+              expected: { aud: 'https://api.clerko.com', iss: 'clerk.clerko.v1' },
+              received: { aud: decoded.aud, iss: decoded.iss }
+            });
+            throw new Error('Invalid token issuer or audience');
+          }
+          
           userId = decoded.userId;
           isServiceAccount = true; // Mark as service account for authorization
+        } else {
+          console.error('❌ JWT verification returned null');
         }
       } catch (error) {
-        console.error('JWT verification failed:', error);
+        console.error('❌ JWT verification failed:', error instanceof Error ? error.message : 'Unknown error');
         // If JWT verification fails, try Clerk authentication
         const user = await currentUser();
         if (user) {
+          console.log('🔑 Falling back to Clerk authentication');
           userId = user.id;
+        } else {
+          console.error('❌ No valid authentication method found');
         }
       }
     } else {

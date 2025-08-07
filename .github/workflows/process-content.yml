@@ -62,24 +62,43 @@ jobs:
         id: generate-token
         env:
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
-          JWT_ISSUER: 'clerk.clerko.v1'
-          JWT_AUDIENCE: 'https://api.clerko.com'
+          GITHUB_WORKFLOW: ${{ github.workflow }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
         run: |
-          echo "🔑 Generating JWT token with the following settings:"
-          echo "- Issuer: $JWT_ISSUER"
-          echo "- Audience: $JWT_AUDIENCE"
-          echo "- Secret: ${JWT_SECRET:0:5}...${JWT_SECRET: -5}"
-          
+          # Install required tools
+          echo "🔧 Installing required tools..."
           npm install jsonwebtoken
+          
+          # Generate JWT token
+          echo "🔑 Generating JWT token..."
           node scripts/generate-jwt.js
           
+          # Read the generated token
+          if [ ! -f "jwt-token.txt" ]; then
+            echo "::error::❌ JWT token file not found"
+            exit 1
+          fi
+          
           JWT_TOKEN=$(cat jwt-token.txt)
+          
+          # Set environment variables for subsequent steps
           echo "JWT_TOKEN=$JWT_TOKEN" >> $GITHUB_ENV
           echo "JWT_HEADER=Bearer $JWT_TOKEN" >> $GITHUB_ENV
           
-          # Debug: Decode the token to verify its contents
-          echo "🔍 Decoded JWT payload:"
-          echo $JWT_TOKEN | cut -d'.' -f2 | base64 -d 2>/dev/null | jq . || echo "Failed to decode JWT"
+          # Debug: Verify the token structure
+          echo "\n🔍 Token verification:"
+          echo "- Token length: ${#JWT_TOKEN} characters"
+          echo "- Token prefix: ${JWT_TOKEN:0:20}..."
+          
+          # Decode and display token header and payload (for debugging)
+          if ! command -v jq &> /dev/null; then
+            echo "::warning::jq not installed, skipping token inspection"
+          else
+            echo "\n📋 Token contents:"
+            echo $JWT_TOKEN | cut -d'.' -f1 | base64 -d 2>/dev/null | jq '.' || echo "Failed to decode header"
+            echo "..."
+            echo $JWT_TOKEN | cut -d'.' -f2 | base64 -d 2>/dev/null | jq '.' || echo "Failed to decode payload"
+          fi
 
       - name: Fetch Book Payload
         id: fetch-payload
