@@ -12,6 +12,8 @@ on:
         required: false
         default: 'epub'
         type: string
+  push:
+    branches: [main]
 
 env:
   NODE_ENV: production
@@ -19,6 +21,7 @@ env:
   JWT_ISSUER: ${{ vars.JWT_ISSUER || 'clerk.matbu.vercel.app' }}
   JWT_AUDIENCE: ${{ vars.JWT_AUDIENCE || 'clerk' }}
   BASE_URL: ${{ vars.NEXT_PUBLIC_APP_URL || 'https://matbu.vercel.app' }}
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
   build-book:
