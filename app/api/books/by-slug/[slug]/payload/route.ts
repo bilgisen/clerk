@@ -103,47 +103,32 @@ export async function GET(
     // Get the slug from params
     const { slug } = await Promise.resolve(params);
     
-    // Get headers and extract the authorization token
-    const headersList = await headers();
-    const authHeader = headersList.get('authorization') || '';
-    let authToken = '';
-    
     // Get user ID from Clerk session
     let userId: string | null = null;
     
     try {
-      // First try to get the current user from Clerk
+      // Get the current user from Clerk
       const user = await currentUser();
-      if (user) {
-        userId = user.id;
-      } else if (authHeader?.startsWith('Bearer ')) {
-        // Fallback to token verification if no user session
-        authToken = authHeader.split(' ')[1];
-        if (authToken) {
-          try {
-            // This is a Clerk session token, not a JWT
-            const session = await auth();
-            if (session?.userId) {
-              userId = session.userId;
-            }
-          } catch (error) {
-            console.error('Session verification failed:', error);
-          }
-        }
-      }
-      
-      if (!userId) {
+      if (!user) {
         console.error('No authenticated user found');
         return NextResponse.json(
           { error: 'Unauthorized - Please sign in to access this resource' },
           { status: 401 }
         );
       }
+      
+      userId = user.id;
+      console.log('Authenticated user:', { userId, email: user.emailAddresses[0]?.emailAddress });
+      
     } catch (error) {
       console.error('Authentication error:', error);
       return NextResponse.json(
-        { error: 'Authentication failed', details: error instanceof Error ? error.message : 'Unknown error' },
-        { status: 500 }
+        { 
+          error: 'Authentication failed', 
+          details: error instanceof Error ? error.message : 'Unknown error',
+          stack: process.env.NODE_ENV === 'development' ? (error as Error).stack : undefined
+        },
+        { status: 401 }
       );
     }
 

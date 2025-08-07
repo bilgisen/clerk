@@ -21,8 +21,8 @@ export default function GenerateEbookPage() {
   useEffect(() => {
     const fetchToken = async () => {
       try {
-        // Get the session token with template name if needed
-        const token = await getToken({ template: 'matbu' });
+        // Get the session token
+        const token = await getToken();
         if (!token) {
           throw new Error('No session token available');
         }
@@ -111,16 +111,25 @@ export default function GenerateEbookPage() {
     
     try {
       // First, get the book data and payload
-      const headers = {
-        'Authorization': `Bearer ${authToken}`,
+      const headers = new Headers({
         'Content-Type': 'application/json',
-        'X-Clerk-Token': authToken // Some Clerk endpoints might need this
-      };
+      });
+      
+      // Add the auth token if available
+      if (authToken) {
+        headers.append('Authorization', `Bearer ${authToken}`);
+      }
       
       console.log('Fetching book data and payload...');
       const [bookResponse, payloadResponse] = await Promise.all([
-        fetch(`/api/books/by-slug/${slug}`, { headers }),
-        fetch(`/api/books/by-slug/${slug}/payload`, { headers })
+        fetch(`/api/books/by-slug/${slug}`, { 
+          headers,
+          credentials: 'include' // Include cookies for session
+        }),
+        fetch(`/api/books/by-slug/${slug}/payload`, { 
+          headers,
+          credentials: 'include' // Include cookies for session
+        })
       ]);
       
       if (!bookResponse.ok) {
