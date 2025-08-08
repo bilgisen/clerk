@@ -53,8 +53,13 @@ jobs:
 
       - name: Install dependencies
         run: |
+          # Ensure we're using the correct Node.js version
+          node --version
+          npm --version
+          
+          # Install dependencies
           npm install --legacy-peer-deps
-          npm install jose
+          npm install jose@^4.14.0
 
       - name: Install system tools
         run: |
@@ -103,12 +108,15 @@ jobs:
         timeout-minutes: 5
         env:
           PRIVATE_KEY_B64: ${{ secrets.PRIVATE_KEY_B64 }}
-          JWT_ISSUER: 'clerk.clerko.v1'  # Hardcoded to match API expectations
-          JWT_AUDIENCE: 'https://api.clerko.com'  # Hardcoded to match API expectations
+          JWT_ISSUER: clerk.clerko.v1
+          JWT_AUDIENCE: https://api.clerko.com
           CLERK_KEY_ID: ${{ env.CLERK_KEY_ID }}
-          JWT_TEMPLATE: 'matbuapp'  # Hardcoded template name
+          JWT_TEMPLATE: matbuapp
           NEXT_PUBLIC_APP_URL: ${{ env.NEXT_PUBLIC_APP_URL }}
           NODE_OPTIONS: --no-warnings
+          # Ensure we're using the correct Node.js version
+          NVM_DIR: /opt/hostedtoolcache/nvm/current/versions/node/v20.17.1/
+          PATH: /opt/hostedtoolcache/node/20.17.1/x64/bin:${{ env.PATH }}
         run: |
           set -e
           echo "🔑 Generating JWT token..."
