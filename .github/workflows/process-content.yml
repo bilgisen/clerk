@@ -101,19 +101,33 @@ jobs:
         id: generate-token
         timeout-minutes: 5
         env:
-          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          PRIVATE_KEY_B64: ${{ secrets.PRIVATE_KEY_B64 }}
           JWT_ISSUER: ${{ env.JWT_ISSUER }}
           JWT_AUDIENCE: ${{ env.JWT_AUDIENCE }}
+          CLERK_KEY_ID: ${{ env.CLERK_KEY_ID }}
           NODE_OPTIONS: --no-warnings
         run: |
           set -e
           echo "🔑 Generating JWT token..."
           
+          # Create private key file from base64
+          echo "$PRIVATE_KEY_B64" | base64 -d > private.pem
+          chmod 600 private.pem
+          
+          # Verify private key was created
+          if [ ! -f "private.pem" ]; then
+            echo "::error::Failed to create private key file"
+            exit 1
+          fi
+          
+          # Install required dependencies
+          npm install jose@^4.14.0
+          
           # Make sure the script is executable
           chmod +x scripts/generate-jwt.mjs
           
-          # Generate the token
-          if ! JWT_OUTPUT=$(node --experimental-modules scripts/generate-jwt.mjs 2>&1); then
+          # Generate the token with the private key
+          if ! JWT_OUTPUT=$(PRIVATE_KEY_PATH=./private.pem node --experimental-modules scripts/generate-jwt.mjs 2>&1); then
             echo "::error::Failed to generate JWT token"
             echo "$JWT_OUTPUT"
             exit 1
@@ -135,6 +149,9 @@ jobs:
             echo "::error::Generated JWT token is empty"
             exit 1
           fi
+          
+          # Clean up the private key
+          rm -f private.pem
           
           echo "✅ JWT token generated successfully"
 
