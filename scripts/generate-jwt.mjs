@@ -1,5 +1,6 @@
 import { webcrypto } from 'node:crypto';
-import { writeFile, writeFileSync, readFileSync, existsSync } from 'fs';
+import { writeFileSync, readFileSync, existsSync } from 'fs';
+import { writeFile } from 'fs/promises';
 import { SignJWT, importPKCS8 } from 'jose';
 import { join } from 'path';
 
