@@ -21,9 +21,9 @@ on:
 env:
   NEXT_PUBLIC_APP_URL: ${{ vars.NEXT_PUBLIC_APP_URL || 'https://matbu.vercel.app' }}
   NODE_ENV: production
-  # Clerk JWT configuration
-  JWT_ISSUER: 'https://sunny-dogfish-14.clerk.accounts.dev'
-  JWT_AUDIENCE: 'https://sunny-dogfish-14.clerk.accounts.dev'
+  # Clerk JWT configuration - Production values
+  JWT_ISSUER: 'clerk.clerko.v1'
+  JWT_AUDIENCE: 'https://api.clerko.com'
   # Clerk template name and key ID
   CLERK_KEY_ID: 'jtmp_310Eh03rhbpy3wXWHcIaNkwwTpj'
   JWT_TEMPLATE: 'matbuapp'
@@ -137,32 +137,25 @@ jobs:
           echo "JWT_TEMPLATE: $JWT_TEMPLATE"
           
           # Generate the token with the private key and required env vars
-          if ! JWT_OUTPUT=$(PRIVATE_KEY_PATH=./private.pem \
+          if ! JWT_TOKEN=$(PRIVATE_KEY_PATH=./private.pem \
             JWT_ISSUER="$JWT_ISSUER" \
             JWT_AUDIENCE="$JWT_AUDIENCE" \
             CLERK_KEY_ID="$CLERK_KEY_ID" \
             JWT_TEMPLATE="$JWT_TEMPLATE" \
-            node --experimental-modules scripts/generate-jwt.mjs 2>&1); then
+            node scripts/generate-jwt.mjs 2>&1); then
             echo "::error::Failed to generate JWT token"
-            echo "$JWT_OUTPUT"
             exit 1
           fi
-          
-          # Verify the token file was created
-          if [ ! -f "jwt-token.txt" ]; then
-            echo "::error::JWT token file not found after generation"
-            exit 1
-          fi
-          
-          # Set the token in environment variables
-          JWT_TOKEN=$(cat jwt-token.txt)
-          echo "JWT_TOKEN=$JWT_TOKEN" | tee -a $GITHUB_ENV
           
           # Verify the token is not empty
           if [ -z "$JWT_TOKEN" ]; then
             echo "::error::Generated JWT token is empty"
             exit 1
           fi
+          
+          # Set the JWT token and header in environment variables
+          echo "JWT_TOKEN=$JWT_TOKEN" >> $GITHUB_ENV
+          echo "JWT_HEADER=Bearer $JWT_TOKEN" >> $GITHUB_ENV
           
           # Debug: Print token info
           echo "=== JWT Token Info ==="
@@ -202,7 +195,8 @@ jobs:
         env:
           CONTENT_ID: ${{ github.event.inputs.content_id }}
           BASE_URL: ${{ env.NEXT_PUBLIC_APP_URL }}
-          JWT_TOKEN: ${{ env.JWT_TOKEN }}  # Only pass the raw token
+          JWT_HEADER: ${{ env.JWT_HEADER }}
+          JWT_TOKEN: ${{ env.JWT_TOKEN }}
           DOWNLOAD_TIMEOUT: ${{ env.DOWNLOAD_TIMEOUT }}
           # Add verbose logging
           CURL_VERBOSE: "1"
