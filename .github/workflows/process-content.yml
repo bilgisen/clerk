@@ -62,31 +62,61 @@ jobs:
             wget \
             parallel
 
-      - name: Decode private.pem
+      - name: Decode and verify private key
+        id: setup-key
         run: |
-          echo "Creating private.pem from base64 secret..."
+          echo "🔑 Decoding private key..."
           echo "${{ secrets.PRIVATE_KEY_B64 }}" | base64 -d > private.pem
           chmod 600 private.pem
-          echo "Private key created with permissions 600"
-          ls -la private.pem
+          
+          # Verify key format
+          if ! head -1 private.pem | grep -q "BEGIN PRIVATE KEY"; then
+            echo "::error::❌ Invalid private key format. Must be PKCS#8 (starts with BEGIN PRIVATE KEY)"
+            exit 1
+          fi
+          
+          echo "✅ Private key verified and saved"
+          echo "PRIVATE_KEY_PATH=$(pwd)/private.pem" >> $GITHUB_ENV
 
-      - name: Generate JWT Token with matbuapp template
+      - name: Generate JWT Token
         id: generate-token
         env:
-          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          PRIVATE_KEY_PATH: ${{ env.PRIVATE_KEY_PATH }}
           JWT_ISSUER: ${{ env.JWT_ISSUER }}
           JWT_AUDIENCE: ${{ env.JWT_AUDIENCE }}
+          CLERK_KEY_ID: ${{ env.CLERK_KEY_ID }}
+          USER_ID: github-actions
         run: |
           echo "🔑 Generating JWT token..."
-          node --experimental-modules scripts/generate-jwt.mjs
+          echo "- Using key: $PRIVATE_KEY_PATH"
+          echo "- Issuer: $JWT_ISSUER"
+          echo "- Audience: $JWT_AUDIENCE"
+          echo "- Key ID: $CLERK_KEY_ID"
+          
+          # Generate the token
+          node scripts/generate-jwt.mjs
 
           if [ ! -f "jwt-token.txt" ]; then
-            echo "::error::JWT token file not found"
+            echo "::error::❌ JWT token file not found"
             exit 1
           fi
 
           JWT_TOKEN=$(cat jwt-token.txt)
+          echo "✅ Token generated successfully"
+          
+          # Set outputs for subsequent steps
           echo "JWT_TOKEN=$JWT_TOKEN" >> $GITHUB_ENV
           echo "JWT_HEADER=Bearer $JWT_TOKEN" >> $GITHUB_ENV
+          
+          # Debug: Show token info
+          echo "\n🔍 Token info:"
+          echo "- Length: ${#JWT_TOKEN} characters"
+          echo "- First 50 chars: ${JWT_TOKEN:0:50}..."
+          
+          # Try to decode and show token payload if jq is available
+          if command -v jq &> /dev/null; then
+            echo -n "- Payload: "
+            echo "$JWT_TOKEN" | cut -d'.' -f2 | base64 -d 2>/dev/null | jq -c '{iss, aud, sub, iat, exp}' || echo "Failed to decode payload"
+          fi
 
       # Diğer adımlar burada devam eder...

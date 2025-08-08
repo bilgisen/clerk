@@ -1,43 +1,125 @@
 #!/bin/bash
 set -e  # Exit on error
 
-# Debug: Print all environment variables (filtered for sensitive data)
-echo "🔧 Environment variables:"
-printenv | sort | grep -v -E 'SECRET|TOKEN|PASSWORD|KEY' | while read -r line; do
-  if [[ $line == JWT_* || $line == GITHUB_* || $line == NODE_* ]]; then
-    key="${line%%=*}"
-    value="${line#*=}"
-    # Truncate long values
-    if [ ${#value} -gt 50 ]; then
-      value="${value:0:20}...${value: -10}"
+# ANSI color codes for better output
+readonly RED='\033[0;31m'
+readonly GREEN='\033[0;32m'
+readonly YELLOW='\033[1;33m'
+readonly NC='\033[0m' # No Color
+
+# Logging functions
+log_info() {
+  echo -e "${GREEN}[INFO]${NC} $1"
+}
+
+log_warning() {
+  echo -e "${YELLOW}[WARN]${NC} $1"
+}
+
+log_error() {
+  echo -e "${RED}[ERROR]${NC} $1" >&2
+}
+
+# Debug function to print environment variables safely
+debug_print_env() {
+  log_info "🔧 Environment variables:"
+  printenv | sort | grep -v -E 'SECRET|TOKEN|PASSWORD|KEY' | while read -r line; do
+    if [[ $line == JWT_* || $line == GITHUB_* || $line == NODE_* || $line == CONTENT_* || $line == BASE_URL* ]]; then
+      key="${line%%=*}"
+      value="${line#*=}"
+      # Truncate long values
+      if [ ${#value} -gt 50 ]; then
+        value="${value:0:20}...${value: -10}"
+      fi
+      echo "- $key: $value"
     fi
-    echo "- $key: $value"
+  done
+}
+
+# Validate JWT token structure
+validate_jwt() {
+  local token=$1
+  local parts
+  IFS='.' read -ra parts <<< "$token"
+  
+  if [ ${#parts[@]} -ne 3 ]; then
+    log_error "Invalid JWT token format: expected 3 parts, got ${#parts[@]}"
+    return 1
   fi
-done
+  
+  # Verify header
+  if ! echo "${parts[0]}" | base64 -d 2>/dev/null | jq -e '.typ == "JWT"' >/dev/null; then
+    log_error "Invalid JWT header"
+    return 1
+  fi
+  
+  # Verify payload
+  if ! echo "${parts[1]}" | base64 -d 2>/dev/null | jq -e '.exp' >/dev/null; then
+    log_error "Invalid JWT payload"
+    return 1
+  fi
+  
+  log_info "JWT token structure is valid"
+  return 0
+}
+
+# Check required commands
+check_commands() {
+  local commands=("curl" "jq" "base64")
+  local missing=()
+  
+  for cmd in "${commands[@]}"; do
+    if ! command -v "$cmd" &> /dev/null; then
+      missing+=("$cmd")
+    fi
+  done
+  
+  if [ ${#missing[@]} -gt 0 ]; then
+    log_error "Missing required commands: ${missing[*]}"
+    exit 1
+  fi
+}
+
+# Main execution starts here
+check_commands
+debug_print_env
 
 # Required environment variables
 REQUIRED_VARS=("CONTENT_ID" "BASE_URL" "JWT_HEADER" "JWT_TOKEN")
 for var in "${REQUIRED_VARS[@]}"; do
   if [ -z "${!var}" ]; then
-    echo "::error::❌ Missing required environment variable: $var"
+    log_error "Missing required environment variable: $var"
     exit 1
   fi
 done
 
+# Extract JWT token from header if needed
+if [[ "$JWT_HEADER" == Bearer* ]]; then
+  JWT_TOKEN="${JWT_HEADER#Bearer }"
+fi
+
+# Validate JWT token
+if ! validate_jwt "$JWT_TOKEN"; then
+  log_error "JWT token validation failed"
+  exit 1
+fi
+
 # Create necessary directories
+log_info "Creating output directories..."
 mkdir -p ./book-content/chapters
 
 # Set the payload URL
 PAYLOAD_URL="$BASE_URL/api/books/by-id/$CONTENT_ID/payload"
-echo "\n🌐 Attempting to fetch payload from: $PAYLOAD_URL"
+log_info "🌐 Attempting to fetch payload from: $PAYLOAD_URL"
 
 # Debug: Print the JWT token header and payload
-if command -v jq &> /dev/null; then
-  echo "\n🔑 JWT Token Analysis:"
-  echo "$JWT_TOKEN" | cut -d'.' -f1 | base64 -d 2>/dev/null | jq '.' || echo "Failed to decode JWT header"
-  echo "..."
-  echo "$JWT_TOKEN" | cut -d'.' -f2 | base64 -d 2>/dev/null | jq '.' || echo "Failed to decode JWT payload"
-fi
+log_info "🔑 JWT Token Analysis:"
+{
+  echo "Header:"
+  echo "$JWT_TOKEN" | cut -d'.' -f1 | base64 -d 2>/dev/null | jq . || echo "Failed to decode JWT header"
+  echo "\nPayload:"
+  echo "$JWT_TOKEN" | cut -d'.' -f2 | base64 -d 2>/dev/null | jq . || echo "Failed to decode JWT payload"
+} | tee ./jwt-debug.json
 
 # Debug: Print environment info
 
