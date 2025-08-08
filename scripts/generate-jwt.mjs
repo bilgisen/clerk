@@ -1,10 +1,11 @@
 import { webcrypto } from 'node:crypto';
+import { writeFile, writeFileSync, readFileSync, existsSync } from 'fs';
+import { SignJWT, importPKCS8 } from 'jose';
+import { join } from 'path';
+
 if (!globalThis.crypto) {
   globalThis.crypto = webcrypto;
 }
-
-import { writeFileSync, readFileSync, existsSync } from 'fs';
-import { SignJWT, importPKCS8 } from 'jose';
 
 // Configuration
 const CONFIG = {
@@ -232,17 +233,23 @@ async function generateToken() {
   }
 }
 
+
+
 // Run the generator
 generateToken()
-  .then(token => {
-    // Write the token to a file instead of outputting it
-    const fs = require('fs');
-    const tokenFile = process.env.GITHUB_WORKSPACE ? 
-      `${process.env.GITHUB_WORKSPACE}/jwt-token.txt` : 'jwt-token.txt';
-    
-    fs.writeFileSync(tokenFile, token);
-    console.log(`✅ JWT token written to ${tokenFile}`);
-    process.exit(0);
+  .then(async (token) => {
+    try {
+      // Write the token to a file instead of outputting it
+      const tokenFile = process.env.GITHUB_WORKSPACE ? 
+        join(process.env.GITHUB_WORKSPACE, 'jwt-token.txt') : 'jwt-token.txt';
+      
+      await writeFile(tokenFile, token);
+      console.log(`✅ JWT token written to ${tokenFile}`);
+      process.exit(0);
+    } catch (error) {
+      console.error('❌ Error writing token to file:', error.message);
+      process.exit(1);
+    }
   })
   .catch(error => {
     console.error('❌ Error generating token:', error.message);
