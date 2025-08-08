@@ -1,7 +1,7 @@
 // scripts/generate-jwt.mjs
 import { writeFileSync } from 'fs';
-import { SignJWT } from 'jose';
-import { createSecretKey } from 'crypto';
+import { SignJWT } from 'jose/dist/node/jwt/sign.js';
+import { createSecretKey } from 'node:crypto';
 
 // Required environment variables
 const JWT_SECRET = process.env.JWT_SECRET || process.env.CLERK_SECRET_KEY;
