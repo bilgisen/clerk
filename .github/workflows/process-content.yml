@@ -218,19 +218,25 @@ jobs:
           fi
           
           # Extract the token (should be the last line of output)
-          JWT_TOKEN=$(echo "$JWT_OUTPUT" | tail -n 1)
+          JWT_TOKEN=$(echo "$JWT_OUTPUT" | grep -E '^eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+$' | tail -n 1)
+          
+          # If we didn't find a token in the expected format, try to extract it from the last line
+          if [ -z "$JWT_TOKEN" ]; then
+            JWT_TOKEN=$(echo "$JWT_OUTPUT" | tail -n 1 | tr -d '[:space:]')
+          fi
           
           # Verify we got a token
           if [ -z "$JWT_TOKEN" ] || [ $(echo "$JWT_TOKEN" | wc -c) -lt 100 ]; then
             echo "::error::Invalid or empty JWT token received"
-            echo "Token: '$JWT_TOKEN'"
+            echo "Last 5 lines of output:"
+            echo "$JWT_OUTPUT" | tail -n 5
             exit 1
           fi
           
-          # Verify the token is not empty and looks like a JWT
-          if [ -z "$JWT_TOKEN" ] || [ $(echo "$JWT_TOKEN" | grep -o '\\.' | wc -l) -lt 2 ]; then
-            echo "::error::Generated JWT token is invalid or empty"
-            echo "Token output: $JWT_TOKEN"
+          # Verify the token looks like a JWT (has two dots)
+          if [ $(echo "$JWT_TOKEN" | grep -o '\\.' | wc -l) -lt 2 ]; then
+            echo "::error::Generated JWT token is invalid (missing parts)"
+            echo "Token: $JWT_TOKEN"
             exit 1
           fi
           

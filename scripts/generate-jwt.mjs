@@ -234,5 +234,12 @@ async function generateToken() {
 
 // Run the generator
 generateToken()
-  .then(() => process.exit(0))
-  .catch(() => process.exit(1));
+  .then(token => {
+    // Only output the token on success (this will be the last line of output)
+    console.log(token);
+    process.exit(0);
+  })
+  .catch(error => {
+    console.error('❌ Error generating token:', error.message);
+    process.exit(1);
+  });
