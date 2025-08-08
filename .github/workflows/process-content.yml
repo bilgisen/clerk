@@ -21,9 +21,9 @@ on:
 env:
   NEXT_PUBLIC_APP_URL: ${{ vars.NEXT_PUBLIC_APP_URL || 'https://matbu.vercel.app' }}
   NODE_ENV: production
-  # Clerk JWT configuration - Production values
-  JWT_ISSUER: 'clerk.clerko.v1'
-  JWT_AUDIENCE: 'https://api.clerko.com'
+  # Clerk JWT configuration - Match Clerk's configuration
+  JWT_ISSUER: 'https://sunny-dogfish-14.clerk.accounts.dev'
+  JWT_AUDIENCE: 'https://sunny-dogfish-14.clerk.accounts.dev'
   # Clerk template name and key ID
   CLERK_KEY_ID: 'jtmp_310Eh03rhbpy3wXWHcIaNkwwTpj'
   JWT_TEMPLATE: 'matbuapp'
@@ -128,8 +128,8 @@ jobs:
         timeout-minutes: 5
         env:
           PRIVATE_KEY_B64: ${{ secrets.PRIVATE_KEY_B64 }}
-          JWT_ISSUER: clerk.clerko.v1
-          JWT_AUDIENCE: https://api.clerko.com
+          JWT_ISSUER: https://sunny-dogfish-14.clerk.accounts.dev
+          JWT_AUDIENCE: https://sunny-dogfish-14.clerk.accounts.dev
           CLERK_KEY_ID: ${{ env.CLERK_KEY_ID }}
           JWT_TEMPLATE: matbuapp
           NEXT_PUBLIC_APP_URL: ${{ env.NEXT_PUBLIC_APP_URL }}
