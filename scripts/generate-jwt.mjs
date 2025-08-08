@@ -67,9 +67,16 @@ async function generateToken() {
     const token = await new SignJWT({
       sub: CONFIG.USER_ID,
       userId: CONFIG.USER_ID,
+      // Include required Clerk claims
+      azp: 'https://matbu.vercel.app',
+      template: process.env.JWT_TEMPLATE,
       // Add additional claims as needed
       role: 'service-account',
-      source: 'github-actions'
+      source: 'github-actions',
+      // Include standard JWT claims
+      iat: Math.floor(Date.now() / 1000),
+      // Add a unique JWT ID
+      jti: `github-${Date.now()}`
     })
       .setProtectedHeader({
         alg: 'RS256',

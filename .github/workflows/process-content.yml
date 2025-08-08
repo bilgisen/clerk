@@ -21,11 +21,12 @@ on:
 env:
   NEXT_PUBLIC_APP_URL: ${{ vars.NEXT_PUBLIC_APP_URL || 'https://matbu.vercel.app' }}
   NODE_ENV: production
-  # JWT configuration must match the values expected by the application
-  JWT_ISSUER: 'clerk.clerko.v1'
-  JWT_AUDIENCE: 'https://api.clerko.com'
-  # Use the correct key ID that matches the server's JWKS
-  CLERK_KEY_ID: 'ins_2yhHfvuC7eV6d8wuj44hPANY5Kq'
+  # Clerk JWT configuration
+  JWT_ISSUER: 'https://sunny-dogfish-14.clerk.accounts.dev'
+  JWT_AUDIENCE: 'https://sunny-dogfish-14.clerk.accounts.dev'
+  # Clerk template name and key ID
+  CLERK_KEY_ID: 'jtmp_310Eh03rhbpy3wXWHcIaNkwwTpj'
+  JWT_TEMPLATE: 'matbuapp'
   JWT_SECRET: ${{ secrets.JWT_SECRET }}
   PRIVATE_KEY_B64: ${{ secrets.PRIVATE_KEY_B64 }}
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -105,6 +106,8 @@ jobs:
           JWT_ISSUER: ${{ env.JWT_ISSUER }}
           JWT_AUDIENCE: ${{ env.JWT_AUDIENCE }}
           CLERK_KEY_ID: ${{ env.CLERK_KEY_ID }}
+          JWT_TEMPLATE: ${{ env.JWT_TEMPLATE }}
+          NEXT_PUBLIC_APP_URL: ${{ env.NEXT_PUBLIC_APP_URL }}
           NODE_OPTIONS: --no-warnings
         run: |
           set -e
@@ -126,8 +129,13 @@ jobs:
           # Make sure the script is executable
           chmod +x scripts/generate-jwt.mjs
           
-          # Generate the token with the private key
-          if ! JWT_OUTPUT=$(PRIVATE_KEY_PATH=./private.pem node --experimental-modules scripts/generate-jwt.mjs 2>&1); then
+          # Generate the token with the private key and required env vars
+          if ! JWT_OUTPUT=$(PRIVATE_KEY_PATH=./private.pem \
+            JWT_ISSUER="$JWT_ISSUER" \
+            JWT_AUDIENCE="$JWT_AUDIENCE" \
+            CLERK_KEY_ID="$CLERK_KEY_ID" \
+            JWT_TEMPLATE="$JWT_TEMPLATE" \
+            node --experimental-modules scripts/generate-jwt.mjs 2>&1); then
             echo "::error::Failed to generate JWT token"
             echo "$JWT_OUTPUT"
             exit 1
