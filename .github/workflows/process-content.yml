@@ -1,4 +1,4 @@
-name: Build and Publish EPUB
+name: Process and Publish E-Book
 
 on:
   workflow_dispatch:
@@ -29,6 +29,9 @@ env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   GITHUB_REPO_OWNER: bilgisen
   GITHUB_REPO_NAME: clerk
+  # Timeouts in seconds
+  DOWNLOAD_TIMEOUT: 300
+  BUILD_TIMEOUT: 600
 
 jobs:
   build-epub:
@@ -52,71 +55,252 @@ jobs:
 
       - name: Install system tools
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          echo "🔄 Updating package lists..."
+          sudo apt-get update -qq
+          
+          echo "📦 Installing required tools..."
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             pandoc \
             texlive-xetex \
             texlive-fonts-recommended \
             texlive-latex-recommended \
             jq \
             wget \
-            parallel
+            parallel \
+            curl \
+            ca-certificates \
+            gnupg \
+            software-properties-common
+            
+          # Clean up to reduce image size
+          sudo apt-get clean
+          sudo rm -rf /var/lib/apt/lists/*
 
-      - name: Decode and verify private key
-        id: setup-key
+      - name: Set up security files
         run: |
-          echo "🔑 Decoding private key..."
-          echo "${{ secrets.PRIVATE_KEY_B64 }}" | base64 -d > private.pem
-          chmod 600 private.pem
+          echo "🔐 Setting up security files..."
+          # Create .env file for the application
+          echo "NEXT_PUBLIC_APP_URL=$NEXT_PUBLIC_APP_URL" > .env
+          echo "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY" >> .env
           
-          # Verify key format
-          if ! head -1 private.pem | grep -q "BEGIN PRIVATE KEY"; then
-            echo "::error::❌ Invalid private key format. Must be PKCS#8 (starts with BEGIN PRIVATE KEY)"
-            exit 1
+          # Decode private key if provided
+          if [ -n "$PRIVATE_KEY_B64" ]; then
+            echo "🔑 Decoding private key..."
+            echo "$PRIVATE_KEY_B64" | base64 --decode > private.pem
+            chmod 600 private.pem
+          else
+            echo "⚠️ No private key provided, some features may be limited"
           fi
           
-          echo "✅ Private key verified and saved"
-          echo "PRIVATE_KEY_PATH=$(pwd)/private.pem" >> $GITHUB_ENV
+          # Set secure permissions
+          chmod -R 700 .
 
       - name: Generate JWT Token
         id: generate-token
+        timeout-minutes: 5
         env:
-          PRIVATE_KEY_PATH: ${{ env.PRIVATE_KEY_PATH }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
           JWT_ISSUER: ${{ env.JWT_ISSUER }}
           JWT_AUDIENCE: ${{ env.JWT_AUDIENCE }}
-          CLERK_KEY_ID: ${{ env.CLERK_KEY_ID }}
-          USER_ID: github-actions
+          NODE_OPTIONS: --no-warnings
         run: |
+          set -e
           echo "🔑 Generating JWT token..."
-          echo "- Using key: $PRIVATE_KEY_PATH"
-          echo "- Issuer: $JWT_ISSUER"
-          echo "- Audience: $JWT_AUDIENCE"
-          echo "- Key ID: $CLERK_KEY_ID"
+          
+          # Make sure the script is executable
+          chmod +x scripts/generate-jwt.mjs
           
           # Generate the token
-          node scripts/generate-jwt.mjs
-
-          if [ ! -f "jwt-token.txt" ]; then
-            echo "::error::❌ JWT token file not found"
+          if ! JWT_OUTPUT=$(node --experimental-modules scripts/generate-jwt.mjs 2>&1); then
+            echo "::error::Failed to generate JWT token"
+            echo "$JWT_OUTPUT"
             exit 1
           fi
-
-          JWT_TOKEN=$(cat jwt-token.txt)
-          echo "✅ Token generated successfully"
           
-          # Set outputs for subsequent steps
-          echo "JWT_TOKEN=$JWT_TOKEN" >> $GITHUB_ENV
-          echo "JWT_HEADER=Bearer $JWT_TOKEN" >> $GITHUB_ENV
-          
-          # Debug: Show token info
-          echo "\n🔍 Token info:"
-          echo "- Length: ${#JWT_TOKEN} characters"
-          echo "- First 50 chars: ${JWT_TOKEN:0:50}..."
-          
-          # Try to decode and show token payload if jq is available
-          if command -v jq &> /dev/null; then
-            echo -n "- Payload: "
-            echo "$JWT_TOKEN" | cut -d'.' -f2 | base64 -d 2>/dev/null | jq -c '{iss, aud, sub, iat, exp}' || echo "Failed to decode payload"
+          # Verify the token file was created
+          if [ ! -f "jwt-token.txt" ]; then
+            echo "::error::JWT token file not found after generation"
+            exit 1
           fi
+          
+          # Set the token in environment variables
+          JWT_TOKEN=$(cat jwt-token.txt)
+          echo "JWT_TOKEN=$JWT_TOKEN" | tee -a $GITHUB_ENV
+          echo "JWT_HEADER=Bearer $JWT_TOKEN" | tee -a $GITHUB_ENV
+          
+          # Verify the token is not empty
+          if [ -z "$JWT_TOKEN" ]; then
+            echo "::error::Generated JWT token is empty"
+            exit 1
+          fi
+          
+          echo "✅ JWT token generated successfully"
 
-      # Diğer adımlar burada devam eder...
+      - name: Fetch Book Content
+        id: fetch-book
+        timeout-minutes: 30
+        env:
+          CONTENT_ID: ${{ github.event.inputs.content_id }}
+          BASE_URL: ${{ env.NEXT_PUBLIC_APP_URL }}
+          JWT_HEADER: ${{ env.JWT_HEADER }}
+          JWT_TOKEN: ${{ env.JWT_TOKEN }}
+          DOWNLOAD_TIMEOUT: ${{ env.DOWNLOAD_TIMEOUT }}
+        run: |
+          set -e
+          echo "📚 Starting book content fetch for ID: $CONTENT_ID"
+          
+          # Make the script executable
+          chmod +x ./scripts/fetch-book.sh
+          
+          # Execute the fetch script with timeout
+          if ! timeout $DOWNLOAD_TIMEOUT ./scripts/fetch-book.sh; then
+            echo "::error::❌ Book content fetch timed out after $DOWNLOAD_TIMEOUT seconds"
+            exit 1
+          fi
+          
+          echo "✅ Book content fetched successfully"
+          
+          # Extract metadata from the downloaded content
+          if [ -f "./book-content/payload.json" ]; then
+            echo "📋 Extracting metadata from payload..."
+            jq '{ 
+              title: .book.title, 
+              author: .book.author, 
+              language: .book.language,
+              generateToc: (.options.generate_toc // true),
+              tocDepth: (.options.toc_depth // 2),
+              includeImprint: (.options.include_imprint // true)
+            }' ./book-content/payload.json > ./book-metadata.json
+            
+            # Set output variables
+            echo "::set-output name=title::$(jq -r '.title // "Untitled"' ./book-metadata.json)"
+            echo "::set-output name=author::$(jq -r '.author // "Unknown"' ./book-metadata.json)"
+            echo "::set-output name=language::$(jq -r '.language // "tr"' ./book-metadata.json)
+            echo "::set-output name=generate_toc::$(jq -r '.generateToc // true' ./book-metadata.json)"
+            echo "::set-output name=toc_depth::$(jq -r '.tocDepth // 2' ./book-metadata.json)
+          else
+            echo "::warning::⚠️ No payload.json found, using default metadata"
+            echo "::set-output name=title::Untitled"
+            echo "::set-output name=author::Unknown"
+            echo "::set-output name=language::tr"
+            echo "::set-output name=generate_toc::true"
+            echo "::set-output name=toc_depth::2"
+          fi
+      
+      - name: Generate E-Book
+        id: generate-ebook
+        timeout-minutes: 30
+        env:
+          BUILD_TIMEOUT: ${{ env.BUILD_TIMEOUT }}
+        run: |
+          set -e
+          echo "📖 Starting e-book generation..."
+          
+          # Get metadata from previous step
+          TITLE="${{ steps.fetch-book.outputs.title }}"
+          AUTHOR="${{ steps.fetch-book.outputs.author }}"
+          LANGUAGE="${{ steps.fetch-book.outputs.language }}"
+          GENERATE_TOC="${{ steps.fetch-book.outputs.generate_toc }}"
+          TOC_DEPTH="${{ steps.fetch-book.outputs.toc_depth }}"
+          CONTENT_ID="${{ github.event.inputs.content_id }}"
+          
+          echo "📚 Book: $TITLE by $AUTHOR"
+          echo "🌐 Language: $LANGUAGE"
+          echo "📑 TOC: $GENERATE_TOC (Depth: $TOC_DEPTH)"
+          
+          # Prepare output directory
+          mkdir -p ./output
+          
+          # Build Pandoc command
+          PANDOC_CMD=(
+            "pandoc"
+            "--from=html"
+            "--to=epub3"
+            "--output=./output/${CONTENT_ID}.epub"
+            "--epub-chapter-level=1"
+            "--metadata=title:${TITLE}"
+            "--metadata=author:${AUTHOR}"
+            "--metadata=language:${LANGUAGE}"
+            "--metadata=identifier:${CONTENT_ID}"
+          )
+          
+          # Add TOC if enabled
+          if [ "$GENERATE_TOC" = "true" ]; then
+            PANDOC_CMD+=("--toc" "--toc-depth=${TOC_DEPTH}")
+          fi
+          
+          # Add cover image if exists
+          if [ -f "./book-content/cover.jpg" ]; then
+            PANDOC_CMD+=("--epub-cover-image=./book-content/cover.jpg")
+          fi
+          
+          # Add stylesheet if exists
+          if [ -f "./book-content/styles/epub.css" ]; then
+            PANDOC_CMD+=("--css=./book-content/styles/epub.css")
+          fi
+          
+          # Add all chapter files in order
+          while IFS= read -r -d $'\0' file; do
+            PANDOC_CMD+=("$file")
+          done < <(find ./book-content -type f -name 'chapter-*.xhtml' -print0 | sort -z -V)
+          
+          # Add imprint if exists
+          if [ -f "./book-content/imprint.xhtml" ]; then
+            PANDOC_CMD+=("./book-content/imprint.xhtml")
+          fi
+          
+          echo "🔄 Running Pandoc with ${#PANDOC_CMD[@]} arguments..."
+          
+          # Execute Pandoc with timeout
+          if ! timeout $BUILD_TIMEOUT "${PANDOC_CMD[@]}"; then
+            echo "::error::❌ E-book generation timed out after $BUILD_TIMEOUT seconds"
+            exit 1
+          fi
+          
+          # Verify output
+          if [ ! -f "./output/${CONTENT_ID}.epub" ]; then
+            echo "::error::❌ Failed to generate e-book: Output file not found"
+            exit 1
+          fi
+          
+          # Get file size
+          FILESIZE=$(stat -c "%s" "./output/${CONTENT_ID}.epub" 2>/dev/null || stat -f "%z" "./output/${CONTENT_ID}.epub")
+          echo "✅ E-book generated successfully: ${CONTENT_ID}.epub (${FILESIZE} bytes)"
+          echo "::set-output name=filename::${CONTENT_ID}.epub"
+          echo "::set-output name=filesize::${FILESIZE}"
+
+      - name: Upload E-Book Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: e-book-output
+          path: ./output/${{ github.event.inputs.content_id }}.epub
+          retention-days: 7
+          compression-level: 9
+          if-no-files-found: error
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Upload Debug Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-files
+          path: |
+            ./book-content/**/*
+            ./*.log
+            ./*.txt
+          retention-days: 1
+          compression-level: 6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Notify Completion
+        if: always()
+        run: |
+          if [ -f "./output/${{ github.event.inputs.content_id }}.epub" ]; then
+            echo "✅ E-book generation completed successfully"
+            echo "::notice title=Success::E-book generated successfully!"
+          else
+            echo "::error::❌ E-book generation failed"
+            exit 1
+          fi
