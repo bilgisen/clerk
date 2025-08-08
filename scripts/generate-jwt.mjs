@@ -5,13 +5,14 @@ if (!globalThis.crypto) {
 }
 
 import { writeFileSync } from 'fs';
-import { SignJWT } from 'jose';
+import { SignJWT, importPKCS8, importJWK } from 'jose';
 
 // Required environment variables
 const JWT_SECRET = process.env.JWT_SECRET || process.env.CLERK_SECRET_KEY;
 const JWT_ISSUER = process.env.JWT_ISSUER || 'clerk.clerko.v1';
 const JWT_AUDIENCE = process.env.JWT_AUDIENCE || 'https://api.clerko.com';
 const USER_ID = process.env.USER_ID || 'service-account';
+const CLERK_KEY_ID = process.env.CLERK_KEY_ID || 'ins_2yhHfvuC7eV6d8wuj44hPANY5Kq'; // From the error message
 
 if (!JWT_SECRET) {
   console.error('❌ Missing environment variable: JWT_SECRET or CLERK_SECRET_KEY');
@@ -23,14 +24,15 @@ async function generateToken() {
     const now = Math.floor(Date.now() / 1000);
     const tokenExpiry = 3600; // 1 hour
 
-    // Create a secret key from the JWT_SECRET
-    const secretKey = createSecretKey(
-      Buffer.from(JWT_SECRET, 'utf8')
+    // Create a JWK from the secret
+    const secretKey = await importPKCS8(
+      `-----BEGIN PRIVATE KEY-----\n${JWT_SECRET}\n-----END PRIVATE KEY-----`,
+      'RS256'
     );
 
     // Create the JWT token with required claims
     const token = await new SignJWT({
-      // Required claims
+      // Standard claims
       sub: USER_ID,
       iat: now,
       exp: now + tokenExpiry,
@@ -50,10 +52,17 @@ async function generateToken() {
         source: 'github-actions',
         workflow: process.env.GITHUB_WORKFLOW || 'unknown',
         run_id: process.env.GITHUB_RUN_ID || 'unknown',
-        service: 'github-actions'
+        service: 'github-actions',
+        // Add any additional metadata needed by your application
+        contentId: process.env.CONTENT_ID || 'unknown',
+        environment: process.env.NODE_ENV || 'production'
       }
     })
-      .setProtectedHeader({ alg: 'HS256' })
+      .setProtectedHeader({
+        alg: 'RS256',  // Use RS256 which is what Clerk expects
+        typ: 'JWT',
+        kid: CLERK_KEY_ID  // Add the key ID from Clerk
+      })
       .setIssuer(JWT_ISSUER)
       .setAudience(JWT_AUDIENCE)
       .setIssuedAt()
@@ -78,9 +87,22 @@ generateToken()
     console.log(`🔐 Token (first 20 chars): ${token.substring(0, 20)}...`);
     
     // Example curl command
-    const exampleUrl = 'http://localhost:3000/api/books/by-id/YOUR_BOOK_ID/payload';
+    const bookId = process.env.CONTENT_ID || 'YOUR_BOOK_ID';
+    const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
+    const exampleUrl = `${baseUrl}/api/books/by-id/${bookId}/payload`;
+    
     console.log('\nExample usage:');
-    console.log(`curl -v -H "Authorization: Bearer ${token}" "${exampleUrl}"`);
+    console.log(`export JWT_TOKEN="${token}"`);
+    console.log(`curl -v -H "Authorization: Bearer $JWT_TOKEN" "${exampleUrl}"`);
+    
+    // Also output the token payload for verification
+    try {
+      const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
+      console.log('\n🔍 Token payload:');
+      console.log(JSON.stringify(payload, null, 2));
+    } catch (e) {
+      console.warn('\n⚠️ Could not decode token payload:', e.message);
+    }
   })
   .catch(error => {
     console.error('❌ Error generating JWT token:', error);
