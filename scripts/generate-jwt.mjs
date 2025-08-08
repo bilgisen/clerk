@@ -46,27 +46,44 @@ function validateConfig() {
 async function loadPrivateKey() {
   try {
     console.log('🔑 Loading private key...');
-    const privateKeyB64 = readFileSync(CONFIG.PRIVATE_KEY_PATH, 'utf8');
     
-    // Decode the base64-encoded private key using Node.js Buffer
-    const privateKeyPem = Buffer.from(privateKeyB64, 'base64').toString('utf-8');
-    
-    // Debug: Verify the private key was decoded correctly
-    if (!privateKeyPem || !privateKeyPem.includes('PRIVATE KEY')) {
-      console.error('Error: Failed to decode private key or invalid format');
-      process.exit(1);
+    // First try to read from file if PRIVATE_KEY_PATH is set
+    if (existsSync(CONFIG.PRIVATE_KEY_PATH)) {
+      console.log(`Reading private key from file: ${CONFIG.PRIVATE_KEY_PATH}`);
+      const privateKeyContent = readFileSync(CONFIG.PRIVATE_KEY_PATH, 'utf8');
+      
+      // Check if the file content is base64 encoded
+      if (privateKeyContent.trim().match(/^[A-Za-z0-9+/=]+$/) && 
+          privateKeyContent.length > 100) { // Simple check for base64
+        console.log('Detected base64-encoded private key, decoding...');
+        const privateKeyPem = Buffer.from(privateKeyContent, 'base64').toString('utf-8');
+        if (privateKeyPem.includes('PRIVATE KEY')) {
+          console.log('✅ Private key decoded successfully from base64');
+          return privateKeyPem;
+        }
+      } else if (privateKeyContent.includes('PRIVATE KEY')) {
+        console.log('✅ Private key loaded directly from PEM file');
+        return privateKeyContent;
+      }
     }
     
-    // Validate key format
-    if (!privateKeyPem.includes('-----BEGIN PRIVATE KEY-----')) {
-      throw new Error('Invalid private key format. Must be PKCS#8 (PEM format)');
+    // If we get here, try to use PRIVATE_KEY_B64 from environment
+    if (process.env.PRIVATE_KEY_B64) {
+      console.log('Using PRIVATE_KEY_B64 from environment');
+      const privateKeyPem = Buffer.from(process.env.PRIVATE_KEY_B64, 'base64').toString('utf-8');
+      if (privateKeyPem.includes('PRIVATE KEY')) {
+        console.log('✅ Private key loaded successfully from PRIVATE_KEY_B64');
+        return privateKeyPem;
+      }
     }
     
-    console.log('✅ Private key loaded successfully');
-    return await importPKCS8(privateKeyPem, 'RS256');
+    throw new Error('No valid private key found. Please provide either a valid PRIVATE_KEY_PATH or PRIVATE_KEY_B64 environment variable');
   } catch (error) {
-    console.error('❌ Failed to load private key:', error.message);
-    throw error;
+    console.error('❌ Error loading private key:', error.message);
+    console.error('Please ensure you have provided a valid private key');
+    console.error('The key should be in PEM format (starting with -----BEGIN PRIVATE KEY-----)');
+    console.error('You can provide it either as a file or base64-encoded in PRIVATE_KEY_B64');
+    process.exit(1);
   }
 }
 
