@@ -217,19 +217,28 @@ jobs:
             exit 1
           fi
           
-          # Read the token from the file instead of the output
+          # Read the token from the file
+          # First try the current directory, then the workspace directory
           JWT_TOKEN_FILE="jwt-token.txt"
+          WORKSPACE_TOKEN_FILE="$GITHUB_WORKSPACE/jwt-token.txt"
           
-          # Check if the token file exists
-          if [ ! -f "$JWT_TOKEN_FILE" ]; then
-            echo "::error::JWT token file not found: $JWT_TOKEN_FILE"
+          # Check which token file exists
+          if [ -f "$JWT_TOKEN_FILE" ]; then
+            echo "Found JWT token in current directory"
+            JWT_TOKEN=$(cat "$JWT_TOKEN_FILE" | tr -d '[:space:]')
+          elif [ -f "$WORKSPACE_TOKEN_FILE" ]; then
+            echo "Found JWT token in workspace directory"
+            JWT_TOKEN=$(cat "$WORKSPACE_TOKEN_FILE" | tr -d '[:space:]')
+          else
+            echo "::error::JWT token file not found in current directory or workspace"
             echo "Current directory contents:"
             ls -la ./
+            if [ -n "$GITHUB_WORKSPACE" ]; then
+              echo "Workspace directory contents:"
+              ls -la "$GITHUB_WORKSPACE/"
+            fi
             exit 1
           fi
-          
-          # Read the token from the file
-          JWT_TOKEN=$(cat "$JWT_TOKEN_FILE" | tr -d '[:space:]')
           
           # Verify we got a token
           if [ -z "$JWT_TOKEN" ] || [ $(echo "$JWT_TOKEN" | wc -c) -lt 100 ]; then

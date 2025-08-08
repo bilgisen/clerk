@@ -240,12 +240,18 @@ async function generateToken() {
 generateToken()
   .then(async (token) => {
     try {
-      // Write the token to a file instead of outputting it
-      const tokenFile = process.env.GITHUB_WORKSPACE ? 
-        join(process.env.GITHUB_WORKSPACE, 'jwt-token.txt') : 'jwt-token.txt';
+      // Always write to jwt-token.txt in the current working directory
+      const tokenFile = 'jwt-token.txt';
       
       await writeFile(tokenFile, token);
       console.log(`✅ JWT token written to ${tokenFile}`);
+      
+      // For debugging: Also write to workspace directory if running in GitHub Actions
+      if (process.env.GITHUB_WORKSPACE) {
+        const workspaceTokenFile = join(process.env.GITHUB_WORKSPACE, tokenFile);
+        await writeFile(workspaceTokenFile, token);
+        console.log(`✅ JWT token also written to ${workspaceTokenFile}`);
+      }
       process.exit(0);
     } catch (error) {
       console.error('❌ Error writing token to file:', error.message);
