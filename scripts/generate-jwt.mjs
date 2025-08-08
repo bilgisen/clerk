@@ -124,14 +124,31 @@ async function generateToken() {
     writeFileSync(CONFIG.TOKEN_FILE, token);
     console.log(`\n✅ Token successfully generated and saved to ${CONFIG.TOKEN_FILE}`);
     
-    // Output token info
-    const tokenParts = token.split('.');
-    console.log('\n🔍 Token Info:');
-    console.log(`- Token length: ${token.length} characters`);
-    console.log(`- Header:    ${tokenParts[0]}...`);
-    console.log(`- Payload:   ${tokenParts[1]}...`);
-    console.log(`- Signature: ...${tokenParts[2].slice(-10)}`);
+    // Debug: Print token info
+    console.log('\n✅ JWT token generated successfully');
     
+    // Get the token parts for verification
+    const [header, payload] = token.split('.');
+    
+    // Decode and log the header and payload for debugging
+    try {
+      const decodedHeader = JSON.parse(Buffer.from(header, 'base64').toString('utf-8'));
+      const decodedPayload = JSON.parse(Buffer.from(payload, 'base64').toString('utf-8'));
+      
+      console.log('\n🔐 JWT Header:');
+      console.log(JSON.stringify(decodedHeader, null, 2));
+      
+      console.log('\n🔐 JWT Payload:');
+      console.log(JSON.stringify(decodedPayload, null, 2));
+      
+      console.log('\n🔐 JWT Token:');
+      console.log(token);
+    } catch (error) {
+      console.error('Error decoding token:', error.message);
+      console.log('\n🔐 JWT Token (raw):', token);
+    }
+    
+    // Return the token (this will be captured by the workflow)
     return token;
   } catch (error) {
     console.error('\n❌ Token generation failed:', error.message);

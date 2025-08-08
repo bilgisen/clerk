@@ -134,45 +134,37 @@ jobs:
           JWT_TEMPLATE: matbuapp
           NEXT_PUBLIC_APP_URL: ${{ env.NEXT_PUBLIC_APP_URL }}
           NODE_OPTIONS: --no-warnings
-          # Ensure we're using the correct Node.js version
-          NVM_DIR: /opt/hostedtoolcache/nvm/current/versions/node/v20.17.1/
-          PATH: /opt/hostedtoolcache/node/20.17.1/x64/bin:${{ env.PATH }}
         run: |
           set -e
           echo "🔑 Generating JWT token..."
           
-          # Create private key file from base64
-          echo "$PRIVATE_KEY_B64" | base64 -d > private.pem
-          chmod 600 private.pem
+          # Create a temporary directory for our files
+          TEMP_DIR=$(mktemp -d)
+          trap 'rm -rf "$TEMP_DIR"' EXIT
           
-          # Verify private key was created
-          if [ ! -f "private.pem" ]; then
-            echo "::error::Failed to create private key file"
-            exit 1
-          fi
+          # Create private key file from base64 using Node.js
+          node -e "
+            const fs = require('fs');
+            const privateKeyPem = Buffer.from(process.env.PRIVATE_KEY_B64, 'base64').toString('utf-8');
+            fs.writeFileSync('$TEMP_DIR/private.pem', privateKeyPem);
+            fs.chmodSync('$TEMP_DIR/private.pem', 0o600);
+            console.log('✅ Private key file created');
+          "
           
           # Install required dependencies
+          echo "📦 Installing dependencies..."
           npm install jose@^4.14.0
           
-          # Make sure the script is executable
-          chmod +x scripts/generate-jwt.mjs
-          
           # Debug: Print environment variables
-          echo "=== Environment Variables ==="
+          echo "\n=== Environment Variables ==="
           echo "JWT_ISSUER: $JWT_ISSUER"
           echo "JWT_AUDIENCE: $JWT_AUDIENCE"
           echo "CLERK_KEY_ID: $CLERK_KEY_ID"
           echo "JWT_TEMPLATE: $JWT_TEMPLATE"
           
           # Generate the token with the private key and required env vars
-          echo "🔑 Generating JWT token with the following settings:"
-          echo "- Issuer: $JWT_ISSUER"
-          echo "- Audience: $JWT_AUDIENCE"
-          echo "- Key ID: $CLERK_KEY_ID"
-          echo "- Template: $JWT_TEMPLATE"
-          
-          # Run the JWT generation script and capture output
-          JWT_OUTPUT=$(PRIVATE_KEY_PATH=./private.pem \
+          echo "\n🔨 Generating JWT token..."
+          JWT_TOKEN=$(PRIVATE_KEY_PATH="$TEMP_DIR/private.pem" \
             JWT_ISSUER="$JWT_ISSUER" \
             JWT_AUDIENCE="$JWT_AUDIENCE" \
             CLERK_KEY_ID="$CLERK_KEY_ID" \
@@ -182,17 +174,14 @@ jobs:
           # Check if the command failed
           if [ $? -ne 0 ]; then
             echo "::error::Failed to generate JWT token"
-            echo "Error output: $JWT_OUTPUT"
+            echo "Error output: $JWT_TOKEN"
             exit 1
           fi
-          
-          # Extract the JWT token (last line of output)
-          JWT_TOKEN=$(echo "$JWT_OUTPUT" | tail -1)
           
           # Verify the token is not empty and looks like a JWT
           if [ -z "$JWT_TOKEN" ] || [ $(echo "$JWT_TOKEN" | grep -o '\\.' | wc -l) -lt 2 ]; then
             echo "::error::Generated JWT token is invalid or empty"
-            echo "Token output: $JWT_OUTPUT"
+            echo "Token output: $JWT_TOKEN"
             exit 1
           fi
           
@@ -200,27 +189,32 @@ jobs:
           echo "JWT_TOKEN=$JWT_TOKEN" >> $GITHUB_ENV
           echo "JWT_HEADER=Bearer $JWT_TOKEN" >> $GITHUB_ENV
           
-          # Debug: Print token info
-          echo "=== JWT Token Info ==="
+          # Debug: Print token info using Node.js for base64 decoding
+          echo "\n=== JWT Token Info ==="
           echo "Token length: ${#JWT_TOKEN} characters"
           
-          # Try to decode and display token payload if jq is available
-          if command -v jq &> /dev/null; then
-            PAYLOAD=$(echo "$JWT_TOKEN" | cut -d'.' -f2 | base64 -d 2>/dev/null) || true
-            if [ -n "$PAYLOAD" ]; then
-              echo "Token payload:"
-              echo "$PAYLOAD" | jq .
-            else
-              echo "Failed to decode JWT payload"
-            fi
-          else
-            echo "jq not available, skipping token payload inspection"
-          fi
+          # Decode and display token payload using Node.js
+          node -e "
+            try {
+              const [header, payload] = process.env.JWT_TOKEN.split('.');
+              const decodedHeader = JSON.parse(Buffer.from(header, 'base64').toString('utf-8'));
+              const decodedPayload = JSON.parse(Buffer.from(payload, 'base64').toString('utf-8'));
+              
+              console.log('\n🔐 JWT Header:');
+              console.log(JSON.stringify(decodedHeader, null, 2));
+              
+              console.log('\n🔐 JWT Payload:');
+              console.log(JSON.stringify(decodedPayload, null, 2));
+              
+              console.log('\n✅ Token generated successfully');
+            } catch (error) {
+              console.error('Error decoding token:', error.message);
+              console.log('\n🔐 JWT Token (raw):', process.env.JWT_TOKEN);
+              process.exit(1);
+            }
+          "
           
-          # Clean up the private key
-          rm -f private.pem
-          
-          echo "✅ JWT token generated successfully"
+          echo "\n✅ JWT token generated and environment variables set"
 
       - name: Debug JWT Token
         run: |
