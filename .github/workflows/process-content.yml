@@ -127,13 +127,25 @@ jobs:
         id: generate-token
         timeout-minutes: 5
         env:
+          # Required for JWT generation
           PRIVATE_KEY_B64: ${{ secrets.PRIVATE_KEY_B64 }}
           JWT_ISSUER: https://sunny-dogfish-14.clerk.accounts.dev
           JWT_AUDIENCE: https://sunny-dogfish-14.clerk.accounts.dev
           CLERK_KEY_ID: ${{ env.CLERK_KEY_ID }}
           JWT_TEMPLATE: matbuapp
-          NEXT_PUBLIC_APP_URL: ${{ env.NEXT_PUBLIC_APP_URL }}
+          NEXT_PUBLIC_APP_URL: ${{ env.NEXT_PUBLIC_APP_URL || 'https://matbu.vercel.app' }}
+          
+          # Additional context for debugging
           NODE_OPTIONS: --no-warnings
+          NODE_DEBUG: jose
+          DEBUG: '*'
+          
+          # GitHub context
+          GITHUB_WORKFLOW: ${{ github.workflow }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_ACTION: ${{ github.action }}
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           set -e
           echo "🔑 Generating JWT token..."

@@ -108,68 +108,93 @@ async function generateToken() {
       exp: now + CONFIG.TOKEN_EXPIRY_SECONDS,
       nbf: now - 60, // Not before 1 minute ago
       jti: `github-${Date.now()}-${Math.random().toString(36).substring(2, 10)}`,
-      
-      // Custom claims
-      role: 'service-account',
-      source: 'github-actions',
-      
-      // Clerk specific claims
-      azp: process.env.NEXT_PUBLIC_APP_URL || 'https://matbu.vercel.app',
-      template: CONFIG.JWT_TEMPLATE,
-      
-      // Additional metadata
-      metadata: {
-        service: 'github-actions',
-        workflow: process.env.GITHUB_WORKFLOW || 'unknown',
-        run_id: process.env.GITHUB_RUN_ID || 'unknown'
-      }
-    })
-      .setProtectedHeader({
-        alg: 'RS256',
-        typ: 'JWT',
-        kid: CONFIG.CLERK_KEY_ID,
-        cty: 'JWT'
-      })
-      .setIssuer(CONFIG.JWT_ISSUER)
-      .setAudience(CONFIG.JWT_AUDIENCE)
-      .setIssuedAt(now)
-      .setExpirationTime(now + CONFIG.TOKEN_EXPIRY_SECONDS)
-      .setNotBefore(now - 60) // Allow for clock skew
-      .sign(privateKey);
-
-    // Write token to file
-    writeFileSync(CONFIG.TOKEN_FILE, token);
-    console.log(`\n✅ Token successfully generated and saved to ${CONFIG.TOKEN_FILE}`);
     
-    // Debug: Print token info
-    console.log('\n✅ JWT token generated successfully');
+    // Load private key
+    console.log('\n🔑 Loading private key...');
+    const privateKeyPem = await loadPrivateKey();
+    console.log('✅ Private key loaded successfully');
     
-    // Get the token parts for verification
-    const [header, payload] = token.split('.');
-    
-    // Decode and log the header and payload for debugging
     try {
-      const decodedHeader = JSON.parse(Buffer.from(header, 'base64').toString('utf-8'));
-      const decodedPayload = JSON.parse(Buffer.from(payload, 'base64').toString('utf-8'));
+      // Import the private key
+      console.log('\n🔑 Importing private key...');
+      const privateKey = await importPKCS8(privateKeyPem, 'RS256');
+      console.log('✅ Private key imported successfully');
       
-      console.log('\n🔐 JWT Header:');
-      console.log(JSON.stringify(decodedHeader, null, 2));
+      // Generate JWT token
+      console.log('\n🔨 Generating JWT token...');
+      const token = await new SignJWT({
+        sub: CONFIG.USER_ID,
+        azp: CONFIG.NEXT_PUBLIC_APP_URL,
+        template: CONFIG.JWT_TEMPLATE,
+        iat: Math.floor(Date.now() / 1000),
+        jti: crypto.randomUUID(),
+      })
+        .setProtectedHeader({
+          alg: 'RS256', // Must be RS256 for Clerk
+          typ: 'JWT',
+          kid: CONFIG.CLERK_KEY_ID,
+        })
+        .setIssuer(CONFIG.JWT_ISSUER)
+        .setAudience(CONFIG.JWT_AUDIENCE)
+        .setIssuedAt()
+        .setExpirationTime('1h')
+        .sign(privateKey);
+
+      // Save token to file
+      writeFileSync(CONFIG.TOKEN_FILE, token);
+      console.log(`\n✅ Token successfully saved to ${CONFIG.TOKEN_FILE}`);
       
-      console.log('\n🔐 JWT Payload:');
-      console.log(JSON.stringify(decodedPayload, null, 2));
+      // Debug: Print token info
+      console.log('\n✅ JWT token generated successfully');
       
-      console.log('\n🔐 JWT Token:');
-      console.log(token);
-    } catch (error) {
-      console.error('Error decoding token:', error.message);
-      console.log('\n🔐 JWT Token (raw):', token);
+      try {
+        // Get the token parts for verification
+        const [header, payload, signature] = token.split('.');
+        
+        // Decode and log the header and payload for debugging
+        const decodedHeader = JSON.parse(Buffer.from(header, 'base64').toString('utf-8'));
+        const decodedPayload = JSON.parse(Buffer.from(payload, 'base64').toString('utf-8'));
+        
+        console.log('\n🔐 JWT Header:');
+        console.log(JSON.stringify(decodedHeader, null, 2));
+        
+        console.log('\n🔐 JWT Payload:');
+        console.log(JSON.stringify(decodedPayload, null, 2));
+        
+        console.log('\n🔐 JWT Signature (first 10 chars):', signature.substring(0, 10) + '...');
+        
+        console.log('\n🔐 JWT Token (first 50 chars):', token.substring(0, 50) + '...');
+      } catch (decodeError) {
+        console.error('\n⚠️ Failed to decode token for debugging:', decodeError.message);
+        console.log('Raw token (first 100 chars):', token.substring(0, 100));
+      }
+      
+      return token;
+    } catch (keyError) {
+      console.error('\n❌ Failed to import private key:', keyError.message);
+      if (keyError.code === 'ERR_OSSL_UNSUPPORTED') {
+        console.error('This usually means the private key format is incorrect.');
+        console.error('Please ensure you are using a valid PKCS#8 private key in PEM format.');
+        console.error('The key should start with: -----BEGIN PRIVATE KEY-----');
+      }
+      throw keyError;
     }
-    
-    // Return the token (this will be captured by the workflow)
-    return token;
   } catch (error) {
     console.error('\n❌ Token generation failed:', error.message);
+    console.error('Error stack:', error.stack);
+    
+    // Log environment variables (excluding sensitive ones)
+    console.log('\n🔧 Environment:');
+    console.log('- Node.js version:', process.version);
+    console.log('- Platform:', process.platform);
+    console.log('- JWT_ISSUER:', process.env.JWT_ISSUER);
+    console.log('- JWT_AUDIENCE:', process.env.JWT_AUDIENCE);
+    console.log('- CLERK_KEY_ID:', process.env.CLERK_KEY_ID ? '***' : 'Not set');
+    console.log('- JWT_TEMPLATE:', process.env.JWT_TEMPLATE);
+    
     throw error;
+  } finally {
+    console.log('\n🏁 Token generation process completed');
   }
 }
 
