@@ -137,14 +137,24 @@ export default function GenerateEbookPage() {
       console.log('Starting parallel requests...');
       const startTime = Date.now();
       
+      // Get the Clerk session token using the client-side hook
+      const token = await getToken();
+      
+      const requestHeaders = new Headers();
+      if (token) {
+        requestHeaders.set('Authorization', `Bearer ${token}`);
+      } else {
+        console.warn('No auth token available');
+      }
+      
       const [bookResponse, payloadResponse] = await Promise.all([
         fetch(`/api/books/by-slug/${slug}`, { 
-          headers,
+          headers: requestHeaders,
           credentials: 'include',
           cache: 'no-store' // Ensure fresh request
         }),
         fetch(`/api/books/by-slug/${slug}/payload`, { 
-          headers,
+          headers: requestHeaders,
           credentials: 'include',
           cache: 'no-store' // Ensure fresh request
         })

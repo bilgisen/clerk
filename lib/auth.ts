@@ -1,5 +1,6 @@
 import { auth } from '@clerk/nextjs/server';
 import { NextRequest } from 'next/server';
+import { SignJWT } from 'jose';
 
 const LOG_PREFIX = '[Auth]';
 
@@ -14,7 +15,12 @@ export interface JWTPayload {
   [key: string]: any;
 }
 
-export async function createToken(userId: string, options: { expiresIn?: string } = {}) {
+interface TokenOptions {
+  expiresIn?: string;
+  metadata?: Record<string, any>;
+}
+
+export async function createToken(userId: string, options: TokenOptions = {}) {
   try {
     const expiresIn = options.expiresIn || '1h';
     const logContext = { userId, expiresIn };
@@ -30,12 +36,24 @@ export async function createToken(userId: string, options: { expiresIn?: string 
     }
 
     // In production, use Clerk's session token
-    const { getToken } = auth();
-    const token = await getToken();
+    const session = await auth();
+    const sessionClaims = session.sessionClaims;
     
-    if (!token) {
-      throw new Error('Failed to create session token');
+    if (!sessionClaims) {
+      throw new Error('No active session found');
     }
+
+    // Create a JWT token with the user's session claims and any additional metadata
+    const token = await new SignJWT({
+      ...sessionClaims,
+      ...(options.metadata || {})
+    })
+      .setProtectedHeader({ alg: 'HS256' })
+      .setIssuedAt()
+      .setIssuer('clerk.clerko.v1')
+      .setAudience('https://api.clerko.com')
+      .setExpirationTime(expiresIn)
+      .sign(new TextEncoder().encode(process.env.JWT_SECRET || ''));
 
     return {
       token,
@@ -54,67 +72,51 @@ export async function verifyToken(
   token: string,
   options: { operation: string } = { operation: 'verifyToken' }
 ): Promise<JWTPayload | null> {
-  const logContext = {
-    operation: options.operation,
-    token: token ? `${token.substring(0, 10)}...` : 'undefined',
-    env: {
-      NODE_ENV: process.env.NODE_ENV,
-    },
-  };
+  const logContext = { operation: options.operation };
+  console.log(`${LOG_PREFIX} Verifying token`, logContext);
 
-  if (!token) {
-    console.error(`${LOG_PREFIX} ❌ No token provided`, logContext);
-    return null;
-  }
-
-  // Skip verification in development if DISABLE_AUTH is set
+  // In development, accept any token if auth is disabled
   if (process.env.NODE_ENV === 'development' && process.env.DISABLE_AUTH === 'true') {
-    console.warn(`${LOG_PREFIX} ⚠️ Auth is disabled in development mode`, logContext);
+    console.warn(`${LOG_PREFIX} ⚠️ Auth is disabled in development mode`);
     return {
       userId: 'dev-user-id',
       user: {
         id: 'dev-user-id',
         email: 'dev@example.com',
-      },
+        firstName: 'Development',
+        lastName: 'User'
+      }
     };
   }
 
   try {
-    console.log(`${LOG_PREFIX} 🔍 Verifying Clerk session token`, logContext);
-    
-    // Use Clerk's auth() to verify the session
+    // In production, verify the token using Clerk
     const session = await auth();
+    const userId = session.userId;
+    const sessionClaims = session.sessionClaims;
     
-    if (!session || !session.userId) {
-      console.error(`${LOG_PREFIX} ❌ No active session found`, logContext);
+    if (!userId) {
+      console.error(`${LOG_PREFIX} ❌ No user ID in session`);
       return null;
     }
-    
-    // Get the user object from the session
-    const user = session.user;
-    
-    // Log successful verification
-    console.log(`${LOG_PREFIX} ✅ Session verified successfully`, {
-      ...logContext,
-      userId: session.userId,
-      sessionId: session.sessionId,
-    });
 
+    // Get the user object from session claims
+    const email = sessionClaims?.email as string | undefined;
+    const firstName = sessionClaims?.given_name as string | undefined;
+    const lastName = sessionClaims?.family_name as string | undefined;
+
+    // Return the verified user data
     return {
-      userId: session.userId,
+      userId,
       user: {
-        id: session.userId,
-        email: user?.emailAddresses?.[0]?.emailAddress,
-        firstName: user?.firstName,
-        lastName: user?.lastName,
-      },
-      // Include any additional session data you need
-      ...session,
-    } as JWTPayload;
-    
+        id: userId,
+        email: sessionClaims?.email as string | undefined,
+        firstName: sessionClaims?.given_name as string | undefined,
+        lastName: sessionClaims?.family_name as string | undefined
+      }
+    };
   } catch (error) {
-    console.error(`${LOG_PREFIX} ❌ Error verifying session`, {
-      ...logContext,
+    console.error(`${LOG_PREFIX} ❌ Error verifying token`, {
       error: error instanceof Error ? error.message : 'Unknown error',
       stack: error instanceof Error ? error.stack : undefined,
     });

@@ -3,7 +3,7 @@ import { db } from '@/db/drizzle';
 import { books, chapters, users } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 import { generateChapterHTML, generateCompleteDocumentHTML } from '@/lib/generateChapterHTML';
-import { getUserIdFromRequest } from '@/lib/auth';
+import { auth } from '@clerk/nextjs/server';
 
 export const dynamic = 'force-dynamic';
 export const dynamicParams = true;
@@ -26,8 +26,16 @@ export async function GET(
     
     console.log(`[${new Date().toISOString()}] Request for book: ${slug}, chapter: ${chapterId}`);
     
-    // Get authenticated user ID from request (handles both Clerk and JWT)
-    const userId = await getUserIdFromRequest(request);
+    // Get authenticated user ID from Clerk
+    const { userId } = auth();
+    
+    if (!userId) {
+      console.warn('Unauthenticated request');
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      );
+    }
     if (!userId) {
       console.error('No authenticated user');
       return new NextResponse('Unauthorized', { status: 401 });

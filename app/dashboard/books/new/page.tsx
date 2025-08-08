@@ -1,6 +1,8 @@
 // app/dashboard/books/new/page.tsx
 "use client";
 
+export const dynamic = 'force-dynamic';
+
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";

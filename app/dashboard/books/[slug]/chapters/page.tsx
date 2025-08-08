@@ -1,35 +1,31 @@
 // app/dashboard/books/[slug]/chapters/page.tsx
 "use client";
 
-import { useEffect, useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
-import { Loader2, Plus, AlertCircle } from 'lucide-react';
-import { Separator } from '@/components/ui/separator';
-import dynamic from 'next/dynamic';
+import { Loader2, Plus, AlertCircle, CheckCircle2, BookOpen, RefreshCw } from 'lucide-react';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { BooksMenu } from '@/components/books/books-menu';
+import { useChapters, useUpdateChapterOrder } from '@/hooks/api/use-chapters';
+import dynamic from 'next/dynamic';
 
-// Ensure process.env is typed
-declare const process: {
-  env: {
-    NODE_ENV?: 'development' | 'production' | 'test';
-    NEXT_PUBLIC_REVALIDATION_SECRET?: string;
-  };
+type ChapterNode = {
+  id: string;
+  title: string;
+  slug: string;
+  order: number;
+  level: number;
+  parent_chapter_id: string | null;
+  children?: ChapterNode[];
 };
 
-
-// Import the ChapterNode type from dnd.ts to ensure consistency
-import type { ChapterNode } from '@/types/dnd';
-
-// Extend the ChapterNode type to include additional fields used in this component
 type ExtendedChapterNode = ChapterNode & {
   bookId?: string;
   created_at: string;
   updated_at: string;
   content?: string;
-  children?: ExtendedChapterNode[];
 };
 
 interface Book {
@@ -39,20 +35,9 @@ interface Book {
   userId: string;
 }
 
-// Import the ChapterTreeWrapper props type
-import type { ChapterTreeWrapperProps } from '@/components/books/chapters/chapter-tree-wrapper';
-
-// Dynamically import the ChapterTree component to avoid SSR issues with DnD
-const ChapterTree = dynamic<ChapterTreeWrapperProps>(
+const ChapterTree = dynamic(
   () => import('@/components/books/chapters/chapter-tree-wrapper').then(mod => mod.ChapterTreeWrapper),
-  { 
-    ssr: false,
-    loading: () => (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="h-8 w-8 animate-spin" />
-      </div>
-    )
-  }
+  { ssr: false, loading: () => <Loader2 className="h-8 w-8 animate-spin" /> }
 );
 
 export default function ChaptersPage() {
@@ -60,270 +45,153 @@ export default function ChaptersPage() {
   const router = useRouter();
   const bookSlug = typeof params?.slug === "string" ? params.slug : "";
   
-  const [isLoading, setIsLoading] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
   const [book, setBook] = useState<Book | null>(null);
-  const [chapters, setChapters] = useState<ExtendedChapterNode[]>([]);
   const [showSuccessAlert, setShowSuccessAlert] = useState(false);
   
-  // Fetch book and chapters data with cache busting
-  const fetchData = useCallback(async (force = false) => {
-    if (!bookSlug) return;
-    
-    try {
-      setIsLoading(true);
-      
-      // Add timestamp to bypass cache when forcing refresh
-      const timestamp = `?t=${Date.now()}`;
-      
-      // Fetch book data with cache control headers
-      const [bookRes, chaptersRes] = await Promise.all([
-        fetch(`/api/books/by-slug/${bookSlug}${timestamp}`, {
-          cache: 'no-store',
-          next: force ? { tags: [`book-${bookSlug}-chapters`] } : undefined
-        }),
-        fetch(`/api/books/by-slug/${bookSlug}/chapters${timestamp}`, {
-          cache: 'no-store',
-          next: force ? { tags: [`book-${bookSlug}-chapters`] } : undefined
-        })
-      ]);
-
-      if (!bookRes.ok) throw new Error('Failed to fetch book');
-      if (!chaptersRes.ok) throw new Error('Failed to fetch chapters');
-      
-      const [bookData, chaptersData] = await Promise.all([
-        bookRes.json(),
-        chaptersRes.json()
-      ]);
-      
-      // Process chapters to ensure all required fields are present
-      const processedChapters = (chaptersData || []).map((chapter: any) => {
-        // Normalize parent_chapter_id and book_id
-        const parent_chapter_id = chapter.parent_chapter_id ?? chapter.parentChapterId ?? null;
-        const book_id = chapter.book_id ?? chapter.bookId ?? bookData.id ?? '';
-        const processedChapter = {
-          id: String(chapter.id || ''),
-          title: String(chapter.title || 'Untitled Chapter'),
-          slug: String(chapter.slug || '').toLowerCase().replace(/\s+/g, '-'),
-          book_id,
-          parent_chapter_id,
-          order: Number(chapter.order) || 0,
-          level: Number(chapter.level) || 0,
-          created_at: chapter.created_at || new Date().toISOString(),
-          updated_at: chapter.updated_at || new Date().toISOString(),
-        };
-        return processedChapter;
-      });
-      // Order'a göre sıralama ekle
-      processedChapters.sort((a: ExtendedChapterNode, b: ExtendedChapterNode) => (a.order ?? 0) - (b.order ?? 0));
-      // Hiyerarşi oluştur: parent_chapter_id'ye göre children dizisi ekle
-      const chapterMap: Record<string, ExtendedChapterNode> = {};
-      processedChapters.forEach((ch: ExtendedChapterNode) => { chapterMap[ch.id] = { ...ch, children: [] }; });
-      const rootChapters: ExtendedChapterNode[] = [];
-      processedChapters.forEach((ch: ExtendedChapterNode) => {
-        if (ch.parent_chapter_id && chapterMap[ch.parent_chapter_id]) {
-          chapterMap[ch.parent_chapter_id].children!.push(chapterMap[ch.id]);
-        } else {
-          rootChapters.push(chapterMap[ch.id]);
-        }
-      });
-      setBook(bookData);
-      setChapters(rootChapters);
-    } catch (error) {
-      console.error('Error fetching data:', error);
-      toast.error('Failed to load book or chapters');
-      setBook(null);
-      setChapters([]);
-    } finally {
-      setIsLoading(false);
-    }
+  // Fetch book data
+  useEffect(() => {
+    const fetchBook = async () => {
+      if (!bookSlug) return;
+      try {
+        const res = await fetch(`/api/books/by-slug/${bookSlug}`);
+        if (!res.ok) throw new Error('Failed to fetch book');
+        setBook(await res.json());
+      } catch (error) {
+        console.error('Error fetching book:', error);
+        toast.error('Failed to load book data');
+      }
+    };
+    fetchBook();
   }, [bookSlug]);
   
-  // Initial data fetch
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+  // Fetch chapters
+  const { 
+    data: chapters = [], 
+    isLoading, 
+    isError, 
+    error,
+    refetch: refetchChapters 
+  } = useChapters(book?.id || '');
   
-  // Handle adding a new chapter
+  const { mutateAsync: updateChapterOrder } = useUpdateChapterOrder(book?.id || '');
+  
+  // Process chapters into tree structure
+  const processedChapters = useMemo(() => {
+    if (!chapters?.length) return [];
+    
+    const chapterMap: Record<string, ExtendedChapterNode> = {};
+    const rootChapters: ExtendedChapterNode[] = [];
+    
+    // First pass: create all nodes
+    chapters.forEach(chapter => {
+      chapterMap[chapter.id] = {
+        ...chapter,
+        children: [],
+        bookId: book?.id,
+        created_at: chapter.created_at || new Date().toISOString(),
+        updated_at: chapter.updated_at || new Date().toISOString()
+      };
+    });
+    
+    // Second pass: build hierarchy
+    chapters.forEach(chapter => {
+      const node = chapterMap[chapter.id];
+      const parentId = chapter.parent_chapter_id;
+      
+      if (parentId && chapterMap[parentId]) {
+        chapterMap[parentId].children = chapterMap[parentId].children || [];
+        chapterMap[parentId].children!.push(node);
+      } else {
+        rootChapters.push(node);
+      }
+    });
+    
+    // Sort chapters by order
+    const sortChapters = (chapters: ExtendedChapterNode[]): ExtendedChapterNode[] => {
+      return [...chapters]
+        .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+        .map(chapter => ({
+          ...chapter,
+          children: chapter.children ? sortChapters(chapter.children) : []
+        }));
+    };
+    
+    return sortChapters(rootChapters);
+  }, [chapters, book?.id]);
+  
+  // Handle saving chapter order
+  const handleSave = useCallback(async (updatedChapters: ChapterNode[]) => {
+    try {
+      const updates: Array<{
+        id: string;
+        order: number;
+        level: number;
+        parent_chapter_id: string | null;
+      }> = [];
+      
+      const collectUpdates = (nodes: ChapterNode[], parentId: string | null = null, level = 0) => {
+        nodes.forEach((node, index) => {
+          updates.push({
+            id: node.id,
+            order: index,
+            level,
+            parent_chapter_id: parentId
+          });
+          
+          if (node.children?.length) {
+            collectUpdates(node.children, node.id, level + 1);
+          }
+        });
+      };
+      
+      collectUpdates(updatedChapters);
+      
+      await updateChapterOrder(updates);
+      setShowSuccessAlert(true);
+      setTimeout(() => setShowSuccessAlert(false), 3000);
+      toast.success('Chapter order saved');
+      
+      return updatedChapters;
+    } catch (error) {
+      console.error('Error saving chapter order:', error);
+      toast.error('Failed to save chapter order');
+      throw error;
+    }
+  }, [updateChapterOrder]);
+  
   const handleAddChapter = useCallback(() => {
     if (!bookSlug) return;
     router.push(`/dashboard/books/${bookSlug}/chapters/new`);
   }, [bookSlug, router]);
   
-  // Show success alert and hide it after 3 seconds
-  const showSuccessMessage = useCallback(() => {
-    setShowSuccessAlert(true);
-    const timer = setTimeout(() => {
-      setShowSuccessAlert(false);
-    }, 3000);
-    return () => clearTimeout(timer);
-  }, []);
-
-  // Handle saving chapter order
-  const handleSave = useCallback(async (updatedChapters: ChapterNode[]): Promise<ChapterNode[] | void> => {
-    if (!bookSlug || !book) return;
-    
-    try {
-      setIsSaving(true);
-      const toastId = toast.loading('Updating chapter order...');
-      
-      // Create a deep copy of the updated chapters and cast to ExtendedChapterNode
-      const chaptersCopy = JSON.parse(JSON.stringify(updatedChapters)) as ExtendedChapterNode[];
-      
-      // Flatten the chapters hierarchy for the API
-      const flattenChapters = (chapters: ChapterNode[], parentId: string | null = null, level = 1): Omit<ChapterNode, 'children'>[] => {
-        let orderCounter = 1;
-        const result: Omit<ChapterNode, 'children'>[] = [];
-        
-        const walk = (nodes: ChapterNode[], parentId: string | null, level: number) => {
-          nodes.forEach((chapter) => {
-            // Ensure required fields are present
-            const flatChapter: ChapterNode = {
-              ...chapter,
-              id: chapter.id,
-              title: chapter.title || 'Untitled Chapter',
-              slug: chapter.slug || '',
-              book_id: book.id,
-              parent_chapter_id: parentId,
-              order: orderCounter++,
-              level: level,
-              created_at: (chapter as any).created_at || new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-            };
-            
-            // Remove children before sending to API
-            const { children, ...chapterWithoutChildren } = flatChapter;
-            
-            console.log(`Flattening chapter ${chapter.id}:`, chapterWithoutChildren);
-            result.push(chapterWithoutChildren);
-            
-            if ((chapter as any).children && (chapter as any).children.length > 0) {
-              walk((chapter as any).children, chapter.id, level + 1);
-            }
-          });
-        };
-        
-        walk(chapters, parentId, level);
-        return result;
-      };
-      
-      const flatChapters = flattenChapters(chaptersCopy);
-      
-      // Log the flattened chapters before sending to the server
-      console.log('=== FLATTENED CHAPTERS TO SEND ===');
-      console.log(JSON.stringify(flatChapters, null, 2));
-      
-      // Import and call the update function
-      const { updateChapterOrder } = await import('@/actions/books/chapters/update-chapter-order');
-      console.log('Calling updateChapterOrder with:', {
-        bookSlug,
-        chapterCount: flatChapters.length,
-        firstChapter: flatChapters[0] ? {
-          id: flatChapters[0].id,
-          order: flatChapters[0].order,
-          level: flatChapters[0].level,
-          parent_chapter_id: flatChapters[0].parent_chapter_id,
-        } : null
-      });
-      
-      const result = await updateChapterOrder(flatChapters, bookSlug);
-      
-      if (result.success) {
-        // Update the local state with the new order
-        setChapters(chaptersCopy);
-        
-        // Get the public revalidation secret from environment
-        const publicSecret = process.env.NEXT_PUBLIC_REVALIDATION_SECRET;
-        
-        // Invalidate Next.js cache
-        const revalidateUrl = new URL('/api/revalidate', window.location.origin);
-        revalidateUrl.searchParams.append('tag', `book-${bookSlug}-chapters`);
-        
-        if (publicSecret) {
-          revalidateUrl.searchParams.append('secret', publicSecret);
-        }
-        
-        // Show success message
-        toast.success('Chapter order updated successfully', { id: toastId });
-        showSuccessMessage();
-        
-        // Return the saved chapters to match the expected return type
-        return chaptersCopy as unknown as ChapterNode[];
-      } else {
-        throw new Error('Failed to save chapter order');
-      }
-    } catch (error) {
-      console.error('Error updating chapter order:', error);
-      toast.error(error instanceof Error ? error.message : 'Failed to update chapter order');
-      throw error;
-    } finally {
-      setIsSaving(false);
-    }
-  }, [bookSlug, book, fetchData]);
-  
-  // Handle chapter edit
-  const handleEdit = useCallback((chapterId: string) => {
-    if (!bookSlug) return;
-    router.push(`/dashboard/books/${bookSlug}/chapters/${chapterId}/edit`);
-  }, [bookSlug, router]);
-  
-  // Handle chapter view
-  const handleView = useCallback((chapterId: string) => {
-    if (!bookSlug) return;
-    router.push(`/dashboard/books/${bookSlug}/chapters/${chapterId}`);
-  }, [bookSlug, router]);
-  
-  // Handle chapter deletion
-  const handleDelete = useCallback(async (chapterId: string) => {
-    if (!bookSlug) return;
-    
-    try {
-      const response = await fetch(`/api/books/by-slug/${bookSlug}/chapters/${chapterId}`, {
-        method: 'DELETE',
-      });
-      
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.message || 'Failed to delete chapter');
-      }
-      
-      // Refresh the chapters list
-      await fetchData();
-      toast.success('Chapter deleted successfully');
-    } catch (error) {
-      console.error('Error deleting chapter:', error);
-      toast.error(error instanceof Error ? error.message : 'Failed to delete chapter');
-    }
-  }, [bookSlug, fetchData]);
-  
-  // Handle refresh
-  const handleRefresh = useCallback(() => {
-    fetchData(true);
-  }, [fetchData]);
-
-  // Loading state
   if (isLoading) {
     return (
-      <div className="container mx-auto py-10 px-8">
-        <div className="flex justify-between items-start mb-6">
-          <div className="space-y-2">
-            <div className="h-8 w-48 bg-muted rounded animate-pulse"></div>
-            <div className="h-5 w-64 bg-muted rounded animate-pulse"></div>
-          </div>
-          <div className="h-10 w-24 bg-muted rounded-md animate-pulse"></div>
-        </div>
-        <Separator className="my-6" />
-        <div className="flex items-center justify-center min-h-[400px]">
-          <div className="flex flex-col items-center gap-4">
-            <Loader2 className="h-8 w-8 animate-spin text-primary" />
-            <p className="text-muted-foreground">Loading chapters...</p>
-          </div>
+      <div className="flex items-center justify-center min-h-[400px]">
+        <Loader2 className="h-8 w-8 animate-spin" />
+      </div>
+    );
+  }
+  
+  if (isError) {
+    return (
+      <div className="p-4 bg-red-50 dark:bg-red-900/20 rounded-md">
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Error loading chapters</AlertTitle>
+          <AlertDescription>
+            {error instanceof Error ? error.message : 'An unknown error occurred'}
+          </AlertDescription>
+        </Alert>
+        <div className="mt-4">
+          <Button variant="outline" onClick={() => refetchChapters()}>
+            <RefreshCw className="mr-2 h-4 w-4" />
+            Retry
+          </Button>
         </div>
       </div>
     );
   }
   
-  // Book not found state
   if (!book) {
     return (
       <div className="container mx-auto py-10 px-8">
@@ -331,8 +199,8 @@ export default function ChaptersPage() {
           <div className="bg-destructive/10 p-4 rounded-full mb-4">
             <AlertCircle className="h-8 w-8 text-destructive" />
           </div>
-          <h2 className="text-2xl font-bold mb-3">Book not found</h2>
-          <p className="text-muted-foreground mb-6 max-w-md">
+          <h2 className="text-2xl font-bold mb-2">Book not found</h2>
+          <p className="text-muted-foreground mb-6">
             The book you're looking for doesn't exist or you don't have permission to view it.
           </p>
           <Button onClick={() => router.push('/dashboard/books')}>
@@ -342,60 +210,59 @@ export default function ChaptersPage() {
       </div>
     );
   }
-
+  
   return (
-    <div className="container mx-auto py-10 px-8">
+    <div className="container mx-auto py-6 px-4">
       {showSuccessAlert && (
-        <Alert className="mb-6 bg-green-50 dark:bg-green-900/30 border-green-200 dark:border-green-800">
-          <AlertTitle className="text-green-800 dark:text-green-200">Success</AlertTitle>
-          <AlertDescription className="text-green-700 dark:text-green-300">
-            Chapter order saved successfully!
-          </AlertDescription>
-        </Alert>
-      )}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
-        <div>
-          <h1 className="text-2xl font-bold">
-            {`Chapters: ${book.title}`}
-          </h1>
-          <p className="text-muted-foreground">
-            Organize your book's chapters with drag and drop
-          </p>
+        <div className="mb-6">
+          <Alert>
+            <CheckCircle2 className="h-4 w-4 text-green-500" />
+            <AlertTitle>Success</AlertTitle>
+            <AlertDescription>Chapter order saved successfully</AlertDescription>
+          </Alert>
         </div>
-        <div className="flex items-center gap-2">
-          <Button
-            onClick={() => fetchData(true)}
-            variant="outline"
-            size="sm"
-            disabled={isLoading || isSaving}
-          >
-            <Loader2 className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : 'hidden'}`} />
-            Refresh
+      )}
+      
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">{book.title}</h1>
+          <p className="text-muted-foreground">Organize and manage your book chapters</p>
+        </div>
+        
+        <div className="flex gap-2">
+          <Button onClick={handleAddChapter}>
+            <Plus className="mr-2 h-4 w-4" />
+            Add Chapter
           </Button>
-          <Button
-            onClick={handleAddChapter}
-            disabled={isLoading || isSaving}
-            size="sm"
-          >
-            <Plus className="h-4 w-4 mr-2" />
-            New Chapter
-          </Button>
-          <BooksMenu slug={bookSlug} />
         </div>
       </div>
-
-      <Separator className="my-4" />
-
-      <ChapterTree
-        chapters={chapters}
-        onSave={handleSave}
-        onSaveSuccess={showSuccessMessage}
-        onEdit={handleEdit}
-        onView={handleView}
-        onDelete={handleDelete}
-        isSaving={isSaving}
-        className="h-[calc(100vh-250px)]"
-      />
+      
+      <div className="bg-card rounded-lg border shadow-sm">
+        {processedChapters.length > 0 ? (
+          <ChapterTree 
+            chapters={processedChapters} 
+            onSave={handleSave}
+            bookId={book.id}
+            bookSlug={book.slug}
+          />
+        ) : (
+          <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
+            <BookOpen className="h-12 w-12 text-muted-foreground mb-4" />
+            <h3 className="text-lg font-medium mb-1">No chapters yet</h3>
+            <p className="text-muted-foreground mb-4">
+              Get started by creating your first chapter
+            </p>
+            <Button onClick={handleAddChapter}>
+              <Plus className="mr-2 h-4 w-4" />
+              Add Chapter
+            </Button>
+          </div>
+        )}
+      </div>
+      
+      <div className="mt-8">
+        <BooksMenu currentBookSlug={book.slug} />
+      </div>
     </div>
   );
 }

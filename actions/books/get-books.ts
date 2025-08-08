@@ -2,41 +2,59 @@
 
 import { auth } from '@clerk/nextjs/server';
 import { db } from '@/db';
-import { books } from '@/db/schema';
-import { eq } from 'drizzle-orm';
-import { ensureUserInDatabase } from '@/lib/auth-utils';
+import { books, users } from '@/db/schema';
+import { eq, and } from 'drizzle-orm';
+import { notFound } from 'next/navigation';
 
+// This is a server action that can be called from the client
 export async function getBooks() {
   try {
-    // Ensure the user exists in our database and get their ID
-    let userId;
-    try {
-      const result = await ensureUserInDatabase();
-      if (!result?.userId) {
-        console.error('Failed to get or create user in database');
-        return { error: 'Failed to authenticate user. Please try signing in again.' };
-      }
-      userId = result.userId;
-    } catch (error) {
-      console.error('Authentication error in getBooks:', error);
+    // Get the current user's session
+    const session = await auth();
+    
+    if (!session?.userId) {
+      console.error('[getBooks] No authenticated user found');
+      // Return a simple error that can be handled by the client
       return { 
-        error: 'Authentication error',
-        details: error instanceof Error ? error.message : 'Unknown error during authentication'
+        error: 'Authentication required',
+        status: 401
       };
     }
+    
+    const clerkUserId = session.userId;
+    console.log(`[getBooks] Fetching books for Clerk user ${clerkUserId}`);
 
-    // Then fetch all books for the current user
+    // First, get the database user ID for this Clerk user
+    const [user] = await db
+      .select()
+      .from(users)
+      .where(eq(users.clerkId, clerkUserId))
+      .limit(1);
+
+    if (!user) {
+      console.error(`[getBooks] No database user found for Clerk user ${clerkUserId}`);
+      notFound();
+    }
+
+    console.log(`[getBooks] Found database user ${user.id} for Clerk user ${clerkUserId}`);
+
+    // Now fetch books using the database user ID
     const userBooks = await db
       .select()
       .from(books)
-      .where(eq(books.userId, userId))
+      .where(eq(books.userId, user.id))
       .orderBy(books.createdAt);
 
-    return { data: userBooks };
+    console.log(`[getBooks] Found ${userBooks.length} books for user ${user.id}`);
+    return { 
+      data: userBooks,
+      status: 200
+    };
   } catch (error) {
-    console.error('Error fetching books:', error);
+    console.error('[getBooks] Error:', error);
     return { 
       error: 'Failed to fetch books',
+      status: 500,
       details: error instanceof Error ? error.message : 'Unknown error'
     };
   }

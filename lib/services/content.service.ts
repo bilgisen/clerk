@@ -30,12 +30,17 @@ export class ContentService {
     }
 
     // Create a JWT token for this content generation job
-    const jobToken = await createToken({
-      sub: userId,
-      contentId: contentId,
-      format: params.format,
-      metadata: params.metadata || {}
+    const tokenData = await createToken(userId, {
+      metadata: {
+        contentId,
+        format: params.format,
+        ...(params.metadata || {})
+      }
     });
+    
+    if (!tokenData?.token) {
+      throw new Error('Failed to generate authentication token');
+    }
 
     // Prepare content for processing
     const contentData = {
@@ -54,9 +59,10 @@ export class ContentService {
 
     return {
       contentId,
-      jobToken,
+      jobToken: tokenData.token,
       status: 'processing',
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      expiresAt: tokenData.expiresAt
     };
   }
 

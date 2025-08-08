@@ -71,14 +71,14 @@ jobs:
         run: |
           # Install required tools
           echo "🔧 Installing required tools..."
-          npm install jsonwebtoken
+          npm install jose
           
           # Generate JWT token using matbu template
           echo "🔑 Generating JWT token with matbu template..."
           echo "- JWT_ISSUER: $JWT_ISSUER"
           echo "- JWT_AUDIENCE: $JWT_AUDIENCE"
           
-          node scripts/generate-jwt.js
+          node --experimental-modules scripts/generate-jwt.mjs
           
           # Read the generated token
           if [ ! -f "jwt-token.txt" ]; then
