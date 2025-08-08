@@ -10,19 +10,18 @@ const isPublicRoute = createRouteMatcher([
   '/api/webhooks(.*)',
 ]);
 
-// Define protected API routes that require JWT authentication
-const isProtectedApiRoute = (pathname: string) => {
+// Define API routes that require authentication (either JWT or Clerk session)
+const isApiRoute = (pathname: string) => {
   return (
     pathname.startsWith('/api/books/by-id/') ||
-    pathname.startsWith('/api/books/by-slug/') ||
-    pathname.startsWith('/api/protected')
+    pathname.startsWith('/api/books/by-slug/')
   );
 };
 
 // These routes are protected and require authentication
 const protectedRoutes = [
   '^/dashboard(?:/.*)?$',
-  '^/api/books(?:/.*)?$'
+  '^/api/books/(?!by-id/.*/(payload|chapters|html|by-slug/.*/chapters/.*/html)).*$'
 ];
 
 export default clerkMiddleware(async (auth, req) => {
@@ -50,100 +49,98 @@ export default clerkMiddleware(async (auth, req) => {
     return NextResponse.next({ request: { headers: requestHeaders } });
   }
 
-  // Handle protected API routes with JWT first
-  if (isProtectedApiRoute(pathname)) {
-    console.log(`[Middleware] Processing protected API route: ${pathname}`);
+  // Handle API routes that can use either JWT or Clerk session
+  if (isApiRoute(pathname)) {
+    console.log(`[Middleware] Processing API route: ${pathname}`);
     
     const authHeader = req.headers.get('authorization');
     
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      console.error('[Middleware] No or invalid Authorization header');
-      return new NextResponse(JSON.stringify({ 
-        error: 'No token provided',
-        status: 401,
-        path: pathname
-      }), { 
-        status: 401,
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
+    // If Authorization header is provided, try JWT authentication first
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      console.log('[Middleware] Attempting JWT authentication');
+      const token = authHeader.split(' ')[1];
+      console.log(`[Middleware] JWT token received (first 10 chars): ${token.substring(0, 10)}...`);
 
-    const token = authHeader.split(' ')[1];
-    console.log(`[Middleware] JWT token received (first 10 chars): ${token.substring(0, 10)}...`);
-
-    try {
-      // Verify the JWT token
-      const decoded = await verifyToken(token, { operation: 'middleware-auth' });
-      
-      if (!decoded) {
-        throw new Error('Failed to verify token');
-      }
-
-      console.log(`[Middleware] Token verified for user: ${decoded.userId}`);
-
-      // Clone the request headers and add user ID
-      const requestHeaders = new Headers(req.headers);
-      requestHeaders.set('x-user-id', decoded.userId);
-      requestHeaders.set('x-auth-method', 'jwt');
-
-      // Add any metadata from the token to headers
-      if (decoded.metadata) {
-        requestHeaders.set('x-auth-metadata', JSON.stringify(decoded.metadata));
-      }
-
-      const response = NextResponse.next({
-        request: { headers: requestHeaders },
-      });
-
-      // Add debug headers to the response
-      response.headers.set('x-auth-method', 'jwt');
-      response.headers.set('x-auth-user-id', decoded.userId);
-
-      return response;
-    } catch (error) {
-      console.error('[Middleware] JWT verification failed, falling back to Clerk session', error);
-      
-      // Fall back to Clerk session if JWT verification fails
       try {
-        const session = await auth();
+        // Verify the JWT token
+        const decoded = await verifyToken(token, { operation: 'middleware-auth' });
         
-        if (!session?.userId) {
-          console.error('[Middleware] No active session found');
-          return new NextResponse(JSON.stringify({
-            error: 'Unauthorized - No valid authentication provided',
-            status: 401,
-            path: pathname
-          }), {
-            status: 401,
-            headers: { 'Content-Type': 'application/json' }
-          });
+        if (!decoded) {
+          throw new Error('Failed to verify token');
         }
 
-        console.log(`[Middleware] Clerk session verified for user: ${session.userId}`);
-
+        console.log(`[Middleware] JWT token verified for user: ${decoded.userId}`);
+        
+        // Set up response with user info
         const requestHeaders = new Headers(req.headers);
-        requestHeaders.set('x-user-id', session.userId);
-        requestHeaders.set('x-auth-method', 'session');
+        requestHeaders.set('x-user-id', decoded.userId);
+        requestHeaders.set('x-auth-method', 'jwt');
+
+        if (decoded.metadata) {
+          requestHeaders.set('x-auth-metadata', JSON.stringify(decoded.metadata));
+        }
 
         const response = NextResponse.next({
           request: { headers: requestHeaders },
         });
 
-        response.headers.set('x-auth-method', 'session');
-        response.headers.set('x-auth-user-id', session.userId);
-
+        response.headers.set('x-auth-method', 'jwt');
+        response.headers.set('x-auth-user-id', decoded.userId);
+        
         return response;
-      } catch (sessionError) {
-        console.error('[Middleware] Error verifying Clerk session:', sessionError);
+      } catch (error) {
+        console.error('[Middleware] JWT verification failed, falling back to Clerk session', error);
+        // Continue to Clerk session authentication
+      }
+    }
+
+    // If we get here, either no auth header was provided or JWT verification failed
+    // Try to authenticate with Clerk session
+    console.log('[Middleware] No valid JWT token, trying Clerk session authentication');
+    
+    try {
+      const session = await auth();
+      
+      if (!session?.userId) {
+        console.error('[Middleware] No active session found');
         return new NextResponse(JSON.stringify({
-          error: 'Authentication failed',
+          error: 'Unauthorized - No valid authentication provided',
           status: 401,
-          path: pathname
+          path: pathname,
+          authMethod: 'none'
         }), {
           status: 401,
           headers: { 'Content-Type': 'application/json' }
         });
       }
+      
+      // If we get here, Clerk session is valid
+      console.log(`[Middleware] Clerk session verified for user: ${session.userId}`);
+      
+      // Set up response with user info
+      const requestHeaders = new Headers(req.headers);
+      requestHeaders.set('x-user-id', session.userId);
+      requestHeaders.set('x-auth-method', 'session');
+      
+      const response = NextResponse.next({
+        request: { headers: requestHeaders },
+      });
+      
+      response.headers.set('x-auth-method', 'session');
+      response.headers.set('x-auth-user-id', session.userId);
+      
+      return response;
+    } catch (error) {
+      console.error('[Middleware] Error verifying Clerk session:', error);
+      return new NextResponse(JSON.stringify({
+        error: 'Authentication failed',
+        status: 401,
+        path: pathname,
+        authMethod: 'error'
+      }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' }
+      });
     }
   }
 

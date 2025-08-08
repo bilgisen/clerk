@@ -14,8 +14,16 @@ const CONFIG = {
   USER_ID: process.env.USER_ID || 'github-actions',
   CLERK_KEY_ID: process.env.CLERK_KEY_ID,
   TOKEN_EXPIRY_SECONDS: 3600, // 1 hour
-  TOKEN_FILE: 'jwt-token.txt'
+  TOKEN_FILE: 'jwt-token.txt',
+  JWT_TEMPLATE: process.env.JWT_TEMPLATE || 'matbuapp'
 };
+
+// Log configuration (without sensitive data)
+console.log('🔧 JWT Generation Configuration:');
+console.log(`- Issuer: ${CONFIG.JWT_ISSUER}`);
+console.log(`- Audience: ${CONFIG.JWT_AUDIENCE}`);
+console.log(`- Key ID: ${CONFIG.CLERK_KEY_ID ? '***' : 'Not provided'}`);
+console.log(`- JWT Template: ${CONFIG.JWT_TEMPLATE}`);
 
 // Validate required environment variables
 function validateConfig() {
@@ -64,24 +72,37 @@ async function generateToken() {
     console.log(`- Issued At: ${new Date(now * 1000).toISOString()}`);
     console.log(`- Expires At: ${new Date((now + CONFIG.TOKEN_EXPIRY_SECONDS) * 1000).toISOString()}`);
 
+    // Create a JWT token with the required claims
     const token = await new SignJWT({
+      // Standard JWT claims
       sub: CONFIG.USER_ID,
       userId: CONFIG.USER_ID,
-      // Include required Clerk claims
-      azp: 'https://matbu.vercel.app',
-      template: process.env.JWT_TEMPLATE,
-      // Add additional claims as needed
+      // Standard JWT timestamps
+      iat: now,
+      exp: now + CONFIG.TOKEN_EXPIRY_SECONDS,
+      nbf: now - 60, // Not before 1 minute ago
+      jti: `github-${Date.now()}-${Math.random().toString(36).substring(2, 10)}`,
+      
+      // Custom claims
       role: 'service-account',
       source: 'github-actions',
-      // Include standard JWT claims
-      iat: Math.floor(Date.now() / 1000),
-      // Add a unique JWT ID
-      jti: `github-${Date.now()}`
+      
+      // Clerk specific claims
+      azp: process.env.NEXT_PUBLIC_APP_URL || 'https://matbu.vercel.app',
+      template: CONFIG.JWT_TEMPLATE,
+      
+      // Additional metadata
+      metadata: {
+        service: 'github-actions',
+        workflow: process.env.GITHUB_WORKFLOW || 'unknown',
+        run_id: process.env.GITHUB_RUN_ID || 'unknown'
+      }
     })
       .setProtectedHeader({
         alg: 'RS256',
         typ: 'JWT',
-        kid: CONFIG.CLERK_KEY_ID
+        kid: CONFIG.CLERK_KEY_ID,
+        cty: 'JWT'
       })
       .setIssuer(CONFIG.JWT_ISSUER)
       .setAudience(CONFIG.JWT_AUDIENCE)

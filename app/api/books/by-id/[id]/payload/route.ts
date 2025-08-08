@@ -85,7 +85,7 @@ export async function GET(
 ) {
   try {
     // Get the book ID from params
-    const { id: bookId } = await Promise.resolve(params);
+    const bookId = params.id;
     
     // Get headers
     const headersList = await headers();
@@ -99,49 +99,77 @@ export async function GET(
       const token = authHeader.split(' ')[1];
       
       console.log('🔑 JWT Token received, starting verification...');
-      console.log('Token:', token.substring(0, 20) + '...');
+      console.log('Token prefix:', token.substring(0, 20) + '...');
       
       try {
-        // First try to verify as a JWT token
-        const decoded = await verifyToken(token);
-        if (decoded) {
-          console.log('✅ JWT Token verified successfully:', {
-            userId: decoded.userId,
-            issuer: decoded.iss,
-            audience: decoded.aud,
-            expiresAt: new Date(decoded.exp * 1000).toISOString(),
-            isExpired: Date.now() >= decoded.exp * 1000
+        // Import jose for JWT verification
+        const { jwtVerify, createRemoteJWKSet } = await import('jose');
+        
+        // Get the JWKS URI from Clerk
+        const jwksUri = `https://${process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.replace('_', ':')}/.well-known/jwks.json`;
+        const JWKS = createRemoteJWKSet(new URL(jwksUri));
+        
+        // Get issuer and audience from environment variables with fallbacks
+        const issuer = process.env.JWT_ISSUER || 'https://sunny-dogfish-14.clerk.accounts.dev';
+        const audience = process.env.JWT_AUDIENCE || 'https://sunny-dogfish-14.clerk.accounts.dev';
+        
+        console.log('🔧 JWT Verification Config:', { issuer, audience });
+        
+        // Verify the JWT token
+        const { payload } = await jwtVerify(token, JWKS, {
+          issuer,
+          audience,
+          algorithms: ['RS256']
+        });
+        
+        console.log('✅ JWT Token verified successfully:', {
+          userId: payload.sub,
+          issuer: payload.iss,
+          audience: payload.aud,
+          expiresAt: payload.exp ? new Date(payload.exp * 1000).toISOString() : 'no expiration',
+          isExpired: payload.exp ? Date.now() >= payload.exp * 1000 : false
+        });
+        
+        // Validate required claims
+        const isValidAudience = Array.isArray(payload.aud) 
+          ? payload.aud.includes(audience)
+          : payload.aud === audience;
+          
+        if (!isValidAudience || payload.iss !== issuer) {
+          console.error('❌ JWT validation failed: Invalid issuer or audience', {
+            expected: { aud: audience, iss: issuer },
+            received: { aud: payload.aud, iss: payload.iss }
           });
-          
-          if (decoded.aud !== 'https://api.clerko.com' || decoded.iss !== 'clerk.clerko.v1') {
-            console.error('❌ JWT validation failed: Invalid issuer or audience', {
-              expected: { aud: 'https://api.clerko.com', iss: 'clerk.clerko.v1' },
-              received: { aud: decoded.aud, iss: decoded.iss }
-            });
-            throw new Error('Invalid token issuer or audience');
-          }
-          
-          userId = decoded.userId;
-          isServiceAccount = true; // Mark as service account for authorization
-        } else {
-          console.error('❌ JWT verification returned null');
+          throw new Error('Invalid token issuer or audience');
         }
+        
+        userId = payload.sub || null;
+        isServiceAccount = true;
+        
       } catch (error) {
         console.error('❌ JWT verification failed:', error instanceof Error ? error.message : 'Unknown error');
-        // If JWT verification fails, try Clerk authentication
-        const user = await currentUser();
-        if (user) {
-          console.log('🔑 Falling back to Clerk authentication');
-          userId = user.id;
-        } else {
-          console.error('❌ No valid authentication method found');
+        // If JWT verification fails, try Clerk authentication as fallback
+        try {
+          const user = await currentUser();
+          if (user) {
+            console.log('🔑 Falling back to Clerk authentication');
+            userId = user.id;
+          } else {
+            console.error('❌ No valid authentication method found');
+          }
+        } catch (userError) {
+          console.error('❌ Clerk authentication failed:', userError instanceof Error ? userError.message : 'Unknown error');
         }
       }
     } else {
       // If no token, try to get current user from Clerk
-      const user = await currentUser();
-      if (user) {
-        userId = user.id;
+      try {
+        const user = await currentUser();
+        if (user) {
+          userId = user.id;
+        }
+      } catch (error) {
+        console.error('❌ Clerk authentication failed:', error instanceof Error ? error.message : 'Unknown error');
       }
     }
 

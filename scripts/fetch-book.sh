@@ -93,14 +93,25 @@ for var in "${REQUIRED_VARS[@]}"; do
   fi
 done
 
-# Extract JWT token from header if needed
-if [[ "$JWT_HEADER" == Bearer* ]]; then
-  JWT_TOKEN="${JWT_HEADER#Bearer }"
+# Ensure JWT token is properly formatted
+if [[ -z "$JWT_TOKEN" && -n "$JWT_HEADER" ]]; then
+  # Extract token from header if it's in Bearer format
+  if [[ "$JWT_HEADER" == Bearer* ]]; then
+    JWT_TOKEN="${JWT_HEADER#Bearer }"
+  else
+    JWT_TOKEN="$JWT_HEADER"
+  fi
 fi
 
 # Validate JWT token
 if ! validate_jwt "$JWT_TOKEN"; then
   log_error "JWT token validation failed"
+  exit 1
+fi
+
+# Ensure we have a valid token
+if [ -z "$JWT_TOKEN" ]; then
+  log_error "No JWT token provided"
   exit 1
 fi
 
@@ -127,7 +138,7 @@ log_info "🔑 JWT Token Analysis:"
 set -x
 curl -v -s -f -D ./headers.txt -o ./book-content/payload.json \
   -H "Accept: application/json" \
-  -H "Authorization: $JWT_HEADER" \
+  -H "Authorization: Bearer $JWT_TOKEN" \
   "$PAYLOAD_URL" 2> ./curl-debug.log || {
     CURL_EXIT_CODE=$?
     set +x

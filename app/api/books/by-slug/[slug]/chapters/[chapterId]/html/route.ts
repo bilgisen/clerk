@@ -21,24 +21,27 @@ export async function GET(
   { params }: { params: { slug: string; chapterId: string } }
 ) {
   try {
-    const { slug, chapterId } = params;
+    // Properly handle params in Next.js 13+
+    const [slug, chapterId] = await Promise.all([
+      Promise.resolve(params.slug),
+      Promise.resolve(params.chapterId)
+    ]);
+    
     const requestStart = Date.now();
     
     console.log(`[${new Date().toISOString()}] Request for book: ${slug}, chapter: ${chapterId}`);
     
     // Get authenticated user ID from Clerk
-    const { userId } = auth();
+    // Get authenticated user session from Clerk
+    const session = await auth();
+    const userId = session?.userId;
     
     if (!userId) {
       console.warn('Unauthenticated request');
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
+      return new NextResponse(
+        JSON.stringify({ error: 'Unauthorized - Please sign in' }), 
+        { status: 401, headers: { 'Content-Type': 'application/json' } }
       );
-    }
-    if (!userId) {
-      console.error('No authenticated user');
-      return new NextResponse('Unauthorized', { status: 401 });
     }
 
     // Get the book and verify ownership in a single query

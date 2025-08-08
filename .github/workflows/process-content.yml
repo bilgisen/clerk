@@ -103,10 +103,10 @@ jobs:
         timeout-minutes: 5
         env:
           PRIVATE_KEY_B64: ${{ secrets.PRIVATE_KEY_B64 }}
-          JWT_ISSUER: ${{ env.JWT_ISSUER }}
-          JWT_AUDIENCE: ${{ env.JWT_AUDIENCE }}
+          JWT_ISSUER: 'clerk.clerko.v1'  # Hardcoded to match API expectations
+          JWT_AUDIENCE: 'https://api.clerko.com'  # Hardcoded to match API expectations
           CLERK_KEY_ID: ${{ env.CLERK_KEY_ID }}
-          JWT_TEMPLATE: ${{ env.JWT_TEMPLATE }}
+          JWT_TEMPLATE: 'matbuapp'  # Hardcoded template name
           NEXT_PUBLIC_APP_URL: ${{ env.NEXT_PUBLIC_APP_URL }}
           NODE_OPTIONS: --no-warnings
         run: |
@@ -129,6 +129,13 @@ jobs:
           # Make sure the script is executable
           chmod +x scripts/generate-jwt.mjs
           
+          # Debug: Print environment variables
+          echo "=== Environment Variables ==="
+          echo "JWT_ISSUER: $JWT_ISSUER"
+          echo "JWT_AUDIENCE: $JWT_AUDIENCE"
+          echo "CLERK_KEY_ID: $CLERK_KEY_ID"
+          echo "JWT_TEMPLATE: $JWT_TEMPLATE"
+          
           # Generate the token with the private key and required env vars
           if ! JWT_OUTPUT=$(PRIVATE_KEY_PATH=./private.pem \
             JWT_ISSUER="$JWT_ISSUER" \
@@ -150,12 +157,19 @@ jobs:
           # Set the token in environment variables
           JWT_TOKEN=$(cat jwt-token.txt)
           echo "JWT_TOKEN=$JWT_TOKEN" | tee -a $GITHUB_ENV
-          echo "JWT_HEADER=Bearer $JWT_TOKEN" | tee -a $GITHUB_ENV
           
           # Verify the token is not empty
           if [ -z "$JWT_TOKEN" ]; then
             echo "::error::Generated JWT token is empty"
             exit 1
+          fi
+          
+          # Debug: Print token info
+          echo "=== JWT Token Info ==="
+          echo "Token length: ${#JWT_TOKEN} characters"
+          if command -v jq &> /dev/null; then
+            echo -n "Token payload: "
+            echo "$JWT_TOKEN" | cut -d'.' -f2 | base64 -d 2>/dev/null | jq -c '{iss, aud, sub, iat, exp}' || echo "Failed to decode JWT payload"
           fi
           
           # Clean up the private key
@@ -188,8 +202,7 @@ jobs:
         env:
           CONTENT_ID: ${{ github.event.inputs.content_id }}
           BASE_URL: ${{ env.NEXT_PUBLIC_APP_URL }}
-          JWT_HEADER: ${{ env.JWT_HEADER }}
-          JWT_TOKEN: ${{ env.JWT_TOKEN }}
+          JWT_TOKEN: ${{ env.JWT_TOKEN }}  # Only pass the raw token
           DOWNLOAD_TIMEOUT: ${{ env.DOWNLOAD_TIMEOUT }}
           # Add verbose logging
           CURL_VERBOSE: "1"
@@ -198,16 +211,63 @@ jobs:
           set -e
           echo "📚 Starting book content fetch for ID: $CONTENT_ID"
           
-          # Make the script executable
-          chmod +x ./scripts/fetch-book.sh
+          # Debug environment variables (excluding sensitive data)
+          echo "[INFO] 🔧 Environment variables:"
+          printenv | grep -v -E 'SECRET|TOKEN|PASSWORD|KEY' | sort
           
-          # Execute the fetch script with timeout
-          if ! timeout $DOWNLOAD_TIMEOUT ./scripts/fetch-book.sh; then
-            echo "::error::❌ Book content fetch timed out after $DOWNLOAD_TIMEOUT seconds"
+          # Validate JWT token
+          if [ -z "$JWT_TOKEN" ]; then
+            echo "::error::JWT_TOKEN is empty"
             exit 1
           fi
           
-          echo "✅ Book content fetched successfully"
+          # Create output directory
+          mkdir -p ./book-content
+          
+          # Make the script executable
+          chmod +x scripts/fetch-book.sh
+          
+          # Debug: Print token info
+          echo "[DEBUG] 🔑 JWT Token Info:"
+          echo "- Token length: ${#JWT_TOKEN} characters"
+          if command -v jq &> /dev/null; then
+            echo -n "- Token payload: "
+            echo "$JWT_TOKEN" | cut -d'.' -f2 | base64 -d 2>/dev/null | jq -c '{iss, aud, sub, iat, exp}' || echo "Failed to decode JWT payload"
+          fi
+          
+          # Debug: Make a test request to the API
+          echo "[DEBUG] 🧪 Testing API access..."
+          curl -v -s -f \
+            -H "Accept: application/json" \
+            -H "Authorization: Bearer $JWT_TOKEN" \
+            "$BASE_URL/api/books/by-id/$CONTENT_ID/payload" \
+            -o /dev/null \
+            -w "\nResponse Code: %{http_code}\n" \
+            --max-time 30 || true
+          
+          # Set executable permissions and run the fetch script with timeout
+          echo "[INFO] 🚀 Starting fetch-book.sh..."
+          chmod +x ./scripts/fetch-book.sh
+          
+          # Execute the script with the token
+          if ! timeout $DOWNLOAD_TIMEOUT ./scripts/fetch-book.sh; then
+            echo "::error::Book content fetch failed"
+            
+            # Check for any error logs
+            if [ -f "./curl-debug.log" ]; then
+              echo "=== cURL Debug Log ==="
+              cat ./curl-debug.log
+            fi
+            
+            if [ -f "./headers.txt" ]; then
+              echo "=== Response Headers ==="
+              cat ./headers.txt
+            fi
+            
+            exit 1
+          fi
+          
+          echo "✅ Successfully fetched book content"
           
           # Extract metadata from the downloaded content
           if [ -f "./book-content/payload.json" ]; then
