@@ -24,7 +24,8 @@ env:
   # JWT configuration must match the values expected by the application
   JWT_ISSUER: 'clerk.clerko.v1'
   JWT_AUDIENCE: 'https://api.clerko.com'
-  CLERK_KEY_ID: 'jtmp_310Eh03rhbpy3wXWHcIaNkwwTpj'
+  # Use the correct key ID that matches the server's JWKS
+  CLERK_KEY_ID: 'ins_2yhHfvuC7eV6d8wuj44hPANY5Kq'
   JWT_SECRET: ${{ secrets.JWT_SECRET }}
   PRIVATE_KEY_B64: ${{ secrets.PRIVATE_KEY_B64 }}
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
