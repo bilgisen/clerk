@@ -1,7 +1,11 @@
 // scripts/generate-jwt.mjs
+import { webcrypto, createSecretKey } from 'node:crypto';
+if (!globalThis.crypto) {
+  globalThis.crypto = webcrypto;
+}
+
 import { writeFileSync } from 'fs';
-import { SignJWT } from 'jose/dist/node/jwt/sign.js';
-import { createSecretKey } from 'node:crypto';
+import { SignJWT } from 'jose';
 
 // Required environment variables
 const JWT_SECRET = process.env.JWT_SECRET || process.env.CLERK_SECRET_KEY;
@@ -18,12 +22,11 @@ async function generateToken() {
     const now = Math.floor(Date.now() / 1000);
     const tokenExpiry = 3600; // 1 hour
 
-    // Create secret key from base64 or utf8
+    // Detect if key is base64 or utf8
     const secretKey = createSecretKey(
       Buffer.from(JWT_SECRET, /^[A-Za-z0-9+/]+={0,2}$/.test(JWT_SECRET) ? 'base64' : 'utf8')
     );
 
-    // Create JWT token
     const token = await new SignJWT({
       azp: JWT_AUDIENCE,
       sub: 'github-actions',
