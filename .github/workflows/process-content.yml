@@ -21,8 +21,9 @@ on:
 env:
   NEXT_PUBLIC_APP_URL: ${{ vars.NEXT_PUBLIC_APP_URL || 'https://matbu.vercel.app' }}
   NODE_ENV: production
-  JWT_ISSUER: 'https://sunny-dogfish-14.clerk.accounts.dev'
-  JWT_AUDIENCE: 'https://sunny-dogfish-14.clerk.accounts.dev'
+  # JWT configuration must match the values expected by the application
+  JWT_ISSUER: 'clerk.clerko.v1'
+  JWT_AUDIENCE: 'https://api.clerko.com'
   CLERK_KEY_ID: 'jtmp_310Eh03rhbpy3wXWHcIaNkwwTpj'
   JWT_SECRET: ${{ secrets.JWT_SECRET }}
   PRIVATE_KEY_B64: ${{ secrets.PRIVATE_KEY_B64 }}
@@ -136,6 +137,25 @@ jobs:
           
           echo "✅ JWT token generated successfully"
 
+      - name: Debug JWT Token
+        run: |
+          echo "🔑 JWT Token Debug:"
+          echo "Token length: ${#JWT_TOKEN}"
+          echo "Header: ${JWT_HEADER:0:20}..."
+          echo "Content ID: ${{ github.event.inputs.content_id }}"
+          echo "Base URL: ${{ env.NEXT_PUBLIC_APP_URL }}"
+          
+          # Print the first part of the token for debugging (header)
+          if [ -n "$JWT_TOKEN" ]; then
+            echo "\nToken Header (decoded):"
+            echo "$JWT_TOKEN" | cut -d'.' -f1 | base64 -d 2>/dev/null || echo "Failed to decode token header"
+            
+            echo "\nToken Payload (decoded):"
+            echo "$JWT_TOKEN" | cut -d'.' -f2 | base64 -d 2>/dev/null || echo "Failed to decode token payload"
+          else
+            echo "\n❌ JWT_TOKEN is empty"
+          fi
+
       - name: Fetch Book Content
         id: fetch-book
         timeout-minutes: 30
@@ -145,6 +165,9 @@ jobs:
           JWT_HEADER: ${{ env.JWT_HEADER }}
           JWT_TOKEN: ${{ env.JWT_TOKEN }}
           DOWNLOAD_TIMEOUT: ${{ env.DOWNLOAD_TIMEOUT }}
+          # Add verbose logging
+          CURL_VERBOSE: "1"
+          DEBUG: "*"
         run: |
           set -e
           echo "📚 Starting book content fetch for ID: $CONTENT_ID"
@@ -294,13 +317,36 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           
-      - name: Notify Completion
+      - name: Debug Output
         if: always()
         run: |
-          if [ -f "./output/${{ github.event.inputs.content_id }}.epub" ]; then
-            echo "✅ E-book generation completed successfully"
+          echo "🔍 Debugging information:"
+          echo "Current directory: $(pwd)"
+          echo "Output directory contents:"
+          ls -la ./output/ || echo "Output directory not found"
+          echo "Book content directory contents:"
+          ls -la ./book-content/ || echo "Book content directory not found"
+          
+          # Check if the output directory exists
+          if [ ! -d "./output" ]; then
+            echo "::error::❌ Output directory does not exist"
+            exit 1
+          fi
+          
+          # Check for any error logs
+          if [ -f "pandoc.log" ]; then
+            echo "📝 Pandoc log contents:"
+            cat pandoc.log
+          fi
+          
+          # Check for the specific file
+          EPUB_FILE="./output/${{ github.event.inputs.content_id }}.epub"
+          if [ -f "$EPUB_FILE" ]; then
+            FILESIZE=$(stat -c "%s" "$EPUB_FILE" 2>/dev/null || stat -f "%z" "$EPUB_FILE")
+            echo "✅ E-book generated successfully: $EPUB_FILE (${FILESIZE} bytes)"
             echo "::notice title=Success::E-book generated successfully!"
           else
-            echo "::error::❌ E-book generation failed"
+            echo "::error::❌ E-book generation failed: $EPUB_FILE not found"
+            echo "::error::Please check the previous steps for any errors"
             exit 1
           fi
