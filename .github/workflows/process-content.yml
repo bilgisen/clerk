@@ -60,7 +60,10 @@ jobs:
             wget \
             parallel
 
-      - name: Generate JWT Token with matbu template
+      - name: Decode private.pem
+        run: echo "${{ secrets.PRIVATE_KEY_B64 }}" | base64 --decode > private.pem
+
+      - name: Generate JWT Token with matbuapp template
         id: generate-token
         env:
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
