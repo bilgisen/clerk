@@ -48,7 +48,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: '18.x'
+          node-version: '20.x'
           cache: 'npm'
 
       - name: Install dependencies
@@ -137,19 +137,34 @@ jobs:
           echo "JWT_TEMPLATE: $JWT_TEMPLATE"
           
           # Generate the token with the private key and required env vars
-          if ! JWT_TOKEN=$(PRIVATE_KEY_PATH=./private.pem \
+          echo "🔑 Generating JWT token with the following settings:"
+          echo "- Issuer: $JWT_ISSUER"
+          echo "- Audience: $JWT_AUDIENCE"
+          echo "- Key ID: $CLERK_KEY_ID"
+          echo "- Template: $JWT_TEMPLATE"
+          
+          # Run the JWT generation script and capture output
+          JWT_OUTPUT=$(PRIVATE_KEY_PATH=./private.pem \
             JWT_ISSUER="$JWT_ISSUER" \
             JWT_AUDIENCE="$JWT_AUDIENCE" \
             CLERK_KEY_ID="$CLERK_KEY_ID" \
             JWT_TEMPLATE="$JWT_TEMPLATE" \
-            node scripts/generate-jwt.mjs 2>&1); then
+            node scripts/generate-jwt.mjs 2>&1)
+          
+          # Check if the command failed
+          if [ $? -ne 0 ]; then
             echo "::error::Failed to generate JWT token"
+            echo "Error output: $JWT_OUTPUT"
             exit 1
           fi
           
-          # Verify the token is not empty
-          if [ -z "$JWT_TOKEN" ]; then
-            echo "::error::Generated JWT token is empty"
+          # Extract the JWT token (last line of output)
+          JWT_TOKEN=$(echo "$JWT_OUTPUT" | tail -1)
+          
+          # Verify the token is not empty and looks like a JWT
+          if [ -z "$JWT_TOKEN" ] || [ $(echo "$JWT_TOKEN" | grep -o '\\.' | wc -l) -lt 2 ]; then
+            echo "::error::Generated JWT token is invalid or empty"
+            echo "Token output: $JWT_OUTPUT"
             exit 1
           fi
           
@@ -160,9 +175,18 @@ jobs:
           # Debug: Print token info
           echo "=== JWT Token Info ==="
           echo "Token length: ${#JWT_TOKEN} characters"
+          
+          # Try to decode and display token payload if jq is available
           if command -v jq &> /dev/null; then
-            echo -n "Token payload: "
-            echo "$JWT_TOKEN" | cut -d'.' -f2 | base64 -d 2>/dev/null | jq -c '{iss, aud, sub, iat, exp}' || echo "Failed to decode JWT payload"
+            PAYLOAD=$(echo "$JWT_TOKEN" | cut -d'.' -f2 | base64 -d 2>/dev/null) || true
+            if [ -n "$PAYLOAD" ]; then
+              echo "Token payload:"
+              echo "$PAYLOAD" | jq .
+            else
+              echo "Failed to decode JWT payload"
+            fi
+          else
+            echo "jq not available, skipping token payload inspection"
           fi
           
           # Clean up the private key
