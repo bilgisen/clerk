@@ -5,7 +5,7 @@ if (!globalThis.crypto) {
 }
 
 import { writeFileSync } from 'fs';
-import { SignJWT, importPKCS8, importJWK } from 'jose';
+import { SignJWT } from 'jose';
 
 // Required environment variables
 const JWT_SECRET = process.env.JWT_SECRET || process.env.CLERK_SECRET_KEY;
@@ -24,11 +24,8 @@ async function generateToken() {
     const now = Math.floor(Date.now() / 1000);
     const tokenExpiry = 3600; // 1 hour
 
-    // Create a JWK from the secret
-    const secretKey = await importPKCS8(
-      `-----BEGIN PRIVATE KEY-----\n${JWT_SECRET}\n-----END PRIVATE KEY-----`,
-      'RS256'
-    );
+    // Create a secret key from the JWT_SECRET
+    const secretKey = new TextEncoder().encode(JWT_SECRET);
 
     // Create the JWT token with required claims
     const token = await new SignJWT({
@@ -53,15 +50,23 @@ async function generateToken() {
         workflow: process.env.GITHUB_WORKFLOW || 'unknown',
         run_id: process.env.GITHUB_RUN_ID || 'unknown',
         service: 'github-actions',
-        // Add any additional metadata needed by your application
         contentId: process.env.CONTENT_ID || 'unknown',
-        environment: process.env.NODE_ENV || 'production'
+        environment: process.env.NODE_ENV || 'production',
+        // Add any additional metadata needed by your application
+        ...(process.env.GITHUB_ACTION ? {
+          github: {
+            action: process.env.GITHUB_ACTION,
+            actor: process.env.GITHUB_ACTOR,
+            run_id: process.env.GITHUB_RUN_ID,
+            workflow: process.env.GITHUB_WORKFLOW
+          }
+        } : {})
       }
     })
       .setProtectedHeader({
-        alg: 'RS256',  // Use RS256 which is what Clerk expects
+        alg: 'HS256',  // Using HS256 with the secret key
         typ: 'JWT',
-        kid: CLERK_KEY_ID  // Add the key ID from Clerk
+        kid: CLERK_KEY_ID  // Clerk key ID is still included in the header
       })
       .setIssuer(JWT_ISSUER)
       .setAudience(JWT_AUDIENCE)
