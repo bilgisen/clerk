@@ -266,20 +266,45 @@ jobs:
           # Decode and display token payload using Node.js
           node -e "
             try {
-              const [header, payload] = process.env.JWT_TOKEN.split('.');
-              const decodedHeader = JSON.parse(Buffer.from(header, 'base64').toString('utf-8'));
-              const decodedPayload = JSON.parse(Buffer.from(payload, 'base64').toString('utf-8'));
+              const fs = require('fs');
               
+              // Try to read the token from the file if not in env
+              let token = process.env.JWT_TOKEN;
+              if (!token) {
+                try {
+                  token = fs.readFileSync('jwt-token.txt', 'utf8').trim();
+                  console.log('Read token from file');
+                } catch (e) {
+                  console.error('Error reading token from file:', e.message);
+                }
+              }
+              
+              if (!token) {
+                throw new Error('No JWT token found in environment or file');
+              }
+              
+              console.log('Token length:', token.length);
+              
+              // Split the token into parts
+              const parts = token.split('.');
+              if (parts.length !== 3) {
+                throw new Error(`Invalid JWT format: expected 3 parts, got ${parts.length}`);
+              }
+              
+              // Decode and log the token parts
+              const [header, payload, signature] = parts;
               console.log('\n🔐 JWT Header:');
-              console.log(JSON.stringify(decodedHeader, null, 2));
+              console.log(JSON.stringify(JSON.parse(Buffer.from(header, 'base64').toString('utf-8')), null, 2));
               
               console.log('\n🔐 JWT Payload:');
-              console.log(JSON.stringify(decodedPayload, null, 2));
+              console.log(JSON.stringify(JSON.parse(Buffer.from(payload, 'base64').toString('utf-8')), null, 2));
               
-              console.log('\n✅ Token generated successfully');
+              console.log('\n🔐 JWT Signature (first 10 chars):', signature.substring(0, 10) + '...');
+              console.log('\n✅ Token decoded successfully');
+              
             } catch (error) {
               console.error('Error decoding token:', error.message);
-              console.log('\n🔐 JWT Token (raw):', process.env.JWT_TOKEN);
+              console.error('Error stack:', error.stack);
               process.exit(1);
             }
           "
