@@ -64,10 +64,13 @@ jobs:
 
       - name: Decode private.pem
         run: |
-          echo "${{ secrets.PRIVATE_KEY_B64 }}" | base64 --decode > private.pem
-        shell: bash
+          echo "Creating private.pem from base64 secret..."
+          echo "${{ secrets.PRIVATE_KEY_B64 }}" | base64 -d > private.pem
+          chmod 600 private.pem
+          echo "Private key created with permissions 600"
+          ls -la private.pem
 
-      - name: Generate JWT Token with matbu template
+      - name: Generate JWT Token with matbuapp template
         id: generate-token
         env:
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
