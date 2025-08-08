@@ -68,6 +68,8 @@ jobs:
           
           echo "📦 Installing required tools..."
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            coreutils \
+            base64 \
             pandoc \
             texlive-xetex \
             texlive-fonts-recommended \
@@ -80,6 +82,12 @@ jobs:
             gnupg \
             software-properties-common
             
+          # Verify base64 is available
+          if ! command -v base64 &> /dev/null; then
+            echo "::error::base64 command not found after installation"
+            exit 1
+          fi
+          
           # Clean up to reduce image size
           sudo apt-get clean
           sudo rm -rf /var/lib/apt/lists/*

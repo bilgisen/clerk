@@ -46,7 +46,16 @@ function validateConfig() {
 async function loadPrivateKey() {
   try {
     console.log('🔑 Loading private key...');
-    const privateKeyPem = readFileSync(CONFIG.PRIVATE_KEY_PATH, 'utf8');
+    const privateKeyB64 = readFileSync(CONFIG.PRIVATE_KEY_PATH, 'utf8');
+    
+    // Decode the base64-encoded private key using Node.js Buffer
+    const privateKeyPem = Buffer.from(privateKeyB64, 'base64').toString('utf-8');
+    
+    // Debug: Verify the private key was decoded correctly
+    if (!privateKeyPem || !privateKeyPem.includes('PRIVATE KEY')) {
+      console.error('Error: Failed to decode private key or invalid format');
+      process.exit(1);
+    }
     
     // Validate key format
     if (!privateKeyPem.includes('-----BEGIN PRIVATE KEY-----')) {
