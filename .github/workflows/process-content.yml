@@ -217,26 +217,32 @@ jobs:
             exit 1
           fi
           
-          # Extract the token (should be the last line of output)
-          JWT_TOKEN=$(echo "$JWT_OUTPUT" | grep -E '^eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+$' | tail -n 1)
+          # Read the token from the file instead of the output
+          JWT_TOKEN_FILE="jwt-token.txt"
           
-          # If we didn't find a token in the expected format, try to extract it from the last line
-          if [ -z "$JWT_TOKEN" ]; then
-            JWT_TOKEN=$(echo "$JWT_OUTPUT" | tail -n 1 | tr -d '[:space:]')
+          # Check if the token file exists
+          if [ ! -f "$JWT_TOKEN_FILE" ]; then
+            echo "::error::JWT token file not found: $JWT_TOKEN_FILE"
+            echo "Current directory contents:"
+            ls -la ./
+            exit 1
           fi
+          
+          # Read the token from the file
+          JWT_TOKEN=$(cat "$JWT_TOKEN_FILE" | tr -d '[:space:]')
           
           # Verify we got a token
           if [ -z "$JWT_TOKEN" ] || [ $(echo "$JWT_TOKEN" | wc -c) -lt 100 ]; then
-            echo "::error::Invalid or empty JWT token received"
-            echo "Last 5 lines of output:"
-            echo "$JWT_OUTPUT" | tail -n 5
+            echo "::error::Invalid or empty JWT token in file"
+            echo "Token length: ${#JWT_TOKEN} characters"
             exit 1
           fi
           
           # Verify the token looks like a JWT (has two dots)
-          if [ $(echo "$JWT_TOKEN" | grep -o '\\.' | wc -l) -lt 2 ]; then
-            echo "::error::Generated JWT token is invalid (missing parts)"
-            echo "Token: $JWT_TOKEN"
+          DOT_COUNT=$(echo "$JWT_TOKEN" | tr -cd '.' | wc -c)
+          if [ "$DOT_COUNT" -ne 2 ]; then
+            echo "::error::Generated JWT token is invalid (expected 2 parts, got $DOT_COUNT)"
+            echo "Token start: ${JWT_TOKEN:0:30}..."
             exit 1
           fi
           

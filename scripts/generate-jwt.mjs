@@ -235,8 +235,13 @@ async function generateToken() {
 // Run the generator
 generateToken()
   .then(token => {
-    // Only output the token on success (this will be the last line of output)
-    console.log(token);
+    // Write the token to a file instead of outputting it
+    const fs = require('fs');
+    const tokenFile = process.env.GITHUB_WORKSPACE ? 
+      `${process.env.GITHUB_WORKSPACE}/jwt-token.txt` : 'jwt-token.txt';
+    
+    fs.writeFileSync(tokenFile, token);
+    console.log(`✅ JWT token written to ${tokenFile}`);
     process.exit(0);
   })
   .catch(error => {
