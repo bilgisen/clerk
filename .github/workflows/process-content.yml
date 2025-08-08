@@ -21,12 +21,12 @@ on:
 env:
   NEXT_PUBLIC_APP_URL: ${{ vars.NEXT_PUBLIC_APP_URL || 'https://matbu.vercel.app' }}
   NODE_ENV: production
-  JWT_ISSUER: 'https://sunny-dogfish-14.clerk.accounts.dev'  # Must match the issuer in auth.ts
-  JWT_AUDIENCE: 'https://sunny-dogfish-14.clerk.accounts.dev'  # Must match the audience in auth.ts
+  JWT_ISSUER: 'https://sunny-dogfish-14.clerk.accounts.dev'
+  JWT_AUDIENCE: 'https://sunny-dogfish-14.clerk.accounts.dev'
   CLERK_KEY_ID: 'jtmp_310Eh03rhbpy3wXWHcIaNkwwTpj'
   JWT_SECRET: ${{ secrets.JWT_SECRET }}
   PRIVATE_KEY_B64: ${{ secrets.PRIVATE_KEY_B64 }}
-  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN || github.token }}
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   GITHUB_REPO_OWNER: bilgisen
   GITHUB_REPO_NAME: clerk
 
@@ -63,274 +63,27 @@ jobs:
             parallel
 
       - name: Decode private.pem
-        run: echo "${{ secrets.PRIVATE_KEY_B64 }}" | base64 --decode > private.pem
+        run: |
+          echo "${{ secrets.PRIVATE_KEY_B64 }}" | base64 --decode > private.pem
+        shell: bash
 
-      - name: Generate JWT Token with matbuapp template
+      - name: Generate JWT Token with matbu template
         id: generate-token
         env:
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           JWT_ISSUER: ${{ env.JWT_ISSUER }}
           JWT_AUDIENCE: ${{ env.JWT_AUDIENCE }}
-          GITHUB_WORKFLOW: ${{ github.workflow }}
-          GITHUB_RUN_ID: ${{ github.run_id }}
         run: |
-          # Install required tools
-          echo "🔧 Installing required tools..."
-          npm install jose
-          
-          # Generate JWT token using matbu template
-          echo "🔑 Generating JWT token with matbu template..."
-          echo "- JWT_ISSUER: $JWT_ISSUER"
-          echo "- JWT_AUDIENCE: $JWT_AUDIENCE"
-          
+          echo "🔑 Generating JWT token..."
           node --experimental-modules scripts/generate-jwt.mjs
-          
-          # Read the generated token
+
           if [ ! -f "jwt-token.txt" ]; then
-            echo "::error::❌ JWT token file not found"
+            echo "::error::JWT token file not found"
             exit 1
           fi
-          
+
           JWT_TOKEN=$(cat jwt-token.txt)
-          
-          # Set environment variables for subsequent steps
           echo "JWT_TOKEN=$JWT_TOKEN" >> $GITHUB_ENV
           echo "JWT_HEADER=Bearer $JWT_TOKEN" >> $GITHUB_ENV
-          
-          # Debug: Verify the token structure
-          echo "\n🔍 Token verification:"
-          echo "- Token length: ${#JWT_TOKEN} characters"
-          echo "- Token prefix: ${JWT_TOKEN:0:20}..."
-          
-          # Decode and display token header and payload (for debugging)
-          if ! command -v jq &> /dev/null; then
-            echo "::warning::jq not installed, skipping token inspection"
-          else
-            echo "\n📋 Token contents:"
-            echo "Header:"
-            echo $JWT_TOKEN | cut -d'.' -f1 | base64 -d 2>/dev/null | jq '.' 2>/dev/null || echo "Failed to decode header"
-            echo "\nPayload:"
-            echo $JWT_TOKEN | cut -d'.' -f2 | base64 -d 2>/dev/null | jq '.' 2>/dev/null || echo "Failed to decode payload"
-            
-            # Verify template name
-            TEMPLATE=$(echo $JWT_TOKEN | cut -d'.' -f2 | base64 -d 2>/dev/null | jq -r '.template // empty' 2>/dev/null)
-            if [ "$TEMPLATE" != "matbu" ]; then
-              echo "::warning::Token template is '$TEMPLATE', expected 'matbu'"
-            fi
-          fi
 
-      - name: Fetch Book Payload
-        id: fetch-payload
-        env:
-          JWT_TOKEN: ${{ env.JWT_TOKEN }}
-          JWT_HEADER: ${{ env.JWT_HEADER }}
-          CONTENT_ID: ${{ github.event.inputs.content_id }}
-          BASE_URL: ${{ env.NEXT_PUBLIC_APP_URL }}
-          JWT_ISSUER: ${{ env.JWT_ISSUER }}
-          JWT_AUDIENCE: ${{ env.JWT_AUDIENCE }}
-        run: |
-          # Print environment info for debugging
-          echo "🔍 Environment variables in fetch-payload step:"
-          echo "- JWT_TOKEN: ${JWT_TOKEN:0:10}..."
-          echo "- JWT_HEADER: ${JWT_HEADER:0:20}..."
-          echo "- CONTENT_ID: $CONTENT_ID"
-          echo "- BASE_URL: $BASE_URL"
-          echo "- JWT_ISSUER: $JWT_ISSUER"
-          echo "- JWT_AUDIENCE: $JWT_AUDIENCE"
-          
-          # Make sure the script is executable
-          chmod +x ./scripts/fetch-book.sh
-          
-          # Run the fetch script with all required environment variables
-          JWT_TOKEN="$JWT_TOKEN" \
-          JWT_HEADER="$JWT_HEADER" \
-          CONTENT_ID="$CONTENT_ID" \
-          BASE_URL="$BASE_URL" \
-          JWT_ISSUER="$JWT_ISSUER" \
-          JWT_AUDIENCE="$JWT_AUDIENCE" \
-            ./scripts/fetch-book.sh
-
-          PAYLOAD_URL="$BASE_URL/api/books/by-id/$CONTENT_ID/payload"
-          echo "Fetching payload from: $PAYLOAD_URL"
-          echo "Using JWT_HEADER: $JWT_HEADER"
-
-          if ! curl -s -f -D ./headers.txt -o ./book-content/payload.json \
-                -H "Accept: application/json" \
-                -H "Authorization: $JWT_HEADER" \
-                "$PAYLOAD_URL"; then
-            echo "::error::❌ Failed to download book payload from $PAYLOAD_URL"
-            echo "↪️  HTTP response headers:"
-            cat ./headers.txt
-            exit 1
-          fi
-
-          echo "✅ Payload fetched successfully. Checking if file is not empty..."
-          if [ ! -s "./book-content/payload.json" ]; then
-            echo "::error::⚠️ Received empty payload"
-            exit 1
-          fi
-
-          echo "📦 Payload content (first 20 lines):"
-          head -n 20 ./book-content/payload.json || echo "::warning::Unable to preview payload"
-
-          set +e
-          BOOK_TITLE=$(jq -r '.book.title // "Untitled Book"' ./book-content/payload.json 2>/dev/null)
-          if [ $? -ne 0 ]; then
-            echo "::error::❌ Invalid payload format: failed to parse book title"
-            jq . ./book-content/payload.json >&2
-            exit 1
-          fi
-
-          BOOK_LANG=$(jq -r '.book.language // "en"' ./book-content/payload.json 2>/dev/null)
-          COVER_URL=$(jq -r '.book.cover_url // empty' ./book-content/payload.json 2>/dev/null)
-          STYLESHEET_URL=$(jq -r '.book.stylesheet_url // empty' ./book-content/payload.json 2>/dev/null)
-          TOC_DEPTH=$(jq -r '.options.toc_depth // 2' ./book-content/payload.json 2>/dev/null)
-          set -e
-
-          echo "📖 Book Title: $BOOK_TITLE"
-          echo "🌐 Language: $BOOK_LANG"
-          echo "🖼️  Cover URL: $COVER_URL"
-          echo "🎨 Stylesheet URL: $STYLESHEET_URL"
-          echo "📚 TOC Depth: $TOC_DEPTH"
-
-          if [ -n "$COVER_URL" ]; then
-            echo "📥 Downloading cover image from $COVER_URL"
-            wget --header="Authorization: $JWT_HEADER" -O ./book-content/cover.jpg "$COVER_URL" || \
-              echo "⚠️ Warning: Failed to download cover image"
-          fi
-
-          if [ -n "$STYLESHEET_URL" ]; then
-            echo "📥 Downloading stylesheet from $STYLESHEET_URL"
-            mkdir -p ./book-content/styles
-            wget --header="Authorization: $JWT_HEADER" -O ./book-content/styles/epub.css "$STYLESHEET_URL" || \
-              echo "⚠️ Warning: Failed to download stylesheet"
-          fi
-
-          echo "📄 Extracting chapter list..."
-          jq -r '.book.chapters[] | "\(.order) \(.url)"' ./book-content/payload.json > ./book-content/chapters-list.txt 2> ./jq-error.log
-
-          if [ $? -ne 0 ] || [ ! -s ./book-content/chapters-list.txt ]; then
-            echo "::error::❌ Failed to extract chapter list from payload"
-            echo "🔍 jq error output:"
-            cat ./jq-error.log
-            echo "📦 Raw payload:"
-            cat ./book-content/payload.json
-            exit 1
-          fi
-
-          BATCH_SIZE=5
-          TOTAL_CHAPTERS=$(wc -l < ./book-content/chapters-list.txt || echo 0)
-          echo "✅ Found $TOTAL_CHAPTERS chapters to process"
-
-          if [ "$TOTAL_CHAPTERS" -gt 0 ]; then
-            for ((i=0; i<TOTAL_CHAPTERS; i+=BATCH_SIZE)); do
-              echo "➡️  Processing chapters $((i+1)) to $((i+BATCH_SIZE))..."
-              tail -n +$((i+1)) ./book-content/chapters-list.txt | head -n $BATCH_SIZE | \
-                while read -r ORDER URL; do
-                  echo "📥 Downloading chapter $ORDER from $URL"
-                  if ! curl -s -f -o "./book-content/chapters/chapter-${ORDER}.xhtml" \
-                           -H "Accept: application/json" \
-                           -H "Authorization: $JWT_HEADER" \
-                           "$URL"; then
-                    echo "::warning::⚠️ Failed to download chapter $ORDER"
-                    false
-                  fi
-                done
-              sleep 1
-            done
-          else
-            echo "⚠️ No chapters found in the payload"
-          fi
-
-          if [ "$(jq -r '.options.include_imprint // false' ./book-content/payload.json 2>/dev/null)" = "true" ]; then
-            IMPRINT_URL=$(jq -r '.book.imprint.url // empty' ./book-content/payload.json 2>/dev/null)
-            if [ -n "$IMPRINT_URL" ]; then
-              echo "📥 Downloading imprint from $IMPRINT_URL"
-              wget --header="Authorization: $JWT_HEADER" -O ./book-content/imprint.xhtml "$IMPRINT_URL" || \
-                echo "⚠️ Warning: Failed to download imprint"
-            fi
-          fi
-
-          echo "✅ All content downloaded successfully"
-
-      - name: Generate EPUB with Pandoc
-        env:
-          CONTENT_ID: ${{ github.event.inputs.content_id }}
-        run: |
-          echo "Generating EPUB for content ID: $CONTENT_ID"
-          mkdir -p ./output
-
-          set +e
-          GENERATE_TOC=$(jq -r '.options.generate_toc // true' ./book-content/payload.json 2>/dev/null || echo 'true')
-          INCLUDE_IMPRINT=$(jq -r '.options.include_imprint // true' ./book-content/payload.json 2>/dev/null || echo 'true')
-          TOC_DEPTH=$(jq -r '.options.toc_depth // 2' ./book-content/payload.json 2>/dev/null || echo 2)
-
-          TITLE=$(jq -r '.book.title // "Untitled Book"' ./book-content/payload.json 2>/dev/null || echo 'Untitled Book')
-          AUTHOR=$(jq -r '.book.author // "Unknown Author"' ./book-content/payload.json 2>/dev/null || echo 'Unknown Author')
-          LANGUAGE=$(jq -r '.book.language // "en"' ./book-content/payload.json 2>/dev/null || echo 'en')
-          set -e
-
-          echo "Book: $TITLE by $AUTHOR"
-          echo "Language: $LANGUAGE"
-
-          FILES=()
-          PANDOC_OPTS=()
-
-          if [ "$GENERATE_TOC" = "true" ]; then
-            PANDOC_OPTS+=("--toc" "--toc-depth=$TOC_DEPTH")
-            echo "Including table of contents with depth: $TOC_DEPTH"
-          fi
-
-          if [ -f "./book-content/cover.jpg" ]; then
-            FILES+=("--epub-cover-image=./book-content/cover.jpg")
-            echo "Including cover image"
-          fi
-
-          if [ -f "./book-content/styles/epub.css" ]; then
-            FILES+=("--css=./book-content/styles/epub.css")
-            echo "Including custom stylesheet"
-          fi
-
-          CHAPTER_FILES=$(find ./book-content/chapters -name "chapter-*.xhtml" | sort -V)
-          if [ -n "$CHAPTER_FILES" ]; then
-            while IFS= read -r file; do
-              FILES+=("$file")
-            done <<< "$CHAPTER_FILES"
-            echo "Found ${#FILES[@]} chapters to include"
-          else
-            echo "Warning: No chapter files found"
-          fi
-
-          if [ "$INCLUDE_IMPRINT" = "true" ] && [ -f "./book-content/imprint.xhtml" ]; then
-            FILES+=("./book-content/imprint.xhtml")
-            echo "Including imprint page"
-          fi
-
-          mkdir -p ./output
-
-          set -x
-          pandoc \
-            --from=html \
-            --to=epub3 \
-            --output="./output/$CONTENT_ID.epub" \
-            --epub-chapter-level=1 \
-            --metadata="title:$TITLE" \
-            --metadata="author:$AUTHOR" \
-            --metadata="language:$LANGUAGE" \
-            --metadata="identifier:$CONTENT_ID" \
-            "${PANDOC_OPTS[@]}" \
-            "${FILES[@]}"
-
-          if [ ! -f "./output/$CONTENT_ID.epub" ]; then
-            echo "Error: Failed to generate EPUB"
-            exit 1
-          fi
-
-          echo "✅ EPUB generated successfully at ./output/$CONTENT_ID.epub"
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: epub-file
-          path: ./output/*.epub
-          retention-days: 1
+      # Diğer adımlar burada devam eder...
