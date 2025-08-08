@@ -69,7 +69,6 @@ jobs:
           echo "📦 Installing required tools..."
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             coreutils \
-            base64 \
             pandoc \
             texlive-xetex \
             texlive-fonts-recommended \
@@ -82,9 +81,22 @@ jobs:
             gnupg \
             software-properties-common
             
-          # Verify base64 is available
+          # Verify coreutils is installed and base64 is available
           if ! command -v base64 &> /dev/null; then
-            echo "::error::base64 command not found after installation"
+            echo "::warning::base64 command not found in PATH, checking /usr/bin/"
+            if [ -x "/usr/bin/base64" ]; then
+              echo "Found base64 in /usr/bin/, adding to PATH"
+              echo "/usr/bin" >> $GITHUB_PATH
+              export PATH="/usr/bin:$PATH"
+            else
+              echo "::error::base64 command not found after coreutils installation"
+              exit 1
+            fi
+          fi
+          
+          # Verify base64 works
+          if ! echo "test" | base64 > /dev/null 2>&1; then
+            echo "::error::base64 command is not working as expected"
             exit 1
           fi
           
