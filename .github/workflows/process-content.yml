@@ -19,19 +19,21 @@ on:
         type: string
 
 env:
-  NEXT_PUBLIC_APP_URL: ${{ vars.NEXT_PUBLIC_APP_URL || 'https://matbu.vercel.app' }}
+  # Default configuration
   NODE_ENV: production
+  
   # Clerk JWT configuration - Match Clerk's configuration
-  JWT_ISSUER: 'https://sunny-dogfish-14.clerk.accounts.dev'
-  JWT_AUDIENCE: 'https://sunny-dogfish-14.clerk.accounts.dev'
+  JWT_ISSUER: 'clerk.clerko.v1'
+  JWT_AUDIENCE: 'https://api.clerko.com'
+  
   # Clerk template name and key ID
   CLERK_KEY_ID: 'jtmp_310Eh03rhbpy3wXWHcIaNkwwTpj'
   JWT_TEMPLATE: 'matbuapp'
-  JWT_SECRET: ${{ secrets.JWT_SECRET }}
-  PRIVATE_KEY_B64: ${{ secrets.PRIVATE_KEY_B64 }}
-  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  
+  # Repository information
   GITHUB_REPO_OWNER: bilgisen
   GITHUB_REPO_NAME: clerk
+  
   # Timeouts in seconds
   DOWNLOAD_TIMEOUT: 300
   BUILD_TIMEOUT: 600
@@ -108,7 +110,7 @@ jobs:
         run: |
           echo "🔐 Setting up security files..."
           # Create .env file for the application
-          echo "NEXT_PUBLIC_APP_URL=$NEXT_PUBLIC_APP_URL" > .env
+          echo "NEXT_PUBLIC_APP_URL=https://matbu.vercel.app" > .env
           echo "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY" >> .env
           
           # Decode private key if provided
@@ -129,11 +131,11 @@ jobs:
         env:
           # Required for JWT generation
           PRIVATE_KEY_B64: ${{ secrets.PRIVATE_KEY_B64 }}
-          JWT_ISSUER: https://sunny-dogfish-14.clerk.accounts.dev
-          JWT_AUDIENCE: https://sunny-dogfish-14.clerk.accounts.dev
+          JWT_ISSUER: ${{ env.JWT_ISSUER || 'clerk.clerko.v1' }}
+          JWT_AUDIENCE: ${{ env.JWT_AUDIENCE || 'https://api.clerko.com' }}
           CLERK_KEY_ID: ${{ env.CLERK_KEY_ID }}
-          JWT_TEMPLATE: matbuapp
-          NEXT_PUBLIC_APP_URL: ${{ env.NEXT_PUBLIC_APP_URL || 'https://matbu.vercel.app' }}
+          JWT_TEMPLATE: ${{ env.JWT_TEMPLATE || 'matbuapp' }}
+          NEXT_PUBLIC_APP_URL: 'https://matbu.vercel.app'
           
           # Additional context for debugging
           NODE_OPTIONS: --no-warnings
@@ -176,17 +178,52 @@ jobs:
           
           # Generate the token with the private key and required env vars
           echo "\n🔨 Generating JWT token..."
-          JWT_TOKEN=$(PRIVATE_KEY_PATH="$TEMP_DIR/private.pem" \
+          
+          # Run the script and capture all output
+          set +e
+          JWT_OUTPUT=$(PRIVATE_KEY_PATH="$TEMP_DIR/private.pem" \
             JWT_ISSUER="$JWT_ISSUER" \
             JWT_AUDIENCE="$JWT_AUDIENCE" \
             CLERK_KEY_ID="$CLERK_KEY_ID" \
             JWT_TEMPLATE="$JWT_TEMPLATE" \
+            NODE_DEBUG=* \
+            DEBUG=* \
             node scripts/generate-jwt.mjs 2>&1)
           
+          # Capture the exit status
+          JWT_EXIT_CODE=$?
+          set -e
+          
+          # Save the full output to a file for debugging
+          echo "$JWT_OUTPUT" > jwt-debug.log
+          
+          # Print the output (limited to avoid overwhelming logs)
+          echo "=== JWT Generation Output (last 50 lines) ==="
+          echo "$JWT_OUTPUT" | tail -n 50
+          
           # Check if the command failed
-          if [ $? -ne 0 ]; then
-            echo "::error::Failed to generate JWT token"
-            echo "Error output: $JWT_TOKEN"
+          if [ $JWT_EXIT_CODE -ne 0 ]; then
+            echo "::error::Failed to generate JWT token (exit code: $JWT_EXIT_CODE)"
+            echo "::group::Full JWT Generation Output"
+            echo "$JWT_OUTPUT"
+            echo "::endgroup::"
+            
+            # Try to extract just the error message if possible
+            ERROR_MSG=$(echo "$JWT_OUTPUT" | grep -i -E 'error|exception|failed' | tail -n 5 || true)
+            if [ -n "$ERROR_MSG" ]; then
+              echo "::error::Error details: $ERROR_MSG"
+            fi
+            
+            exit 1
+          fi
+          
+          # Extract the token (should be the last line of output)
+          JWT_TOKEN=$(echo "$JWT_OUTPUT" | tail -n 1)
+          
+          # Verify we got a token
+          if [ -z "$JWT_TOKEN" ] || [ $(echo "$JWT_TOKEN" | wc -c) -lt 100 ]; then
+            echo "::error::Invalid or empty JWT token received"
+            echo "Token: '$JWT_TOKEN'"
             exit 1
           fi
           
@@ -234,7 +271,8 @@ jobs:
           echo "Token length: ${#JWT_TOKEN}"
           echo "Header: ${JWT_HEADER:0:20}..."
           echo "Content ID: ${{ github.event.inputs.content_id }}"
-          echo "Base URL: ${{ env.NEXT_PUBLIC_APP_URL }}"
+          echo "Base URL: https://matbu.vercel.app"
+          echo "Repository: ${{ env.GITHUB_REPO_OWNER }}/${{ env.GITHUB_REPO_NAME }}"
           
           # Print the first part of the token for debugging (header)
           if [ -n "$JWT_TOKEN" ]; then
@@ -252,7 +290,10 @@ jobs:
         timeout-minutes: 30
         env:
           CONTENT_ID: ${{ github.event.inputs.content_id }}
-          BASE_URL: ${{ env.NEXT_PUBLIC_APP_URL }}
+          BASE_URL: 'https://matbu.vercel.app'
+          GITHUB_REPO_OWNER: ${{ env.GITHUB_REPO_OWNER }}
+          GITHUB_REPO_NAME: ${{ env.GITHUB_REPO_NAME }}
+          GITHUB_REF: ${{ github.ref }}
           JWT_HEADER: ${{ env.JWT_HEADER }}
           JWT_TOKEN: ${{ env.JWT_TOKEN }}
           DOWNLOAD_TIMEOUT: ${{ env.DOWNLOAD_TIMEOUT }}
