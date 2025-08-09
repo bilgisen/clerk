@@ -137,6 +137,20 @@ export async function GET(
     const configuredBase = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_BASE_URL || '';
     const baseUrl = configuredBase || `${reqUrl.protocol}//${reqUrl.host}`;
 
+    // Read publishing options from query params with sensible defaults
+    const search = reqUrl.searchParams;
+    const formatParam = (search.get('format') || 'epub').toLowerCase();
+    const format = (formatParam === 'mobi' ? 'mobi' : 'epub') as 'epub' | 'mobi';
+    const generateToc = (search.get('generate_toc') ?? 'true').toLowerCase() === 'true';
+    const includeImprint = (search.get('include_imprint') ?? 'true').toLowerCase() === 'true';
+    const includeCover = (search.get('cover') ?? (bookResult.coverImageUrl ? 'true' : 'false')).toLowerCase() === 'true';
+    const style = (search.get('style') || 'default').toLowerCase();
+    const tocDepth = Number(search.get('toc_depth') ?? '3');
+    const languageOverride = search.get('language') || undefined;
+
+    const stylesheetPath = style === 'style2' ? '/styles/ebook-style2.css' : '/styles/ebook.css';
+    const outputExt = format === 'mobi' ? 'mobi' : 'epub';
+
     // Build chapter tree
     const chapterTree = buildChapterTree(bookResult.chapters);
     const flattenedChapters = flattenChapterTree(chapterTree, bookResult.slug, baseUrl);
@@ -146,21 +160,21 @@ export async function GET(
       book: {
         slug: bookResult.slug,
         title: bookResult.title,
-        language: bookResult.language || 'tr',
-        output_filename: `${bookResult.slug}.epub`,
-        cover_url: bookResult.coverImageUrl || '',
-        stylesheet_url: `${baseUrl}/styles/ebook.css`,
+        language: languageOverride || bookResult.language || 'tr',
+        output_filename: `${bookResult.slug}.${outputExt}`,
+        cover_url: includeCover ? (bookResult.coverImageUrl || '') : '',
+        stylesheet_url: `${baseUrl}${stylesheetPath}`,
         imprint: {
           url: `${baseUrl}/api/books/by-id/${bookId}/imprint`
         },
         chapters: flattenedChapters
       },
       options: {
-        generate_toc: true,
-        toc_depth: 3,
-        language: bookResult.language || 'tr',
+        generate_toc: generateToc,
+        toc_depth: Number.isFinite(tocDepth) && tocDepth > 0 ? tocDepth : 3,
+        language: languageOverride || bookResult.language || 'tr',
         embed_metadata: true,
-        cover: !!bookResult.coverImageUrl
+        cover: includeCover
       }
     };
 
