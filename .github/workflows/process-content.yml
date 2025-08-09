@@ -222,11 +222,11 @@ jobs:
             
             # Set output variables (GITHUB_OUTPUT)
             {
-              echo "title=$(jq -r '.title // \"Untitled\"' ./book-metadata.json)";
-              echo "author=$(jq -r '.author // \"Unknown\"' ./book-metadata.json)";
-              echo "language=$(jq -r '.language // \"tr\"' ./book-metadata.json)";
-              echo "generate_toc=$(jq -r '.generateToc // true' ./book-metadata.json)";
-              echo "toc_depth=$(jq -r '.tocDepth // 2' ./book-metadata.json)";
+              printf "title=%s\n" "$(jq -r '.title // "Untitled"' ./book-metadata.json)";
+              printf "author=%s\n" "$(jq -r '.author // "Unknown"' ./book-metadata.json)";
+              printf "language=%s\n" "$(jq -r '.language // "tr"' ./book-metadata.json)";
+              printf "generate_toc=%s\n" "$(jq -r '.generateToc // true' ./book-metadata.json)";
+              printf "toc_depth=%s\n" "$(jq -r '.tocDepth // 2' ./book-metadata.json)";
             } >> "$GITHUB_OUTPUT"
           else
             echo "::warning::⚠️ No payload.json found, using default metadata"
@@ -330,8 +330,8 @@ jobs:
           # Get file size
           FILESIZE=$(stat -c "%s" "./output/${CONTENT_ID}.epub" 2>/dev/null || stat -f "%z" "./output/${CONTENT_ID}.epub")
           echo "✅ E-book generated successfully: ${CONTENT_ID}.epub (${FILESIZE} bytes)"
-          echo "::set-output name=filename::${CONTENT_ID}.epub"
-          echo "::set-output name=filesize::${FILESIZE}"
+          echo "filename=${CONTENT_ID}.epub" >> "$GITHUB_OUTPUT"
+          echo "filesize=${FILESIZE}" >> "$GITHUB_OUTPUT"
 
       - name: Upload E-Book Artifact
         uses: actions/upload-artifact@v4
@@ -400,7 +400,7 @@ jobs:
             FILESIZE=$(stat -c "%s" "$EPUB_FILE" 2>/dev/null || stat -f "%z" "$EPUB_FILE" 2>/dev/null || echo "unknown")
             echo "✅ E-book generated successfully: $EPUB_FILE (${FILESIZE} bytes)"
             echo "::notice title=Success::E-book generated successfully!"
-            echo "::set-output name=epub_path::$EPUB_FILE"
+            echo "epub_path=$EPUB_FILE" >> "$GITHUB_OUTPUT"
           else
             echo "::warning::❌ E-book not found: $EPUB_FILE"
             echo "Looking for any .epub files in output directory..."

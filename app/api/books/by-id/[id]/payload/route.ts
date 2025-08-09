@@ -60,9 +60,8 @@ function buildChapterTree(chapterList: Chapter[], parentId: string | null = null
     }));
 }
 
-function flattenChapterTree(chapters: ChapterWithChildren[], bookSlug: string, level = 1, parentId: string | null = null): PayloadChapter[] {
+function flattenChapterTree(chapters: ChapterWithChildren[], bookSlug: string, baseUrl: string, level = 1, parentId: string | null = null): PayloadChapter[] {
   return chapters.flatMap((chapter, index) => {
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
     const result: PayloadChapter = {
       id: chapter.id,
       title: chapter.title,
@@ -73,7 +72,7 @@ function flattenChapterTree(chapters: ChapterWithChildren[], bookSlug: string, l
       title_tag: `h${Math.min(level + 1, 6)}` as const,
     };
 
-    const children = flattenChapterTree(chapter.children, bookSlug, level + 1, chapter.id);
+    const children = flattenChapterTree(chapter.children, bookSlug, baseUrl, level + 1, chapter.id);
     return [result, ...children];
   });
 }
@@ -133,13 +132,15 @@ export async function GET(
       );
     }
 
+    // Determine base URL for absolute links
+    const reqUrl = new URL(request.url);
+    const configuredBase = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_BASE_URL || '';
+    const baseUrl = configuredBase || `${reqUrl.protocol}//${reqUrl.host}`;
+
     // Build chapter tree
     const chapterTree = buildChapterTree(bookResult.chapters);
-    const flattenedChapters = flattenChapterTree(chapterTree, bookResult.slug);
+    const flattenedChapters = flattenChapterTree(chapterTree, bookResult.slug, baseUrl);
 
-    // Get base URL
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-    
     // Construct the payload
     const payload: EbookPayload = {
       book: {

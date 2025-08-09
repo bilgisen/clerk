@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { headers } from 'next/headers';
 import { db } from '@/db/drizzle';
 import { books, chapters, users } from '@/db/schema';
 import { eq } from 'drizzle-orm';
@@ -31,17 +32,23 @@ export async function GET(
     
     console.log(`[${new Date().toISOString()}] Request for book: ${slug}, chapter: ${chapterId}`);
     
-    // Get authenticated user ID from Clerk
-    // Get authenticated user session from Clerk
-    const session = await auth();
-    const userId = session?.userId;
-    
-    if (!userId) {
-      console.warn('Unauthenticated request');
-      return new NextResponse(
-        JSON.stringify({ error: 'Unauthorized - Please sign in' }), 
-        { status: 401, headers: { 'Content-Type': 'application/json' } }
-      );
+    // Determine auth method from middleware (GitHub OIDC for CI) or Clerk for user
+    const hdrs = await headers();
+    const authMethod = hdrs.get('x-auth-method');
+    let userId: string | null = null;
+    const isCi = authMethod === 'oidc';
+
+    if (!isCi) {
+      // User flow: require Clerk auth
+      const session = await auth();
+      userId = session?.userId || null;
+      if (!userId) {
+        console.warn('Unauthenticated request');
+        return new NextResponse(
+          JSON.stringify({ error: 'Unauthorized - Please sign in' }), 
+          { status: 401, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
     }
 
     // Get the book and verify ownership in a single query
@@ -86,15 +93,18 @@ export async function GET(
       return new NextResponse('Book not found or access denied', { status: 404 });
     }
 
-    // Verify the authenticated user owns this book
-    if (book.ownerClerkId !== userId) {
-      console.error('Access denied: User does not own this book', {
-        bookId: book.id,
-        bookTitle: book.title,
-        ownerClerkId: book.ownerClerkId,
-        requestingUserId: userId,
-      });
-      return new NextResponse('Access denied', { status: 403 });
+    // For CI (OIDC) allow access without ownership; for user flows enforce ownership
+    if (!isCi) {
+      // Verify the authenticated user owns this book
+      if (book.ownerClerkId !== userId) {
+        console.error('Access denied: User does not own this book', {
+          bookId: book.id,
+          bookTitle: book.title,
+          ownerClerkId: book.ownerClerkId,
+          requestingUserId: userId,
+        });
+        return new NextResponse('Access denied', { status: 403 });
+      }
     }
 
     // Get all chapters for the book in a single query
