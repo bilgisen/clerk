@@ -117,10 +117,9 @@ jobs:
           chmod -R 700 .
 
       - name: Generate JWT Token
-        id: generate-token
-        timeout-minutes: 5
+        id: generate_jwt
         env:
-          # Required for JWT generation
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
           PRIVATE_KEY_B64: ${{ secrets.PRIVATE_KEY_B64 }}
           JWT_ISSUER: ${{ env.JWT_ISSUER || 'https://sunny-dogfish-14.clerk.accounts.dev' }}
           JWT_AUDIENCE: ${{ env.JWT_AUDIENCE || 'https://sunny-dogfish-14.clerk.accounts.dev' }}
