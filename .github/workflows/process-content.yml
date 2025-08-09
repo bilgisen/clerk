@@ -1,4 +1,4 @@
-name: Process and Publish E-Book
+name: Build E-Book
 
 on:
   workflow_dispatch:
@@ -22,13 +22,8 @@ env:
   # Environment configuration
   NODE_ENV: development  # Development mode for Clerk integration
   
-  # Clerk JWT configuration - Development environment
-  JWT_ISSUER: 'https://sunny-dogfish-14.clerk.accounts.dev'
-  JWT_AUDIENCE: 'https://sunny-dogfish-14.clerk.accounts.dev'
-  
-  # Clerk template name and key ID - Using the key ID from Clerk's JWKS
-  CLERK_KEY_ID: 'ins_2yhHfvuC7eV6d8wuj44hPANY5Kq'
-  JWT_TEMPLATE: 'matbuapp'
+  # OIDC Audience used when fetching the GitHub OIDC token
+  GITHUB_OIDC_AUDIENCE: 'https://api.clerko.com/ci'
   
   # Repository information
   GITHUB_REPO_OWNER: bilgisen
@@ -42,13 +37,16 @@ jobs:
   build-epub:
     name: Build EPUB
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: '20.x'
           cache: 'npm'
@@ -61,7 +59,6 @@ jobs:
           
           # Install dependencies
           npm install --legacy-peer-deps
-          npm install jose@^4.14.0
 
       - name: Install system tools
         run: |
@@ -115,261 +112,24 @@ jobs:
           
           # Set secure permissions
           chmod -R 700 .
-
-      - name: Generate JWT Token
-        id: generate_jwt
+      - name: Get GitHub OIDC token
+        id: oidc
         env:
-          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
-          PRIVATE_KEY_B64: ${{ secrets.PRIVATE_KEY_B64 }}
-          JWT_ISSUER: ${{ env.JWT_ISSUER || 'https://sunny-dogfish-14.clerk.accounts.dev' }}
-          JWT_AUDIENCE: ${{ env.JWT_AUDIENCE || 'https://sunny-dogfish-14.clerk.accounts.dev' }}
-          CLERK_KEY_ID: ${{ env.CLERK_KEY_ID || 'ins_2yhHfvuC7eV6d8wuj44hPANY5Kq' }}
-          JWT_TEMPLATE: ${{ env.JWT_TEMPLATE || 'matbuapp' }}
-          NEXT_PUBLIC_APP_URL: 'https://matbu.vercel.app'
-          
-          # Additional context for debugging
-          NODE_OPTIONS: --no-warnings
-          NODE_DEBUG: jose
-          DEBUG: '*'
-          
-          # GitHub context
-          GITHUB_WORKFLOW: ${{ github.workflow }}
-          GITHUB_RUN_ID: ${{ github.run_id }}
-          GITHUB_ACTION: ${{ github.action }}
-          GITHUB_ACTOR: ${{ github.actor }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
+          AUDIENCE: ${{ env.GITHUB_OIDC_AUDIENCE || 'https://api.clerko.com/ci' }}
         run: |
           set -e
-          echo "🔑 Generating JWT token..."
-          
-          # Create a temporary directory for our files
-          TEMP_DIR=$(mktemp -d)
-          trap 'rm -rf "$TEMP_DIR"' EXIT
-          
-          # Create private key file from base64
-          if [ -z "$PRIVATE_KEY_B64" ]; then
-            echo "❌ PRIVATE_KEY_B64 is not set"
+          echo "🔑 Requesting GitHub OIDC token (audience=$AUDIENCE)"
+          RESP=$(curl -sS -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${AUDIENCE}")
+          TOKEN=$(echo "$RESP" | jq -r .value)
+          if [ -z "$TOKEN" ] || [ "$TOKEN" = null ]; then
+            echo "::error::Failed to obtain OIDC token"
+            echo "$RESP"
             exit 1
           fi
-          
-          # Write the base64-decoded private key to file
-          echo "$PRIVATE_KEY_B64" | base64 --decode > "$TEMP_DIR/private.pem"
-          chmod 600 "$TEMP_DIR/private.pem"
-          
-          # Verify the key format
-          if ! grep -q 'BEGIN PRIVATE KEY' "$TEMP_DIR/private.pem" && ! grep -q 'BEGIN RSA PRIVATE KEY' "$TEMP_DIR/private.pem"; then
-            echo "❌ Invalid private key format. Expected PEM format with BEGIN PRIVATE KEY or BEGIN RSA PRIVATE KEY"
-            echo "First 100 chars of key:"
-            head -c 100 "$TEMP_DIR/private.pem"
-            exit 1
-          fi
-          
-          echo '✅ Private key file created with proper permissions'
-          
-          # Install required dependencies
-          echo "📦 Installing dependencies..."
-          npm install jose@^4.14.0
-          
-          # Debug: Print environment variables
-          echo "\n=== Environment Variables ==="
-          echo "JWT_ISSUER: $JWT_ISSUER"
-          echo "JWT_AUDIENCE: $JWT_AUDIENCE"
-          echo "CLERK_KEY_ID: $CLERK_KEY_ID"
-          echo "JWT_TEMPLATE: $JWT_TEMPLATE"
-          
-          # Generate the token with the private key and required env vars
-          echo "\n🔨 Generating JWT token..."
-          
-          # Debug: Print environment variables
-          echo "=== Environment Variables ==="
-          echo "JWT_ISSUER: $JWT_ISSUER"
-          echo "JWT_AUDIENCE: $JWT_AUDIENCE"
-          echo "CLERK_KEY_ID: $CLERK_KEY_ID"
-          echo "JWT_TEMPLATE: $JWT_TEMPLATE"
-          
-          # Debug: Check if the key ID is being overridden
-          echo "\n=== Checking Key ID in JWT Generation Script ==="
-          if [ -f "scripts/generate-jwt.mjs" ]; then
-            echo "Checking for key ID in generate-jwt.mjs:"
-            grep -A 5 -B 5 "kid" scripts/generate-jwt.mjs || echo "No explicit key ID found in generate-jwt.mjs"
-          fi
-          
-          # Ensure all required environment variables are set
-          if [ -z "$JWT_ISSUER" ] || [ -z "$JWT_AUDIENCE" ] || [ -z "$CLERK_KEY_ID" ]; then
-            echo "❌ Missing required environment variables"
-            echo "JWT_ISSUER: $JWT_ISSUER"
-            echo "JWT_AUDIENCE: $JWT_AUDIENCE"
-            echo "CLERK_KEY_ID: $CLERK_KEY_ID"
-            exit 1
-          fi
-          
-          # Debug: Print the exact command we're about to run
-          echo "\n=== Running JWT Generation ==="
-          echo "node scripts/generate-jwt.mjs with environment:"
-          echo "- PRIVATE_KEY_PATH=$TEMP_DIR/private.pem"
-          echo "- JWT_ISSUER=$JWT_ISSUER"
-          echo "- JWT_AUDIENCE=$JWT_AUDIENCE"
-          echo "- CLERK_KEY_ID=$CLERK_KEY_ID"
-          echo "- JWT_TEMPLATE=$JWT_TEMPLATE"
-          
-          # Debug: Print environment variables before running the script
-          echo "\n=== Environment Variables in Workflow ==="
-          echo "JWT_ISSUER: $JWT_ISSUER"
-          echo "JWT_AUDIENCE: $JWT_AUDIENCE"
-          echo "CLERK_KEY_ID: $CLERK_KEY_ID"
-          echo "JWT_TEMPLATE: $JWT_TEMPLATE"
-          
-          # Run the script and capture all output
-          set +e
-          JWT_OUTPUT=$(PRIVATE_KEY_PATH="$TEMP_DIR/private.pem" \
-            JWT_ISSUER="$JWT_ISSUER" \
-            JWT_AUDIENCE="$JWT_AUDIENCE" \
-            CLERK_KEY_ID="$CLERK_KEY_ID" \
-            JWT_TEMPLATE="$JWT_TEMPLATE" \
-            NODE_DEBUG=* \
-            DEBUG=* \
-            node scripts/generate-jwt.mjs 2>&1)
-          
-          # Capture the exit status
-          JWT_EXIT_CODE=$?
-          set -e
-          
-          # Save the full output to a file for debugging
-          echo "$JWT_OUTPUT" > jwt-debug.log
-          
-          # Print the output (limited to avoid overwhelming logs)
-          echo "=== JWT Generation Output (last 50 lines) ==="
-          echo "$JWT_OUTPUT" | tail -n 50
-          
-          # Check if the command failed
-          if [ $JWT_EXIT_CODE -ne 0 ]; then
-            echo "::error::Failed to generate JWT token (exit code: $JWT_EXIT_CODE)"
-            echo "::group::Full JWT Generation Output"
-            echo "$JWT_OUTPUT"
-            echo "::endgroup::"
-            
-            # Try to extract just the error message if possible
-            ERROR_MSG=$(echo "$JWT_OUTPUT" | grep -i -E 'error|exception|failed' | tail -n 5 || true)
-            if [ -n "$ERROR_MSG" ]; then
-              echo "::error::Error details: $ERROR_MSG"
-            fi
-            
-            exit 1
-          fi
-          
-          # Read the token from the file
-          # First try the current directory, then the workspace directory
-          JWT_TOKEN_FILE="jwt-token.txt"
-          WORKSPACE_TOKEN_FILE="$GITHUB_WORKSPACE/jwt-token.txt"
-          
-          # Check which token file exists
-          if [ -f "$JWT_TOKEN_FILE" ]; then
-            echo "Found JWT token in current directory"
-            JWT_TOKEN=$(cat "$JWT_TOKEN_FILE" | tr -d '[:space:]')
-          elif [ -f "$WORKSPACE_TOKEN_FILE" ]; then
-            echo "Found JWT token in workspace directory"
-            JWT_TOKEN=$(cat "$WORKSPACE_TOKEN_FILE" | tr -d '[:space:]')
-          else
-            echo "::error::JWT token file not found in current directory or workspace"
-            echo "Current directory contents:"
-            ls -la ./
-            if [ -n "$GITHUB_WORKSPACE" ]; then
-              echo "Workspace directory contents:"
-              ls -la "$GITHUB_WORKSPACE/"
-            fi
-            exit 1
-          fi
-          
-          # Verify we got a token
-          if [ -z "$JWT_TOKEN" ] || [ $(echo "$JWT_TOKEN" | wc -c) -lt 100 ]; then
-            echo "::error::Invalid or empty JWT token in file"
-            echo "Token length: ${#JWT_TOKEN} characters"
-            exit 1
-          fi
-          
-          # Verify the token looks like a JWT (has two dots)
-          DOT_COUNT=$(echo "$JWT_TOKEN" | tr -cd '.' | wc -c)
-          if [ "$DOT_COUNT" -ne 2 ]; then
-            echo "::error::Generated JWT token is invalid (expected 2 parts, got $DOT_COUNT)"
-            echo "Token start: ${JWT_TOKEN:0:30}..."
-            exit 1
-          fi
-          
-          # Set the JWT token and header in environment variables
-          echo "JWT_TOKEN=$JWT_TOKEN" >> $GITHUB_ENV
-          echo "JWT_HEADER=Bearer $JWT_TOKEN" >> $GITHUB_ENV
-          
-          # Debug: Print token info using Node.js for base64 decoding
-          echo "\n=== JWT Token Info ==="
-          echo "Token length: ${#JWT_TOKEN} characters"
-          
-          # Decode and display token payload using Node.js
-          node -e "
-            try {
-              const fs = require('fs');
-              
-              // Try to read the token from the file if not in env
-              let token = process.env.JWT_TOKEN;
-              if (!token) {
-                try {
-                  token = fs.readFileSync('jwt-token.txt', 'utf8').trim();
-                  console.log('Read token from file');
-                } catch (e) {
-                  console.error('Error reading token from file:', e.message);
-                }
-              }
-              
-              if (!token) {
-                throw new Error('No JWT token found in environment or file');
-              }
-              
-              console.log('Token length:', token.length);
-              
-              // Split the token into parts
-              const parts = token.split('.');
-              if (parts.length !== 3) {
-                throw new Error(`Invalid JWT format: expected 3 parts, got ${parts.length}`);
-              }
-              
-              // Decode and log the token parts
-              const [header, payload, signature] = parts;
-              console.log('\n🔐 JWT Header:');
-              console.log(JSON.stringify(JSON.parse(Buffer.from(header, 'base64').toString('utf-8')), null, 2));
-              
-              console.log('\n🔐 JWT Payload:');
-              console.log(JSON.stringify(JSON.parse(Buffer.from(payload, 'base64').toString('utf-8')), null, 2));
-              
-              console.log('\n🔐 JWT Signature (first 10 chars):', signature.substring(0, 10) + '...');
-              console.log('\n✅ Token decoded successfully');
-              
-            } catch (error) {
-              console.error('Error decoding token:', error.message);
-              console.error('Error stack:', error.stack);
-              process.exit(1);
-            }
-          "
-          
-          echo "\n✅ JWT token generated and environment variables set"
-
-      - name: Debug JWT Token
-        run: |
-          echo "🔑 JWT Token Debug:"
-          echo "Token length: ${#JWT_TOKEN}"
-          echo "Header: ${JWT_HEADER:0:20}..."
-          echo "Content ID: ${{ github.event.inputs.content_id }}"
-          echo "Base URL: https://matbu.vercel.app"
-          echo "Repository: ${{ env.GITHUB_REPO_OWNER }}/${{ env.GITHUB_REPO_NAME }}"
-          
-          # Print the first part of the token for debugging (header)
-          if [ -n "$JWT_TOKEN" ]; then
-            echo "\nToken Header (decoded):"
-            echo "$JWT_TOKEN" | cut -d'.' -f1 | base64 -d 2>/dev/null || echo "Failed to decode token header"
-            
-            echo "\nToken Payload (decoded):"
-            echo "$JWT_TOKEN" | cut -d'.' -f2 | base64 -d 2>/dev/null || echo "Failed to decode token payload"
-          else
-            echo "\n❌ JWT_TOKEN is empty"
-          fi
+          echo "JWT_TOKEN=$TOKEN" >> $GITHUB_ENV
+          echo "JWT_HEADER=Bearer $TOKEN" >> $GITHUB_ENV
+          echo "Token length: ${#TOKEN}"
+          echo "✅ OIDC token acquired"
 
       - name: Fetch Book Content
         id: fetch-book
@@ -407,19 +167,19 @@ jobs:
           chmod +x scripts/fetch-book.sh
           
           # Debug: Print token info
-          echo "[DEBUG] 🔑 JWT Token Info:"
+          echo "[DEBUG] 🔑 JWT token acquired (length only)"
           echo "- Token length: ${#JWT_TOKEN} characters"
-          if command -v jq &> /dev/null; then
-            echo -n "- Token payload: "
-            echo "$JWT_TOKEN" | cut -d'.' -f2 | base64 -d 2>/dev/null | jq -c '{iss, aud, sub, iat, exp}' || echo "Failed to decode JWT payload"
-          fi
           
-          # Debug: Make a test request to the API
-          echo "[DEBUG] 🧪 Testing API access..."
+          # Debug: Make a test request to the OIDC-protected CI endpoint
+          echo "[DEBUG] 🧪 Testing CI endpoint access..."
+          IDEM_KEY="${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}"
           curl -v -s -f \
             -H "Accept: application/json" \
-            -H "Authorization: Bearer $JWT_TOKEN" \
-            "$BASE_URL/api/books/by-id/$CONTENT_ID/payload" \
+            -H "Authorization: $JWT_HEADER" \
+            -H "Idempotency-Key: ${IDEM_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "{\"contentId\":\"$CONTENT_ID\",\"mode\":\"${{ github.event.inputs.format }}\"}" \
+            "$BASE_URL/api/ci/process" \
             -o /dev/null \
             -w "\nResponse Code: %{http_code}\n" \
             --max-time 30 || true
@@ -460,19 +220,23 @@ jobs:
               includeImprint: (.options.include_imprint // true)
             }' ./book-content/payload.json > ./book-metadata.json
             
-            # Set output variables
-            echo "::set-output name=title::$(jq -r '.title // "Untitled"' ./book-metadata.json)"
-            echo "::set-output name=author::$(jq -r '.author // "Unknown"' ./book-metadata.json)"
-            echo "::set-output name=language::$(jq -r '.language // "tr"' ./book-metadata.json)
-            echo "::set-output name=generate_toc::$(jq -r '.generateToc // true' ./book-metadata.json)"
-            echo "::set-output name=toc_depth::$(jq -r '.tocDepth // 2' ./book-metadata.json)
+            # Set output variables (GITHUB_OUTPUT)
+            {
+              echo "title=$(jq -r '.title // \"Untitled\"' ./book-metadata.json)";
+              echo "author=$(jq -r '.author // \"Unknown\"' ./book-metadata.json)";
+              echo "language=$(jq -r '.language // \"tr\"' ./book-metadata.json)";
+              echo "generate_toc=$(jq -r '.generateToc // true' ./book-metadata.json)";
+              echo "toc_depth=$(jq -r '.tocDepth // 2' ./book-metadata.json)";
+            } >> "$GITHUB_OUTPUT"
           else
             echo "::warning::⚠️ No payload.json found, using default metadata"
-            echo "::set-output name=title::Untitled"
-            echo "::set-output name=author::Unknown"
-            echo "::set-output name=language::tr"
-            echo "::set-output name=generate_toc::true"
-            echo "::set-output name=toc_depth::2"
+            {
+              echo "title=Untitled";
+              echo "author=Unknown";
+              echo "language=tr";
+              echo "generate_toc=true";
+              echo "toc_depth=2";
+            } >> "$GITHUB_OUTPUT"
           fi
       
       - name: Prepare Directories

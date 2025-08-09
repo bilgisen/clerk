@@ -9,8 +9,6 @@ readonly NC='\033[0m' # No Color
 
 # Set default values
 BASE_URL=${BASE_URL:-'https://matbu.vercel.app'}
-JWT_ISSUER=${JWT_ISSUER:-'https://sunny-dogfish-14.clerk.accounts.dev'}
-JWT_AUDIENCE=${JWT_AUDIENCE:-'https://sunny-dogfish-14.clerk.accounts.dev'}
 
 # Logging functions
 log_info() {
@@ -139,14 +137,16 @@ mkdir -p ./book-content/chapters
 PAYLOAD_URL="$BASE_URL/api/books/by-id/$CONTENT_ID/payload"
 log_info "🌐 Attempting to fetch payload from: $PAYLOAD_URL"
 
-# Debug: Print the JWT token header and payload
-log_info "🔑 JWT Token Analysis:"
-{
-  echo "Header:"
-  echo "$JWT_TOKEN" | cut -d'.' -f1 | base64 -d 2>/dev/null | jq . || echo "Failed to decode JWT header"
-  echo "\nPayload:"
-  echo "$JWT_TOKEN" | cut -d'.' -f2 | base64 -d 2>/dev/null | jq . || echo "Failed to decode JWT payload"
-} | tee ./jwt-debug.json
+# Optional JWT inspection (disabled by default). Enable with CURL_VERBOSE=1
+if [ "${CURL_VERBOSE}" = "1" ]; then
+  log_info "🔑 JWT Token Analysis (limited):"
+  {
+    echo "Header (alg, kid only):"
+    echo "$JWT_TOKEN" | cut -d'.' -f1 | base64 -d 2>/dev/null | jq '{alg, kid}' || echo "Failed to decode JWT header"
+    echo "\nPayload (selected claims):"
+    echo "$JWT_TOKEN" | cut -d'.' -f2 | base64 -d 2>/dev/null | jq '{iss, aud, repository, ref, workflow, iat, exp}' || echo "Failed to decode JWT payload"
+  } > ./jwt-debug.json
+fi
 
 # Debug: Print environment info
 
@@ -154,7 +154,7 @@ log_info "🔑 JWT Token Analysis:"
 set -x
 curl -v -s -f -D ./headers.txt -o ./book-content/payload.json \
   -H "Accept: application/json" \
-  -H "Authorization: Bearer $JWT_TOKEN" \
+  -H "Authorization: $JWT_HEADER" \
   "$PAYLOAD_URL" 2> ./curl-debug.log || {
     CURL_EXIT_CODE=$?
     set +x
