@@ -1,6 +1,6 @@
 import { auth } from '@clerk/nextjs/server';
 import { NextRequest } from 'next/server';
-import { SignJWT } from 'jose';
+import { SignJWT, jwtVerify, createRemoteJWKSet } from 'jose';
 
 const LOG_PREFIX = '[Auth]';
 
@@ -90,35 +90,36 @@ export async function verifyToken(
   }
 
   try {
-    // In production, verify the token using Clerk
-    const session = await auth();
-    const userId = session.userId;
-    const sessionClaims = session.sessionClaims;
-    
-    if (!userId) {
-      console.error(`${LOG_PREFIX} ❌ No user ID in session`);
-      return null;
-    }
+    // Verify RS256 JWT against Clerk JWKS
+    const jwksUrl = process.env.CLERK_JWKS_URL || 'https://sunny-dogfish-14.clerk.accounts.dev/.well-known/jwks.json';
+    const issuer = process.env.JWT_ISSUER || 'https://sunny-dogfish-14.clerk.accounts.dev';
+    const audience = process.env.JWT_AUDIENCE || 'https://sunny-dogfish-14.clerk.accounts.dev';
 
-    // Get the user object from session claims
-    const email = sessionClaims?.email as string | undefined;
-    const firstName = sessionClaims?.given_name as string | undefined;
-    const lastName = sessionClaims?.family_name as string | undefined;
+    const JWKS = createRemoteJWKSet(new URL(jwksUrl));
+    const { payload } = await jwtVerify(token, JWKS, {
+      issuer,
+      audience,
+      algorithms: ['RS256']
+    });
 
-    // Return the verified user data
-    return {
-      userId,
+    const sub = (payload.sub as string) || '';
+
+    // Map Clerk-style fields if present
+    const verified: JWTPayload = {
+      userId: sub,
       user: {
-        id: userId,
-        email: sessionClaims?.email as string | undefined,
-        firstName: sessionClaims?.given_name as string | undefined,
-        lastName: sessionClaims?.family_name as string | undefined
-      }
+        id: sub,
+        email: (payload as any).email as string | undefined,
+        firstName: (payload as any).first_name || (payload as any).given_name,
+        lastName: (payload as any).last_name || (payload as any).family_name,
+      },
+      ...payload,
     };
+
+    return verified;
   } catch (error) {
-    console.error(`${LOG_PREFIX} ❌ Error verifying token`, {
+    console.error(`${LOG_PREFIX} ❌ JWT verification failed`, {
       error: error instanceof Error ? error.message : 'Unknown error',
-      stack: error instanceof Error ? error.stack : undefined,
     });
     return null;
   }

@@ -105,8 +105,8 @@ export async function GET(
         // Import jose for JWT verification
         const { jwtVerify, createRemoteJWKSet } = await import('jose');
         
-        // Get the JWKS URI from Clerk
-        const jwksUri = `https://${process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.replace('_', ':')}/.well-known/jwks.json`;
+        // Build JWKS URL from env or fallback to the known Clerk Frontend API
+        const jwksUri = process.env.CLERK_JWKS_URL || 'https://sunny-dogfish-14.clerk.accounts.dev/.well-known/jwks.json';
         const JWKS = createRemoteJWKSet(new URL(jwksUri));
         
         // Get issuer and audience from environment variables with fallbacks

@@ -17,6 +17,7 @@ const CONFIG = {
   USER_ID: process.env.USER_ID || 'github-actions',
   // Make sure this matches the key ID from Clerk
   CLERK_KEY_ID: process.env.CLERK_KEY_ID,
+  CLERK_SECRET_KEY: process.env.CLERK_SECRET_KEY,
   TOKEN_EXPIRY_SECONDS: 3600, // 1 hour
   TOKEN_FILE: 'jwt-token.txt',
   JWT_TEMPLATE: process.env.JWT_TEMPLATE || 'matbuapp'  // This should match your Clerk template name
@@ -28,6 +29,7 @@ console.log(`- Issuer: ${CONFIG.JWT_ISSUER}`);
 console.log(`- Audience: ${CONFIG.JWT_AUDIENCE}`);
 console.log(`- Key ID: ${CONFIG.CLERK_KEY_ID ? '***' : 'Not provided'}`);
 console.log(`- JWT Template: ${CONFIG.JWT_TEMPLATE}`);
+console.log(`- Using Clerk API: ${CONFIG.CLERK_SECRET_KEY ? 'Yes' : 'No'}`);
 
 // Validate required environment variables
 function validateConfig() {
@@ -103,9 +105,20 @@ async function generateToken() {
     console.log(`- JWT_AUDIENCE: ${process.env.JWT_AUDIENCE}`);
     console.log(`- CLERK_KEY_ID: ${process.env.CLERK_KEY_ID ? '***' + process.env.CLERK_KEY_ID.slice(-4) : 'Not set'}`);
     console.log(`- JWT_TEMPLATE: ${process.env.JWT_TEMPLATE}`);
+    console.log(`- CLERK_SECRET_KEY present: ${process.env.CLERK_SECRET_KEY ? 'yes' : 'no'}`);
     
-    // Validate configuration
-    console.log('\n🔍 Validating configuration...');
+    // If Clerk secret key is present, mint via Clerk API (preferred)
+    if (CONFIG.CLERK_SECRET_KEY) {
+      console.log('\n🔐 Minting JWT via Clerk API using template:', CONFIG.JWT_TEMPLATE);
+      const token = await mintViaClerk();
+      await writeFileSync(CONFIG.TOKEN_FILE, token);
+      console.log(`\n✅ Token successfully saved to ${CONFIG.TOKEN_FILE}`);
+      return token;
+    }
+
+    // Otherwise, fall back to self-signing with a private key
+    console.log('\n⚠️ CLERK_SECRET_KEY not set; falling back to self-signed token.');
+    console.log('\n🔍 Validating configuration for self-signing...');
     validateConfig();
     
     // Load private key
@@ -263,6 +276,40 @@ async function generateToken() {
 }
 
 
+
+async function mintViaClerk() {
+  const endpoint = 'https://api.clerk.com/v1/jwts';
+  const claims = {
+    sub: CONFIG.USER_ID,
+    azp: process.env.NEXT_PUBLIC_APP_URL || 'https://matbu.vercel.app',
+  };
+
+  const body = {
+    template: CONFIG.JWT_TEMPLATE,
+    claims,
+  };
+
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${CONFIG.CLERK_SECRET_KEY}`,
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Clerk JWT minting failed: ${res.status} ${res.statusText} - ${text}`);
+  }
+
+  const data = await res.json();
+  if (!data?.jwt) {
+    throw new Error('Clerk JWT minting response missing jwt field');
+  }
+  console.log('✅ Clerk JWT minted successfully');
+  return data.jwt;
+}
 
 // Run the generator
 generateToken()
