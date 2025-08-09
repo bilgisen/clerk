@@ -11,13 +11,15 @@ if (!globalThis.crypto) {
 // Configuration
 const CONFIG = {
   PRIVATE_KEY_PATH: process.env.PRIVATE_KEY_PATH || './private.pem',
+  // Use Clerk's template values from environment variables
   JWT_ISSUER: process.env.JWT_ISSUER || 'https://sunny-dogfish-14.clerk.accounts.dev',
   JWT_AUDIENCE: process.env.JWT_AUDIENCE || 'https://sunny-dogfish-14.clerk.accounts.dev',
   USER_ID: process.env.USER_ID || 'github-actions',
+  // Make sure this matches the key ID from Clerk
   CLERK_KEY_ID: process.env.CLERK_KEY_ID,
   TOKEN_EXPIRY_SECONDS: 3600, // 1 hour
   TOKEN_FILE: 'jwt-token.txt',
-  JWT_TEMPLATE: process.env.JWT_TEMPLATE || 'matbuapp'
+  JWT_TEMPLATE: process.env.JWT_TEMPLATE || 'matbuapp'  // This should match your Clerk template name
 };
 
 // Log configuration (without sensitive data)
@@ -152,6 +154,17 @@ async function generateToken() {
       
       console.log('\n📝 JWT Payload:');
       console.log(JSON.stringify(payload, null, 2));
+      
+      // Ensure the key ID is properly set and valid
+      if (!CONFIG.CLERK_KEY_ID) {
+        throw new Error('CLERK_KEY_ID environment variable is not set');
+      }
+
+      // Log the key ID being used (masking sensitive parts)
+      const maskedKeyId = CONFIG.CLERK_KEY_ID 
+        ? `${CONFIG.CLERK_KEY_ID.substring(0, 4)}...${CONFIG.CLERK_KEY_ID.substring(-4)}`
+        : 'not set';
+      console.log(`🔑 Using key ID: ${maskedKeyId}`);
       
       const protectedHeader = {
         alg: 'RS256',
