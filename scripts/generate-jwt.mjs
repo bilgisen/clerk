@@ -249,44 +249,87 @@ async function generateToken() {
 
 
 async function mintViaClerk() {
-  // Issue a JWT from a template via Clerk Backend API
-  const endpoint = new URL('/v1/jwts/issue', CONFIG.CLERK_API_URL).toString();
+  // Candidate endpoint + payload shapes to maximize compatibility across Clerk API versions
+  const base = CONFIG.CLERK_API_URL;
+  const azp = process.env.NEXT_PUBLIC_APP_URL || 'https://matbu.vercel.app';
 
-  const body = {
-    template: CONFIG.JWT_TEMPLATE,
-    // place subject in claims for wider compatibility
-    claims: {
-      sub: CONFIG.USER_ID,
-      azp: process.env.NEXT_PUBLIC_APP_URL || 'https://matbu.vercel.app',
+  const attempts = [
+    // 1) POST /v1/jwts/issue with claims.sub
+    {
+      url: new URL('/v1/jwts/issue', base).toString(),
+      body: { template: CONFIG.JWT_TEMPLATE, claims: { sub: CONFIG.USER_ID, azp } },
+      note: 'POST /v1/jwts/issue with claims.sub',
     },
+    // 2) POST /v1/jwts (older style) with claims.sub
+    {
+      url: new URL('/v1/jwts', base).toString(),
+      body: { template: CONFIG.JWT_TEMPLATE, claims: { sub: CONFIG.USER_ID, azp } },
+      note: 'POST /v1/jwts with claims.sub',
+    },
+    // 3) POST /v1/jwt_templates/{template}/issue with claims.sub
+    {
+      url: new URL(`/v1/jwt_templates/${encodeURIComponent(CONFIG.JWT_TEMPLATE)}/issue`, base).toString(),
+      body: { claims: { sub: CONFIG.USER_ID, azp } },
+      note: 'POST /v1/jwt_templates/{template}/issue with claims.sub',
+    },
+    // 4) Try top-level sub on /v1/jwts
+    {
+      url: new URL('/v1/jwts', base).toString(),
+      body: { template: CONFIG.JWT_TEMPLATE, sub: CONFIG.USER_ID, claims: { azp } },
+      note: 'POST /v1/jwts with top-level sub',
+    },
+  ];
+
+  const headersBase = {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${CONFIG.CLERK_SECRET_KEY}`,
   };
 
-  // Debug: log final endpoint and compact body
-  console.log('🌐 Clerk mint endpoint:', endpoint);
-  console.log('📤 Clerk mint body:', JSON.stringify(body));
+  // Try with explicit API version first, then without
+  const headerVariants = [
+    { ...headersBase, 'Clerk-API-Version': process.env.CLERK_API_VERSION || '2024-10-01' },
+    { ...headersBase },
+  ];
 
-  const res = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${CONFIG.CLERK_SECRET_KEY}`,
-      // Pin an API version to avoid surprises; adjust if your instance shows a different latest version
-      'Clerk-API-Version': process.env.CLERK_API_VERSION || '2024-10-01',
-    },
-    body: JSON.stringify(body),
-  });
+  const errors = [];
+  for (const attempt of attempts) {
+    for (const headers of headerVariants) {
+      console.log(`\n🚀 Attempt: ${attempt.note}`);
+      console.log('🌐 Endpoint:', attempt.url);
+      console.log('📤 Body:', JSON.stringify(attempt.body));
+      console.log('🧾 Headers:', Object.keys(headers).sort().join(', '));
 
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Clerk JWT minting failed: ${res.status} ${res.statusText} - ${text}`);
+      const res = await fetch(attempt.url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(attempt.body),
+      });
+
+      const text = await res.text();
+      console.log('📥 Status:', res.status, res.statusText);
+      if (!res.ok) {
+        console.log('❌ Response text:', text.slice(0, 500));
+        errors.push({ url: attempt.url, status: res.status, statusText: res.statusText, text: text.slice(0, 500) });
+        continue;
+      }
+
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (e) {
+        throw new Error(`Clerk JWT minting: Expected JSON but got: ${text.slice(0, 200)}`);
+      }
+
+      if (!data?.jwt) {
+        throw new Error(`Clerk JWT minting response missing jwt field. Response: ${text.slice(0, 200)}`);
+      }
+      console.log('✅ Clerk JWT minted successfully using:', attempt.note);
+      return data.jwt;
+    }
   }
 
-  const data = await res.json();
-  if (!data?.jwt) {
-    throw new Error('Clerk JWT minting response missing jwt field');
-  }
-  console.log('✅ Clerk JWT minted successfully');
-  return data.jwt;
+  const summary = errors.map(e => `${e.status} ${e.statusText} @ ${e.url} :: ${e.text}`).join('\n---\n');
+  throw new Error(`All Clerk mint attempts failed. Details:\n${summary}`);
 }
 
 // Run the generator
