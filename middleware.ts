@@ -1,6 +1,7 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { NextResponse } from 'next/server';
 import { verifyToken } from './lib/auth';
+import { verifyGithubOidc } from './lib/auth/verifyGithubOidc';
 
 // Define public routes that don't require authentication
 const isPublicRoute = createRouteMatcher([
@@ -49,48 +50,43 @@ export default clerkMiddleware(async (auth, req) => {
     return NextResponse.next({ request: { headers: requestHeaders } });
   }
 
-  // Handle API routes that can use either JWT or Clerk session
+  // Handle API routes that can use either JWT, GitHub OIDC, or Clerk session
   if (isApiRoute(pathname)) {
     console.log(`[Middleware] Processing API route: ${pathname}`);
     
     const authHeader = req.headers.get('authorization');
     
-    // If Authorization header is provided, try JWT authentication first
+    // If Authorization header is provided, try GitHub OIDC first, then fallback JWT
     if (authHeader && authHeader.startsWith('Bearer ')) {
-      console.log('[Middleware] Attempting JWT authentication');
       const token = authHeader.split(' ')[1];
-      console.log(`[Middleware] JWT token received (first 10 chars): ${token.substring(0, 10)}...`);
-
       try {
-        // Verify the JWT token
-        const decoded = await verifyToken(token, { operation: 'middleware-auth' });
-        
-        if (!decoded) {
-          throw new Error('Failed to verify token');
-        }
-
-        console.log(`[Middleware] JWT token verified for user: ${decoded.userId}`);
-        
-        // Set up response with user info
+        const claims = await verifyGithubOidc(token);
+        // OIDC verified
         const requestHeaders = new Headers(req.headers);
-        requestHeaders.set('x-user-id', decoded.userId);
-        requestHeaders.set('x-auth-method', 'jwt');
-
-        if (decoded.metadata) {
-          requestHeaders.set('x-auth-metadata', JSON.stringify(decoded.metadata));
-        }
-
-        const response = NextResponse.next({
-          request: { headers: requestHeaders },
-        });
-
-        response.headers.set('x-auth-method', 'jwt');
-        response.headers.set('x-auth-user-id', decoded.userId);
-        
+        requestHeaders.set('x-auth-method', 'oidc');
+        requestHeaders.set('x-auth-user-id', claims.sub || 'ci');
+        requestHeaders.set('x-oidc-repo', claims.repository || '');
+        requestHeaders.set('x-oidc-ref', claims.ref || '');
+        requestHeaders.set('x-oidc-workflow', claims.workflow || '');
+        const response = NextResponse.next({ request: { headers: requestHeaders } });
+        response.headers.set('x-auth-method', 'oidc');
         return response;
-      } catch (error) {
-        console.error('[Middleware] JWT verification failed, falling back to Clerk session', error);
-        // Continue to Clerk session authentication
+      } catch (_oidcErr) {
+        // Not a valid OIDC token; try app JWT next
+        try {
+          const decoded = await verifyToken(token, { operation: 'middleware-auth' });
+          if (!decoded) throw new Error('Failed to verify token');
+          const requestHeaders = new Headers(req.headers);
+          requestHeaders.set('x-user-id', decoded.userId);
+          requestHeaders.set('x-auth-method', 'jwt');
+          if (decoded.metadata) requestHeaders.set('x-auth-metadata', JSON.stringify(decoded.metadata));
+          const response = NextResponse.next({ request: { headers: requestHeaders } });
+          response.headers.set('x-auth-method', 'jwt');
+          response.headers.set('x-auth-user-id', decoded.userId);
+          return response;
+        } catch (_jwtErr) {
+          // Continue to Clerk session authentication
+        }
       }
     }
 

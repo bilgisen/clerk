@@ -3,7 +3,6 @@ import { headers } from 'next/headers';
 import { db } from '@/db/drizzle';
 import { books, chapters } from '@/db/schema';
 import { eq } from 'drizzle-orm';
-import { verifyToken } from '@/lib/auth';
 import { currentUser } from '@clerk/nextjs/server';
 
 export const dynamic = 'force-dynamic';
@@ -89,80 +88,19 @@ export async function GET(
     
     // Get headers
     const headersList = await headers();
-    const authHeader = headersList.get('authorization') || '';
-    
-    // Verify authentication
+    const authMethod = headersList.get('x-auth-method');
+    const oidcUser = headersList.get('x-auth-user-id');
+
+    // Verify authentication: trust middleware signals
     let userId: string | null = null;
     let isServiceAccount = false;
 
-    if (authHeader?.startsWith('Bearer ')) {
-      const token = authHeader.split(' ')[1];
-      
-      console.log('🔑 JWT Token received, starting verification...');
-      console.log('Token prefix:', token.substring(0, 20) + '...');
-      
-      try {
-        // Import jose for JWT verification
-        const { jwtVerify, createRemoteJWKSet } = await import('jose');
-        
-        // Build JWKS URL from env or fallback to the known Clerk Frontend API
-        const jwksUri = process.env.CLERK_JWKS_URL || 'https://sunny-dogfish-14.clerk.accounts.dev/.well-known/jwks.json';
-        const JWKS = createRemoteJWKSet(new URL(jwksUri));
-        
-        // Get issuer and audience from environment variables with fallbacks
-        const issuer = process.env.JWT_ISSUER || 'https://sunny-dogfish-14.clerk.accounts.dev';
-        const audience = process.env.JWT_AUDIENCE || 'https://sunny-dogfish-14.clerk.accounts.dev';
-        
-        console.log('🔧 JWT Verification Config:', { issuer, audience });
-        
-        // Verify the JWT token
-        const { payload } = await jwtVerify(token, JWKS, {
-          issuer,
-          audience,
-          algorithms: ['RS256']
-        });
-        
-        console.log('✅ JWT Token verified successfully:', {
-          userId: payload.sub,
-          issuer: payload.iss,
-          audience: payload.aud,
-          expiresAt: payload.exp ? new Date(payload.exp * 1000).toISOString() : 'no expiration',
-          isExpired: payload.exp ? Date.now() >= payload.exp * 1000 : false
-        });
-        
-        // Validate required claims
-        const isValidAudience = Array.isArray(payload.aud) 
-          ? payload.aud.includes(audience)
-          : payload.aud === audience;
-          
-        if (!isValidAudience || payload.iss !== issuer) {
-          console.error('❌ JWT validation failed: Invalid issuer or audience', {
-            expected: { aud: audience, iss: issuer },
-            received: { aud: payload.aud, iss: payload.iss }
-          });
-          throw new Error('Invalid token issuer or audience');
-        }
-        
-        userId = payload.sub || null;
-        isServiceAccount = true;
-        
-      } catch (error) {
-        console.error('❌ JWT verification failed:', error instanceof Error ? error.message : 'Unknown error');
-        // If JWT verification fails, try Clerk authentication as fallback
-        try {
-          const user = await currentUser();
-          if (user) {
-            console.log('🔑 Falling back to Clerk authentication');
-            userId = user.id;
-          } else {
-            console.error('❌ No valid authentication method found');
-          }
-        } catch (userError) {
-          console.error('❌ Clerk authentication failed:', userError instanceof Error ? userError.message : 'Unknown error');
-        }
-      }
+    if (authMethod === 'oidc') {
+      // Verified by middleware via GitHub OIDC
+      isServiceAccount = true;
+      userId = oidcUser || 'ci';
     } else {
-      // If no token, try to get current user from Clerk
+      // Fall back to Clerk session for user flows
       try {
         const user = await currentUser();
         if (user) {
