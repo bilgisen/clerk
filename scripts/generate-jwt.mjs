@@ -107,19 +107,19 @@ async function generateToken() {
     console.log(`- JWT_TEMPLATE: ${process.env.JWT_TEMPLATE}`);
     console.log(`- CLERK_SECRET_KEY present: ${process.env.CLERK_SECRET_KEY ? 'yes' : 'no'}`);
     
-    // If Clerk secret key is present, mint via Clerk API (preferred)
-    if (CONFIG.CLERK_SECRET_KEY) {
-      console.log('\n🔐 Minting JWT via Clerk API using template:', CONFIG.JWT_TEMPLATE);
-      const token = await mintViaClerk();
-      await writeFileSync(CONFIG.TOKEN_FILE, token);
-      console.log(`\n✅ Token successfully saved to ${CONFIG.TOKEN_FILE}`);
-      return token;
+    // Require Clerk secret key; do not self-sign to avoid unverifiable tokens
+    if (!CONFIG.CLERK_SECRET_KEY) {
+      console.error('\n❌ CLERK_SECRET_KEY is not set. Cannot mint JWT via Clerk.');
+      console.error('Set the repository secret CLERK_SECRET_KEY to your Clerk secret key.');
+      console.error('Aborting to avoid generating a token that your API cannot verify.');
+      process.exit(1);
     }
 
-    // Otherwise, fall back to self-signing with a private key
-    console.log('\n⚠️ CLERK_SECRET_KEY not set; falling back to self-signed token.');
-    console.log('\n🔍 Validating configuration for self-signing...');
-    validateConfig();
+    console.log('\n🔐 Minting JWT via Clerk API using template:', CONFIG.JWT_TEMPLATE);
+    const token = await mintViaClerk();
+    await writeFileSync(CONFIG.TOKEN_FILE, token);
+    console.log(`\n✅ Token successfully saved to ${CONFIG.TOKEN_FILE}`);
+    return token;
     
     // Load private key
     console.log('\n🔑 Loading private key...');
@@ -150,36 +150,6 @@ async function generateToken() {
         throw importError;
       });
       
-      console.log('✅ Private key imported successfully');
-      
-      // Generate JWT token
-      console.log('\n🔨 Generating JWT token...');
-      
-      const now = Math.floor(Date.now() / 1000);
-      const payload = {
-        sub: CONFIG.USER_ID,
-        azp: process.env.NEXT_PUBLIC_APP_URL || 'https://matbu.vercel.app',
-        template: CONFIG.JWT_TEMPLATE,
-        iat: now,
-        exp: now + 3600, // 1 hour
-        jti: crypto.randomUUID(),
-      };
-      
-      console.log('\n📝 JWT Payload:');
-      console.log(JSON.stringify(payload, null, 2));
-      
-      // Ensure the key ID is properly set and valid
-      if (!CONFIG.CLERK_KEY_ID) {
-        throw new Error('CLERK_KEY_ID environment variable is not set');
-      }
-
-      // Log the key ID being used (masking sensitive parts)
-      const maskedKeyId = CONFIG.CLERK_KEY_ID 
-        ? `${CONFIG.CLERK_KEY_ID.substring(0, 4)}...${CONFIG.CLERK_KEY_ID.substring(-4)}`
-        : 'not set';
-      
-      console.log('\n🔑 Key ID Verification:');
-      console.log(`- Key ID from config: ${maskedKeyId}`);
       console.log(`- Expected key ID: ins_2yhHfvuC7eV6d8wuj44hPANY5Kq`);
       console.log(`- Key ID matches expected: ${CONFIG.CLERK_KEY_ID === 'ins_2yhHfvuC7eV6d8wuj44hPANY5Kq' ? '✅ Yes' : '❌ No'}`);
       
