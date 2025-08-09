@@ -19,14 +19,14 @@ on:
         type: string
 
 env:
-  # Default configuration
-  NODE_ENV: production
+  # Environment configuration
+  NODE_ENV: development  # Development mode for Clerk integration
   
-  # Clerk JWT configuration - Match Clerk's configuration
-  JWT_ISSUER: 'clerk.clerko.v1'
-  JWT_AUDIENCE: 'https://api.clerko.com'
+  # Clerk JWT configuration - Development environment
+  JWT_ISSUER: 'https://sunny-dogfish-14.clerk.accounts.dev'
+  JWT_AUDIENCE: 'https://sunny-dogfish-14.clerk.accounts.dev'
   
-  # Clerk template name and key ID - Use the instance key ID (starts with ins_)
+  # Clerk template name and key ID
   CLERK_KEY_ID: 'jtmp_310Eh03rhbpy3wXWHcIaNkwwTpj'
   JWT_TEMPLATE: 'matbuapp'
   
@@ -178,6 +178,15 @@ jobs:
           
           # Generate the token with the private key and required env vars
           echo "\n🔨 Generating JWT token..."
+          
+          # Ensure all required environment variables are set
+          if [ -z "$JWT_ISSUER" ] || [ -z "$JWT_AUDIENCE" ] || [ -z "$CLERK_KEY_ID" ]; then
+            echo "❌ Missing required environment variables"
+            echo "JWT_ISSUER: $JWT_ISSUER"
+            echo "JWT_AUDIENCE: $JWT_AUDIENCE"
+            echo "CLERK_KEY_ID: $CLERK_KEY_ID"
+            exit 1
+          fi
           
           # Run the script and capture all output
           set +e

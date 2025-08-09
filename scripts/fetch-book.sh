@@ -7,6 +7,11 @@ readonly GREEN='\033[0;32m'
 readonly YELLOW='\033[1;33m'
 readonly NC='\033[0m' # No Color
 
+# Set default values
+BASE_URL=${BASE_URL:-'https://matbu.vercel.app'}
+JWT_ISSUER=${JWT_ISSUER:-'https://sunny-dogfish-14.clerk.accounts.dev'}
+JWT_AUDIENCE=${JWT_AUDIENCE:-'https://sunny-dogfish-14.clerk.accounts.dev'}
+
 # Logging functions
 log_info() {
   echo -e "${GREEN}[INFO]${NC} $1"
@@ -85,13 +90,24 @@ check_commands
 debug_print_env
 
 # Required environment variables
-REQUIRED_VARS=("CONTENT_ID" "BASE_URL" "JWT_HEADER" "JWT_TOKEN")
+REQUIRED_VARS=("CONTENT_ID" "JWT_TOKEN")
 for var in "${REQUIRED_VARS[@]}"; do
   if [ -z "${!var}" ]; then
     log_error "Missing required environment variable: $var"
     exit 1
   fi
 done
+
+# Set JWT_HEADER if not provided
+if [ -z "$JWT_HEADER" ] && [ -n "$JWT_TOKEN" ]; then
+  JWT_HEADER="Bearer $JWT_TOKEN"
+  export JWT_HEADER
+fi
+
+# Set BASE_URL if not provided
+if [ -z "$BASE_URL" ]; then
+  log_warning "BASE_URL not set, using default: $BASE_URL"
+fi
 
 # Ensure JWT token is properly formatted
 if [[ -z "$JWT_TOKEN" && -n "$JWT_HEADER" ]]; then
