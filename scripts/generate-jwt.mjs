@@ -248,15 +248,17 @@ async function generateToken() {
 
 
 async function mintViaClerk() {
-  const endpoint = 'https://api.clerk.com/v1/jwts';
-  const claims = {
-    sub: CONFIG.USER_ID,
-    azp: process.env.NEXT_PUBLIC_APP_URL || 'https://matbu.vercel.app',
-  };
+  // Issue a JWT from a template via Clerk Backend API
+  const endpoint = 'https://api.clerk.com/v1/jwts/issue';
 
   const body = {
     template: CONFIG.JWT_TEMPLATE,
-    claims,
+    // some Clerk endpoints accept subject at top-level
+    sub: CONFIG.USER_ID,
+    // custom claims
+    claims: {
+      azp: process.env.NEXT_PUBLIC_APP_URL || 'https://matbu.vercel.app',
+    },
   };
 
   const res = await fetch(endpoint, {
