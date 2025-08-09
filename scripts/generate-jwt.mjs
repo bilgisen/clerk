@@ -250,7 +250,7 @@ async function generateToken() {
 
 async function mintViaClerk() {
   // Issue a JWT from a template via Clerk Backend API
-  const endpoint = `${CONFIG.CLERK_API_URL}/v1/jwts/issue`;
+  const endpoint = new URL('/v1/jwts/issue', CONFIG.CLERK_API_URL).toString();
 
   const body = {
     template: CONFIG.JWT_TEMPLATE,
@@ -260,6 +260,10 @@ async function mintViaClerk() {
       azp: process.env.NEXT_PUBLIC_APP_URL || 'https://matbu.vercel.app',
     },
   };
+
+  // Debug: log final endpoint and compact body
+  console.log('🌐 Clerk mint endpoint:', endpoint);
+  console.log('📤 Clerk mint body:', JSON.stringify(body));
 
   const res = await fetch(endpoint, {
     method: 'POST',
