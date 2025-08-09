@@ -164,13 +164,28 @@ async function generateToken() {
       const maskedKeyId = CONFIG.CLERK_KEY_ID 
         ? `${CONFIG.CLERK_KEY_ID.substring(0, 4)}...${CONFIG.CLERK_KEY_ID.substring(-4)}`
         : 'not set';
-      console.log(`🔑 Using key ID: ${maskedKeyId}`);
+      
+      console.log('\n🔑 Key ID Verification:');
+      console.log(`- Key ID from config: ${maskedKeyId}`);
+      console.log(`- Expected key ID: ins_2yhHfvuC7eV6d8wuj44hPANY5Kq`);
+      console.log(`- Key ID matches expected: ${CONFIG.CLERK_KEY_ID === 'ins_2yhHfvuC7eV6d8wuj44hPANY5Kq' ? '✅ Yes' : '❌ No'}`);
+      
+      if (CONFIG.CLERK_KEY_ID !== 'ins_2yhHfvuC7eV6d8wuj44hPANY5Kq') {
+        console.error('\n❌ ERROR: Key ID does not match the expected value!');
+        console.error('Please ensure you are using the correct key ID from Clerk\'s JWT template settings.');
+        console.error('Expected: ins_2yhHfvuC7eV6d8wuj44hPANY5Kq');
+        console.error(`Got: ${CONFIG.CLERK_KEY_ID}`);
+        process.exit(1);
+      }
       
       const protectedHeader = {
         alg: 'RS256',
         typ: 'JWT',
-        kid: CONFIG.CLERK_KEY_ID,
+        kid: 'ins_2yhHfvuC7eV6d8wuj44hPANY5Kq', // Hardcoded to ensure it's always correct
       };
+      
+      console.log('\n🔏 JWT Header to be used:');
+      console.log(JSON.stringify(protectedHeader, null, 2));
       
       console.log('\n📝 JWT Header:');
       console.log(JSON.stringify(protectedHeader, null, 2));

@@ -124,7 +124,7 @@ jobs:
           PRIVATE_KEY_B64: ${{ secrets.PRIVATE_KEY_B64 }}
           JWT_ISSUER: ${{ env.JWT_ISSUER || 'https://sunny-dogfish-14.clerk.accounts.dev' }}
           JWT_AUDIENCE: ${{ env.JWT_AUDIENCE || 'https://sunny-dogfish-14.clerk.accounts.dev' }}
-          CLERK_KEY_ID: ${{ env.CLERK_KEY_ID }}
+          CLERK_KEY_ID: ${{ env.CLERK_KEY_ID || 'ins_2yhHfvuC7eV6d8wuj44hPANY5Kq' }}
           JWT_TEMPLATE: ${{ env.JWT_TEMPLATE || 'matbuapp' }}
           NEXT_PUBLIC_APP_URL: 'https://matbu.vercel.app'
           
@@ -181,6 +181,20 @@ jobs:
           # Generate the token with the private key and required env vars
           echo "\n🔨 Generating JWT token..."
           
+          # Debug: Print environment variables
+          echo "=== Environment Variables ==="
+          echo "JWT_ISSUER: $JWT_ISSUER"
+          echo "JWT_AUDIENCE: $JWT_AUDIENCE"
+          echo "CLERK_KEY_ID: $CLERK_KEY_ID"
+          echo "JWT_TEMPLATE: $JWT_TEMPLATE"
+          
+          # Debug: Check if the key ID is being overridden
+          echo "\n=== Checking Key ID in JWT Generation Script ==="
+          if [ -f "scripts/generate-jwt.mjs" ]; then
+            echo "Checking for key ID in generate-jwt.mjs:"
+            grep -A 5 -B 5 "kid" scripts/generate-jwt.mjs || echo "No explicit key ID found in generate-jwt.mjs"
+          fi
+          
           # Ensure all required environment variables are set
           if [ -z "$JWT_ISSUER" ] || [ -z "$JWT_AUDIENCE" ] || [ -z "$CLERK_KEY_ID" ]; then
             echo "❌ Missing required environment variables"
@@ -189,6 +203,22 @@ jobs:
             echo "CLERK_KEY_ID: $CLERK_KEY_ID"
             exit 1
           fi
+          
+          # Debug: Print the exact command we're about to run
+          echo "\n=== Running JWT Generation ==="
+          echo "node scripts/generate-jwt.mjs with environment:"
+          echo "- PRIVATE_KEY_PATH=$TEMP_DIR/private.pem"
+          echo "- JWT_ISSUER=$JWT_ISSUER"
+          echo "- JWT_AUDIENCE=$JWT_AUDIENCE"
+          echo "- CLERK_KEY_ID=$CLERK_KEY_ID"
+          echo "- JWT_TEMPLATE=$JWT_TEMPLATE"
+          
+          # Debug: Print environment variables before running the script
+          echo "\n=== Environment Variables in Workflow ==="
+          echo "JWT_ISSUER: $JWT_ISSUER"
+          echo "JWT_AUDIENCE: $JWT_AUDIENCE"
+          echo "CLERK_KEY_ID: $CLERK_KEY_ID"
+          echo "JWT_TEMPLATE: $JWT_TEMPLATE"
           
           # Run the script and capture all output
           set +e
