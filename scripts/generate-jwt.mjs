@@ -18,6 +18,7 @@ const CONFIG = {
   // Make sure this matches the key ID from Clerk
   CLERK_KEY_ID: process.env.CLERK_KEY_ID,
   CLERK_SECRET_KEY: process.env.CLERK_SECRET_KEY,
+  CLERK_API_URL: (process.env.CLERK_API_URL || 'https://api.clerk.com').replace(/\/$/, ''),
   TOKEN_EXPIRY_SECONDS: 3600, // 1 hour
   TOKEN_FILE: 'jwt-token.txt',
   JWT_TEMPLATE: process.env.JWT_TEMPLATE || 'matbuapp'  // This should match your Clerk template name
@@ -249,14 +250,13 @@ async function generateToken() {
 
 async function mintViaClerk() {
   // Issue a JWT from a template via Clerk Backend API
-  const endpoint = 'https://api.clerk.com/v1/jwts/issue';
+  const endpoint = `${CONFIG.CLERK_API_URL}/v1/jwts/issue`;
 
   const body = {
     template: CONFIG.JWT_TEMPLATE,
-    // some Clerk endpoints accept subject at top-level
-    sub: CONFIG.USER_ID,
-    // custom claims
+    // place subject in claims for wider compatibility
     claims: {
+      sub: CONFIG.USER_ID,
       azp: process.env.NEXT_PUBLIC_APP_URL || 'https://matbu.vercel.app',
     },
   };
@@ -266,6 +266,8 @@ async function mintViaClerk() {
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${CONFIG.CLERK_SECRET_KEY}`,
+      // Pin an API version to avoid surprises; adjust if your instance shows a different latest version
+      'Clerk-API-Version': process.env.CLERK_API_VERSION || '2024-10-01',
     },
     body: JSON.stringify(body),
   });
