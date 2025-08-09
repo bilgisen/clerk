@@ -131,8 +131,8 @@ jobs:
         env:
           # Required for JWT generation
           PRIVATE_KEY_B64: ${{ secrets.PRIVATE_KEY_B64 }}
-          JWT_ISSUER: ${{ env.JWT_ISSUER || 'clerk.clerko.v1' }}
-          JWT_AUDIENCE: ${{ env.JWT_AUDIENCE || 'https://api.clerko.com' }}
+          JWT_ISSUER: ${{ env.JWT_ISSUER || 'https://sunny-dogfish-14.clerk.accounts.dev' }}
+          JWT_AUDIENCE: ${{ env.JWT_AUDIENCE || 'https://sunny-dogfish-14.clerk.accounts.dev' }}
           CLERK_KEY_ID: ${{ env.CLERK_KEY_ID }}
           JWT_TEMPLATE: ${{ env.JWT_TEMPLATE || 'matbuapp' }}
           NEXT_PUBLIC_APP_URL: 'https://matbu.vercel.app'
