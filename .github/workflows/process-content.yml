@@ -26,8 +26,8 @@ env:
   JWT_ISSUER: 'https://sunny-dogfish-14.clerk.accounts.dev'
   JWT_AUDIENCE: 'https://sunny-dogfish-14.clerk.accounts.dev'
   
-  # Clerk template name and key ID
-  CLERK_KEY_ID: 'jtmp_310Eh03rhbpy3wXWHcIaNkwwTpj'
+  # Clerk template name and key ID - Using the key ID from Clerk's JWKS
+  CLERK_KEY_ID: 'ins_2yhHfvuC7eV6d8wuj44hPANY5Kq'
   JWT_TEMPLATE: 'matbuapp'
   
   # Repository information
