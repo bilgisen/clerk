@@ -113,15 +113,6 @@ jobs:
           echo "NEXT_PUBLIC_APP_URL=https://matbu.vercel.app" > .env
           echo "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY" >> .env
           
-          # Decode private key if provided
-          if [ -n "$PRIVATE_KEY_B64" ]; then
-            echo "🔑 Decoding private key..."
-            echo "$PRIVATE_KEY_B64" | base64 --decode > private.pem
-            chmod 600 private.pem
-          else
-            echo "⚠️ No private key provided, some features may be limited"
-          fi
-          
           # Set secure permissions
           chmod -R 700 .
 
@@ -156,14 +147,25 @@ jobs:
           TEMP_DIR=$(mktemp -d)
           trap 'rm -rf "$TEMP_DIR"' EXIT
           
-          # Create private key file from base64 using Node.js
-          node -e "
-            const fs = require('fs');
-            const privateKeyPem = Buffer.from(process.env.PRIVATE_KEY_B64, 'base64').toString('utf-8');
-            fs.writeFileSync('$TEMP_DIR/private.pem', privateKeyPem);
-            fs.chmodSync('$TEMP_DIR/private.pem', 0o600);
-            console.log('✅ Private key file created');
-          "
+          # Create private key file from base64
+          if [ -z "$PRIVATE_KEY_B64" ]; then
+            echo "❌ PRIVATE_KEY_B64 is not set"
+            exit 1
+          fi
+          
+          # Write the base64-decoded private key to file
+          echo "$PRIVATE_KEY_B64" | base64 --decode > "$TEMP_DIR/private.pem"
+          chmod 600 "$TEMP_DIR/private.pem"
+          
+          # Verify the key format
+          if ! grep -q 'BEGIN PRIVATE KEY' "$TEMP_DIR/private.pem" && ! grep -q 'BEGIN RSA PRIVATE KEY' "$TEMP_DIR/private.pem"; then
+            echo "❌ Invalid private key format. Expected PEM format with BEGIN PRIVATE KEY or BEGIN RSA PRIVATE KEY"
+            echo "First 100 chars of key:"
+            head -c 100 "$TEMP_DIR/private.pem"
+            exit 1
+          fi
+          
+          echo '✅ Private key file created with proper permissions'
           
           # Install required dependencies
           echo "📦 Installing dependencies..."
