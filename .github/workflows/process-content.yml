@@ -27,7 +27,7 @@ env:
   JWT_AUDIENCE: 'https://api.clerko.com'
   
   # Clerk template name and key ID - Use the instance key ID (starts with ins_)
-  CLERK_KEY_ID: 'ins_2yhHfvuC7eV6d8wuj44hPANY5Kq'
+  CLERK_KEY_ID: 'jtmp_310Eh03rhbpy3wXWHcIaNkwwTpj'
   JWT_TEMPLATE: 'matbuapp'
   
   # Repository information

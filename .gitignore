@@ -19,6 +19,7 @@
 .DS_Store
 *.pem
 *.pem.b64
+*.key
 
 # debug
 npm-debug.log*
