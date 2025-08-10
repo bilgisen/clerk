@@ -34,7 +34,7 @@ interface EbookPayload {
     output_filename: string;
     cover_url: string;
     stylesheet_url: string;
-    imprint: {
+    imprint?: {
       url: string;
     };
     chapters: PayloadChapter[];
@@ -164,9 +164,7 @@ export async function GET(
         output_filename: `${bookResult.slug}.${outputExt}`,
         cover_url: includeCover ? (bookResult.coverImageUrl || '') : '',
         stylesheet_url: `${baseUrl}${stylesheetPath}`,
-        imprint: {
-          url: `${baseUrl}/api/books/by-id/${bookId}/imprint`
-        },
+        ...(includeImprint ? { imprint: { url: `${baseUrl}/api/books/by-id/${bookId}/imprint` } } : {}),
         chapters: flattenedChapters
       },
       options: {

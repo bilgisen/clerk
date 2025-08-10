@@ -1,16 +1,8 @@
 import { NextResponse } from 'next/server';
-import { Octokit } from '@octokit/rest';
 import { auth } from '@clerk/nextjs/server';
+import { GitHubActionsService } from '@/lib/services/github-actions.service';
 
-type WorkflowResponse = {
-  id: number;
-  html_url: string;
-};
-
-// Initialize Octokit with GitHub token
-const octokit = new Octokit({
-  auth: process.env.GITHUB_PAT || process.env.GITHUB_TOKEN,
-});
+// We centralize GitHub workflow triggering in GitHubActionsService
 
 export async function POST(request: Request) {
   try {
@@ -34,49 +26,16 @@ export async function POST(request: Request) {
       );
     }
 
-    // Get repository owner and name from environment variables
-    const owner = process.env.GITHUB_REPO_OWNER;
-    const repo = process.env.GITHUB_REPO_NAME;
-    const workflowFile = process.env.GITHUB_WORKFLOW || 'process-content.yml';
-    
-    if (!owner || !repo) {
-      return NextResponse.json(
-        { error: 'GitHub repository owner or name not configured' },
-        { status: 500 }
-      );
-    }
-
-    // Prepare the inputs for the workflow
-    const inputs: Record<string, string> = {
-      content_id: content_id.toString(),
+    const result = await GitHubActionsService.triggerContentProcessing({
+      contentId: content_id.toString(),
       format: format || 'epub',
-      metadata: JSON.stringify({
+      metadata: {
         ...(metadata || {}),
         user_id: userId,
-        timestamp: new Date().toISOString(),
-      }),
-    };
-
-    // Trigger the workflow
-    const response = await octokit.actions.createWorkflowDispatch({
-      // @ts-ignore - Type definition issue with octokit
-      owner,
-      repo,
-      workflow_id: workflowFile,
-      ref: 'main',
-      inputs,
-    }) as { data: WorkflowResponse };
-
-    // Get the workflow run ID and URL
-    const workflowRunId = response.data.id;
-    const workflowUrl = response.data.html_url || 
-      `https://github.com/${owner}/${repo}/actions/runs/${workflowRunId}`;
-
-    return NextResponse.json({
-      success: true,
-      workflowRunId,
-      workflowUrl,
+      },
     });
+
+    return NextResponse.json(result);
 
   } catch (error) {
     console.error('Error triggering workflow:', error);

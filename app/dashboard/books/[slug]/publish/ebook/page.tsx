@@ -5,6 +5,15 @@ import { useParams, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { useAuth } from '@clerk/nextjs';
+import { BooksMenu } from '@/components/books/books-menu';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Label } from '@/components/ui/label';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Separator } from '@/components/ui/separator';
+import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Progress } from '@/components/ui/progress';
 
 // Polling interval in milliseconds
 const POLL_INTERVAL = 10000; // 10 seconds
@@ -26,7 +35,6 @@ export default function GenerateEbookPage() {
   const [includeCover, setIncludeCover] = useState<boolean>(true);
   const [style, setStyle] = useState<'default' | 'style2'>('default');
   const [tocDepth, setTocDepth] = useState<number>(3);
-  const [language, setLanguage] = useState<string>('tr');
 
   // Simple progress state
   const [status, setStatus] = useState<'idle' | 'starting' | 'triggered' | 'processing' | 'completed' | 'failed'>('idle');
@@ -163,8 +171,7 @@ export default function GenerateEbookPage() {
         include_imprint: String(includeImprint),
         cover: String(includeCover),
         style,
-        toc_depth: String(tocDepth),
-        language
+        toc_depth: String(tocDepth)
       });
 
       // 3) Precompute payload (optional: ensures route works with options)
@@ -189,7 +196,7 @@ export default function GenerateEbookPage() {
             book_id: book.id,
             slug: book.slug,
             title: book.title,
-            options: { format, generateToc, includeImprint, includeCover, style, tocDepth, language }
+            options: { format, generateToc, includeImprint, includeCover, style, tocDepth }
           },
         }),
       });
@@ -245,118 +252,251 @@ export default function GenerateEbookPage() {
     }
   };
 
+  // Calculate progress percentage based on status
+  const getProgress = () => {
+    switch(status) {
+      case 'starting': return 25;
+      case 'triggered': return 50;
+      case 'processing': return 75;
+      case 'completed': return 100;
+      case 'failed': return 0;
+      default: return 0;
+    }
+  };
+
   return (
-    <div className="container mx-auto px-4 py-8">
-      <div className="max-w-3xl mx-auto">
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
-          <h1 className="text-2xl font-bold mb-6">Publish E‑Book</h1>
-          
-          <div className="space-y-6">
-            {/* Publishing Options */}
-            <div className="bg-gray-50 dark:bg-gray-700 p-4 rounded-md space-y-4">
-              <h2 className="text-lg font-medium">Publishing Options</h2>
-
-              {/* Format */}
-              <div>
-                <label className="block text-sm font-medium mb-1">Format</label>
-                <div className="flex items-center gap-4">
-                  <label className="inline-flex items-center gap-2">
-                    <input type="radio" name="format" value="epub" checked={format === 'epub'} onChange={() => setFormat('epub')} className="h-4 w-4" />
-                    <span>EPUB</span>
-                  </label>
-                  <label className="inline-flex items-center gap-2">
-                    <input type="radio" name="format" value="mobi" checked={format === 'mobi'} onChange={() => setFormat('mobi')} className="h-4 w-4" />
-                    <span>MOBI</span>
-                  </label>
-                </div>
-              </div>
-
-              {/* Checkboxes */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <label className="inline-flex items-center gap-2">
-                  <input type="checkbox" checked={generateToc} onChange={(e) => setGenerateToc(e.target.checked)} className="h-4 w-4" />
-                  <span>Add TOC</span>
-                </label>
-                <label className="inline-flex items-center gap-2">
-                  <input type="checkbox" checked={includeImprint} onChange={(e) => setIncludeImprint(e.target.checked)} className="h-4 w-4" />
-                  <span>Add Imprint</span>
-                </label>
-                <label className="inline-flex items-center gap-2">
-                  <input type="checkbox" checked={includeCover} onChange={(e) => setIncludeCover(e.target.checked)} className="h-4 w-4" />
-                  <span>Include Cover</span>
-                </label>
-              </div>
-
-              {/* Style and TOC depth */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium mb-1">Style</label>
-                  <select value={style} onChange={(e) => setStyle(e.target.value as 'default' | 'style2')} className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2">
-                    <option value="default">Default</option>
-                    <option value="style2">Style 2</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1">TOC Depth</label>
-                  <input type="number" min={1} max={6} value={tocDepth} onChange={(e) => setTocDepth(parseInt(e.target.value || '3', 10))} className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2" />
-                </div>
-              </div>
-
-              {/* Language */}
-              <div>
-                <label className="block text-sm font-medium mb-1">Language</label>
-                <input type="text" value={language} onChange={(e) => setLanguage(e.target.value)} className="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2" />
-              </div>
-            </div>
-
-            {/* Actions */}
-            <div className="bg-gray-50 dark:bg-gray-700 p-4 rounded-md">
-              <h2 className="text-lg font-medium mb-2">Generate</h2>
-              <p className="text-gray-600 dark:text-gray-300 mb-4">Generate your e‑book with the selected options.</p>
-              <div className="flex items-center gap-3">
-                <Button onClick={handleGenerateEPUB} disabled={isGenerating} className="bg-blue-600 hover:bg-blue-700 text-white">
-                  {isGenerating ? (
-                    <>
-                      <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                      </svg>
-                      Processing...
-                    </>
-                  ) : (
-                    'Generate E‑Book'
-                  )}
-                </Button>
-                <Button asChild variant="outline" disabled={!downloadUrl}>
-                  <a href={downloadUrl || '#'} target="_blank" rel="noopener noreferrer">Download</a>
-                </Button>
-              </div>
-              <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">You will be able to download once generation completes.</p>
-            </div>
-
-            {/* Progress Steps */}
-            <div className="bg-gray-50 dark:bg-gray-700 p-4 rounded-md">
-              <h3 className="text-sm font-medium mb-3">Progress</h3>
-              <ol className="space-y-2 text-sm">
-                <li className="flex items-center gap-2">
-                  <span className={`h-2 w-2 rounded-full ${status !== 'idle' ? 'bg-blue-500' : 'bg-gray-400'}`}></span>
-                  Start
-                </li>
-                <li className="flex items-center gap-2">
-                  <span className={`h-2 w-2 rounded-full ${status === 'triggered' || status === 'processing' || status === 'completed' ? 'bg-blue-500' : 'bg-gray-400'}`}></span>
-                  Triggered
-                </li>
-                <li className="flex items-center gap-2">
-                  <span className={`h-2 w-2 rounded-full ${status === 'processing' || status === 'completed' ? 'bg-blue-500' : 'bg-gray-400'}`}></span>
-                  Processing
-                </li>
-                <li className="flex items-center gap-2">
-                  <span className={`h-2 w-2 rounded-full ${status === 'completed' ? 'bg-green-500' : status === 'failed' ? 'bg-red-500' : 'bg-gray-400'}`}></span>
-                  Completed
-                </li>
-              </ol>
-            </div>
+    <div className="container mx-auto px-8 py-6 space-y-6">
+      {/* Header */}
+      <div className="flex flex-col space-y-2">
+        <div className="flex justify-between items-start">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">Publish E-Book</h1>
+            <p className="text-muted-foreground">Publish ebook version of {slug}</p>
           </div>
+          <BooksMenu slug={slug as string} />
+        </div>
+        <Separator className="my-4" />
+      </div>
+
+      {/* Main Content */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Left Column - Publishing Options (2/3 width) */}
+        <div className="lg:col-span-2 space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Publishing Options</CardTitle>
+              <CardDescription>Customize how your ebook will be generated</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* Format Selection */}
+              <div className="space-y-2">
+                <Label>Format</Label>
+                <RadioGroup 
+                  value={format} 
+                  onValueChange={(value) => setFormat(value as 'epub' | 'mobi')}
+                  className="grid grid-cols-2 gap-4 pt-2"
+                >
+                  <div>
+                    <RadioGroupItem value="epub" id="epub" className="peer sr-only" />
+                    <Label
+                      htmlFor="epub"
+                      className="flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary"
+                    >
+                      <div className="font-medium">EPUB</div>
+                      <div className="text-xs text-muted-foreground">Standard format</div>
+                    </Label>
+                  </div>
+                  <div>
+                    <RadioGroupItem value="mobi" id="mobi" className="peer sr-only" />
+                    <Label
+                      htmlFor="mobi"
+                      className="flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary"
+                    >
+                      <div className="font-medium">MOBI</div>
+                      <div className="text-xs text-muted-foreground">Kindle format</div>
+                    </Label>
+                  </div>
+                </RadioGroup>
+              </div>
+
+              {/* Checkbox Options */}
+              <div className="space-y-4">
+                <div className="flex items-center space-x-2">
+                  <Checkbox 
+                    id="generateToc" 
+                    checked={generateToc} 
+                    onCheckedChange={(checked) => setGenerateToc(checked as boolean)} 
+                  />
+                  <Label htmlFor="generateToc" className="font-normal">
+                    Generate Table of Contents
+                  </Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <Checkbox 
+                    id="includeImprint" 
+                    checked={includeImprint} 
+                    onCheckedChange={(checked) => setIncludeImprint(checked as boolean)} 
+                  />
+                  <Label htmlFor="includeImprint" className="font-normal">
+                    Include Imprint Page
+                  </Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <Checkbox 
+                    id="includeCover" 
+                    checked={includeCover} 
+                    onCheckedChange={(checked) => setIncludeCover(checked as boolean)} 
+                  />
+                  <Label htmlFor="includeCover" className="font-normal">
+                    Include Book Cover
+                  </Label>
+                </div>
+              </div>
+
+              {/* Advanced Options */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                <div className="space-y-2">
+                  <Label htmlFor="style">Style</Label>
+                  <Select value={style} onValueChange={(value) => setStyle(value as 'default' | 'style2')}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select style" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="default">Default</SelectItem>
+                      <SelectItem value="style2">Style 2</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="tocDepth">TOC Depth</Label>
+                  <Input 
+                    id="tocDepth"
+                    type="number" 
+                    min={1} 
+                    max={6} 
+                    value={tocDepth} 
+                    onChange={(e) => setTocDepth(parseInt(e.target.value || '3', 10))} 
+                  />
+                </div>
+
+              </div>
+            </CardContent>
+            <CardFooter className="flex justify-end border-t px-6 py-4">
+              <Button 
+                onClick={handleGenerateEPUB} 
+                disabled={isGenerating}
+                className="w-full sm:w-auto"
+              >
+                {isGenerating ? (
+                  <>
+                    <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Generating...
+                  </>
+                ) : (
+                  'Generate E-Book'
+                )}
+              </Button>
+            </CardFooter>
+          </Card>
+        </div>
+
+        {/* Right Column - Generation Progress (1/3 width) */}
+        <div className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Generation Progress</CardTitle>
+              <CardDescription>Track the status of your ebook generation</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span>Status</span>
+                  <span className="font-medium capitalize">
+                    {status === 'idle' ? 'Ready' : status}
+                    {status === 'completed' && ' 🎉'}
+                    {status === 'failed' && ' ❌'}
+                  </span>
+                </div>
+                <Progress value={getProgress()} className="h-2" />
+              </div>
+
+              <div className="space-y-2">
+                <h4 className="text-sm font-medium">Generation Steps</h4>
+                <div className="space-y-2 text-sm">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className={`h-2 w-2 rounded-full ${
+                        status !== 'idle' ? 'bg-primary' : 'bg-muted-foreground/20'
+                      }`}></div>
+                      <span className={status !== 'idle' ? 'font-medium' : 'text-muted-foreground'}>Initializing</span>
+                    </div>
+                    {status !== 'idle' && <span className="text-xs text-muted-foreground">✓</span>}
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className={`h-2 w-2 rounded-full ${
+                        ['triggered', 'processing', 'completed'].includes(status) ? 'bg-primary' : 'bg-muted-foreground/20'
+                      }`}></div>
+                      <span className={['triggered', 'processing', 'completed'].includes(status) ? 'font-medium' : 'text-muted-foreground'}>
+                        Preparing Content
+                      </span>
+                    </div>
+                    {['triggered', 'processing', 'completed'].includes(status) && <span className="text-xs text-muted-foreground">✓</span>}
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className={`h-2 w-2 rounded-full ${
+                        ['processing', 'completed'].includes(status) ? 'bg-primary' : 'bg-muted-foreground/20'
+                      }`}></div>
+                      <span className={['processing', 'completed'].includes(status) ? 'font-medium' : 'text-muted-foreground'}>
+                        Generating E-Book
+                      </span>
+                    </div>
+                    {['processing', 'completed'].includes(status) && <span className="text-xs text-muted-foreground">
+                      {status === 'processing' ? '...' : '✓'}
+                    </span>}
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className={`h-2 w-2 rounded-full ${
+                        status === 'completed' ? 'bg-green-500' : 
+                        status === 'failed' ? 'bg-destructive' : 'bg-muted-foreground/20'
+                      }`}></div>
+                      <span className={status === 'completed' || status === 'failed' ? 'font-medium' : 'text-muted-foreground'}>
+                        {status === 'failed' ? 'Failed' : 'Completed'}
+                      </span>
+                    </div>
+                    {(status === 'completed' || status === 'failed') && (
+                      <span className="text-xs text-muted-foreground">
+                        {status === 'completed' ? '✓' : '✗'}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+            <CardFooter className="border-t px-6 py-4">
+              <Button 
+                asChild 
+                className="w-full"
+                disabled={!downloadUrl}
+              >
+                <a 
+                  href={downloadUrl || '#'} 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  onClick={(e) => !downloadUrl && e.preventDefault()}
+                >
+                  {status === 'completed' ? 'Download E-Book' : 
+                   status === 'processing' ? 'Generating...' : 
+                   'E-Book Not Ready'}
+                </a>
+              </Button>
+            </CardFooter>
+          </Card>
         </div>
       </div>
     </div>
