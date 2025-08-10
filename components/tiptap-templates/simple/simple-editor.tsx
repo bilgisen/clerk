@@ -198,8 +198,6 @@ export function SimpleEditor({
   const toolbarRef = React.useRef<HTMLDivElement>(null)
 
   const editor = useEditor({
-    immediatelyRender: false,
-    shouldRerenderOnTransaction: false,
     editorProps: {
       attributes: {
         autocomplete: "off",
@@ -216,13 +214,36 @@ export function SimpleEditor({
           openOnClick: false,
           enableClickSelection: true,
         },
+        heading: {
+          levels: [1, 2, 3, 4, 5, 6],
+        },
+        bulletList: {
+          keepMarks: true,
+          keepAttributes: false,
+        },
+        orderedList: {
+          keepMarks: true,
+          keepAttributes: false,
+        },
       }),
       HorizontalRule,
-      TextAlign.configure({ types: ["heading", "paragraph"] }),
+      TextAlign.configure({ 
+        types: ["heading", "paragraph"],
+        defaultAlignment: 'left',
+      }),
       TaskList,
-      TaskItem.configure({ nested: true }),
+      TaskItem.configure({ 
+        nested: true,
+        onReadOnlyChecked: () => true,
+      }),
       Highlight.configure({ multicolor: true }),
-      Image,
+      Image.configure({
+        inline: true,
+        allowBase64: true,
+        HTMLAttributes: {
+          class: 'tiptap-image',
+        },
+      }),
       Typography,
       Superscript,
       Subscript,
@@ -234,6 +255,11 @@ export function SimpleEditor({
       }),
     ],
     content: content || '<p></p>',
+    autofocus: true,
+    injectCSS: true,
+    enableInputRules: true,
+    enablePasteRules: true,
+    editable,
   })
 
   const isScrolling = useScrolling()
@@ -272,6 +298,11 @@ export function SimpleEditor({
       editor.off('update', handleUpdate);
     };
   }, [editor, onChange, content]);
+
+  // Ensure editor is ready before rendering the toolbar
+  if (!editor) {
+    return <div>Loading editor...</div>;
+  }
 
   return (
     <div className={`simple-editor-wrapper ${className}`}>
