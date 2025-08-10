@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import dynamic from 'next/dynamic';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { useAuth } from '@clerk/nextjs';
@@ -14,6 +15,9 @@ import { Separator } from '@/components/ui/separator';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Progress } from '@/components/ui/progress';
+
+// Import the EPUB viewer component
+import { EpubViewer } from '@/components/epub-viewer';
 
 // Polling interval in milliseconds
 const POLL_INTERVAL = 10000; // 10 seconds
@@ -39,6 +43,11 @@ export default function GenerateEbookPage() {
   // Simple progress state
   const [status, setStatus] = useState<'idle' | 'starting' | 'triggered' | 'processing' | 'completed' | 'failed'>('idle');
   
+  // State for EPUB preview
+  const [showPreview, setShowPreview] = useState(false);
+  const [epubFile, setEpubFile] = useState<File | null>(null);
+  const [localEpubUrl, setLocalEpubUrl] = useState<string | null>(null);
+
   // Get the auth token when component mounts
   useEffect(() => {
     const fetchToken = async () => {
@@ -84,67 +93,98 @@ export default function GenerateEbookPage() {
     init();
   }, [slug]);
   
-  // Function to start polling for completion
-  const startPollingForCompletion = (bookId: string) => {
+  // Function to start polling for completion with retry logic
+  const startPollingForCompletion = (bookId: string, attempt = 1) => {
     if (polling) return; // Prevent multiple polling instances
     
     setPolling(true);
-    const poll = async () => {
+    const poll = async (currentAttempt: number) => {
+      // Clean up any existing local URLs
+      if (localEpubUrl) {
+        URL.revokeObjectURL(localEpubUrl);
+        setLocalEpubUrl(null);
+      }
       try {
-        // Poll the secure by-id endpoint for the latest book state
-        const response = await fetch(`/api/books/by-id/${bookId}`, { 
+        // Add a cache-busting parameter to the URL
+        const cacheBuster = `_t=${Date.now()}`;
+        const response = await fetch(`/api/books/by-id/${bookId}?${cacheBuster}`, { 
           cache: 'no-store',
-          credentials: 'include' // Ensure cookies are sent with the request
+          credentials: 'include',
+          headers: {
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0'
+          }
         });
         
         if (response.ok) {
           const book = await response.json();
-          console.log('Polling response:', { book }); // Debug log
+          console.log('Polling response:', { book });
           
           if (book.epubUrl) {
-            // EPUB is ready
-            setDownloadUrl(book.epubUrl);
+            // Add cache-buster to the download URL
+            const downloadUrl = `${book.epubUrl}${book.epubUrl.includes('?') ? '&' : '?'}t=${Date.now()}`;
+            setDownloadUrl(downloadUrl);
             setStatus('completed');
+            
+            // Download the file for preview
+            try {
+              const epubResponse = await fetch(downloadUrl);
+              const epubBlob = await epubResponse.blob();
+              const epubFile = new File([epubBlob], `book-${bookId}.epub`, { type: 'application/epub+zip' });
+              const fileUrl = URL.createObjectURL(epubFile);
+              setEpubFile(epubFile);
+              setLocalEpubUrl(fileUrl);
+            } catch (e) {
+              console.warn('Failed to prepare EPUB for preview:', e);
+            }
+            
             toast.success('EPUB generated successfully!', {
-              description: (
-                <div className="flex flex-col space-y-2">
-                  <span>Your EPUB is ready to download.</span>
-                  <a 
-                    href={book.epubUrl} 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    className="text-blue-500 hover:underline"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    Download EPUB
-                  </a>
-                </div>
-              ),
+              description: 'Your EPUB is ready to download and preview.',
               duration: 10000,
             });
             setPolling(false);
             return;
+          } else if (currentAttempt < 30) { // Try for max 5 minutes (30 attempts * 10 seconds)
+            // Continue polling
+            setTimeout(() => poll(currentAttempt + 1), POLL_INTERVAL);
+          } else {
+            // Timeout after 5 minutes
+            setStatus('failed');
+            setPolling(false);
+            toast.error('EPUB generation timed out', {
+              description: 'The EPUB generation is taking longer than expected. Please try again later.',
+            });
           }
         } else {
           console.error('Error polling for book:', await response.text());
-        }
-        
-        // Continue polling if not found yet
-        if (polling) {
-          setTimeout(poll, POLL_INTERVAL);
+          // Continue polling on error (server might be temporarily unavailable)
+          if (currentAttempt < 30) {
+            setTimeout(() => poll(currentAttempt + 1), POLL_INTERVAL);
+          } else {
+            setStatus('failed');
+            setPolling(false);
+            toast.error('Error checking EPUB status', {
+              description: 'Failed to check if EPUB is ready. Please refresh the page and try again.',
+            });
+          }
         }
       } catch (error) {
         console.error('Error polling for EPUB:', error);
-        setStatus('failed');
-        setPolling(false);
-        toast.error('Error checking EPUB status', {
-          description: 'Failed to check if EPUB is ready. Please refresh the page and try again.',
-        });
+        if (currentAttempt < 30) {
+          setTimeout(() => poll(currentAttempt + 1), POLL_INTERVAL);
+        } else {
+          setStatus('failed');
+          setPolling(false);
+          toast.error('Error checking EPUB status', {
+            description: 'Failed to check if EPUB is ready. Please refresh the page and try again.',
+          });
+        }
       }
     };
     
     // Start polling
-    poll();
+    poll(attempt);
     
     // Cleanup function
     return () => {
@@ -317,7 +357,71 @@ export default function GenerateEbookPage() {
       </div>
 
       {/* Main Content */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="space-y-6">
+        {/* E-book Preview Section */}
+        {status === 'completed' && localEpubUrl && (
+          <Card>
+            <CardHeader>
+              <CardTitle>E-Book Preview</CardTitle>
+              <CardDescription>Preview your generated e-book</CardDescription>
+            </CardHeader>
+            <CardContent className="min-h-[600px]">
+              <div className="flex justify-between items-center mb-4">
+                <div className="text-sm text-muted-foreground">
+                  Preview your e-book before downloading
+                </div>
+                <Button 
+                  variant="outline" 
+                  onClick={() => setShowPreview(!showPreview)}
+                >
+                  {showPreview ? 'Hide Preview' : 'Show Preview'}
+                </Button>
+              </div>
+              
+              {showPreview && (
+                <div className="border rounded-lg overflow-hidden h-[600px] bg-white">
+                  <div className="w-full h-full">
+                    <EpubViewer 
+                      url={localEpubUrl!}
+                      style={{ width: '100%', height: '100%' }}
+                    />
+                  </div>
+                </div>
+              )}
+            </CardContent>
+            <CardFooter className="flex justify-between border-t pt-4">
+              <div className="space-x-2">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    if (localEpubUrl) {
+                      const a = document.createElement('a');
+                      a.href = localEpubUrl;
+                      a.download = `book-${bookId || 'preview'}.epub`;
+                      document.body.appendChild(a);
+                      a.click();
+                      document.body.removeChild(a);
+                    }
+                  }}
+                >
+                  Download Local Copy
+                </Button>
+              </div>
+              <Button
+                onClick={() => {
+                  if (downloadUrl) {
+                    window.open(downloadUrl, '_blank');
+                  }
+                }}
+              >
+                Download from Cloudflare R2
+              </Button>
+            </CardFooter>
+          </Card>
+        )}
+
+        {/* Options Section */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left Column - Publishing Options (2/3 width) */}
         <div className="lg:col-span-2 space-y-6">
           <Card>
@@ -561,6 +665,7 @@ export default function GenerateEbookPage() {
               </Button>
             </CardFooter>
           </Card>
+        </div>
         </div>
       </div>
     </div>

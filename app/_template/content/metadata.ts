@@ -2,14 +2,14 @@ import { Metadata } from "next";
 
 export const templateMetadata: Metadata = {
   metadataBase: new URL("https://clerk-nextjs-app-router.vercel.app/"),
-  title: "Next.js Clerk Template",
+  title: "Matbu.app",
   description:
-    "A simple and powerful Next.js template featuring authentication and user management powered by Clerk.",
+    "Publish your first book free",
   openGraph: { images: ["/og.png"] },
 };
 
 // Default metadata for when template is removed
 export const defaultMetadata: Metadata = {
-  title: "My App",
-  description: "My Next.js app with Clerk authentication",
+  title: "Matbu.app",
+  description: "Publish your first book free",
 };
