@@ -11,21 +11,15 @@ import { BooksMenu } from '@/components/books/books-menu';
 import { useChapters, useUpdateChapterOrder } from '@/hooks/api/use-chapters';
 import dynamic from 'next/dynamic';
 
-type ChapterNode = {
-  id: string;
-  title: string;
-  slug: string;
-  order: number;
-  level: number;
-  parent_chapter_id: string | null;
-  children?: ChapterNode[];
-};
+// Import the ChapterNode type from the canonical source
+import type { ChapterNode } from '@/types/dnd';
 
+// Extend the ChapterNode type with any additional fields needed for the UI
 type ExtendedChapterNode = ChapterNode & {
   bookId?: string;
-  created_at: string;
-  updated_at: string;
   content?: string;
+  isEditing?: boolean;
+  isExpanded?: boolean;
 };
 
 interface Book {
@@ -237,13 +231,20 @@ export default function ChaptersPage() {
         </div>
       </div>
       
-      <div className="bg-card rounded-lg border shadow-sm">
+      <div className="w-full p-8">
         {processedChapters.length > 0 ? (
           <ChapterTree 
-            chapters={processedChapters} 
+            chapters={processedChapters.map(ch => ({
+              ...ch,
+              // Ensure all required ChapterNode fields are present
+              slug: ch.slug || `chapter-${ch.id.substring(0, 8)}`,
+              book_id: book.id,
+              created_at: ch.created_at || new Date().toISOString(),
+              updated_at: ch.updated_at || new Date().toISOString(),
+            }))}
             onSave={handleSave}
-            bookId={book.id}
-            bookSlug={book.slug}
+            onView={(chapterId) => router.push(`/dashboard/books/${bookSlug}/chapters/${chapterId}`)}
+            onEdit={(chapterId) => router.push(`/dashboard/books/${bookSlug}/chapters/${chapterId}/edit`)}
           />
         ) : (
           <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
@@ -261,7 +262,7 @@ export default function ChaptersPage() {
       </div>
       
       <div className="mt-8">
-        <BooksMenu currentBookSlug={book.slug} />
+        <BooksMenu slug={book.slug} />
       </div>
     </div>
   );

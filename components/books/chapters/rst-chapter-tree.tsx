@@ -270,9 +270,15 @@ export function RdtChapterTree({
             </button>
           )}
           
-          <span className="truncate font-medium text-foreground">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              if (onView) onView(String(node.id));
+            }}
+            className="truncate font-medium text-foreground hover:underline text-left"
+          >
             {node.text}
-          </span>
+          </button>
         </div>
         
         <div className="flex items-center gap-1 opacity-0 group-hover/item:opacity-100 transition-opacity">
