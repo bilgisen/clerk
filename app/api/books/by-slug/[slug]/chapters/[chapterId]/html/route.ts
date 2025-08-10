@@ -5,6 +5,7 @@ import { books, chapters, users } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 import { generateChapterHTML, generateCompleteDocumentHTML } from '@/lib/generateChapterHTML';
 import { auth } from '@clerk/nextjs/server';
+import { verifyGithubOidc, OidcAuthError } from '@/lib/auth/verifyGithubOidc';
 
 export const dynamic = 'force-dynamic';
 export const dynamicParams = true;
@@ -32,11 +33,41 @@ export async function GET(
     
     console.log(`[${new Date().toISOString()}] Request for book: ${slug}, chapter: ${chapterId}`);
     
-    // Determine auth method from middleware (GitHub OIDC for CI) or Clerk for user
+    // Determine auth method: prefer GitHub OIDC (Authorization or ?token) for CI; else Clerk for user
     const hdrs = await headers();
-    const authMethod = hdrs.get('x-auth-method');
+    const url = new URL(request.url);
+    const headerAuth = hdrs.get('authorization') || hdrs.get('Authorization') || '';
+    const queryToken = url.searchParams.get('token') || '';
+    const bearer = headerAuth || (queryToken ? `Bearer ${queryToken}` : '');
     let userId: string | null = null;
-    const isCi = authMethod === 'oidc';
+    let isCi = false;
+
+    if (bearer.startsWith('Bearer ')) {
+      const raw = bearer.substring('Bearer '.length).trim();
+      try {
+        const claims = await verifyGithubOidc(raw);
+        if (claims) {
+          isCi = true;
+          console.log('Authenticated via GitHub OIDC for chapter HTML:', {
+            repository: claims.repository,
+            ref: claims.ref,
+            workflow: claims.workflow,
+          });
+        }
+      } catch (e) {
+        if (e instanceof OidcAuthError) {
+          console.warn('OIDC verification failed for chapter HTML:', e.code);
+        } else {
+          console.warn('OIDC verification error for chapter HTML, falling back to headers flag');
+        }
+      }
+    }
+
+    // Backward-compat: allow middleware to signal CI via header if present
+    if (!isCi) {
+      const authMethod = hdrs.get('x-auth-method');
+      isCi = authMethod === 'oidc';
+    }
 
     if (!isCi) {
       // User flow: require Clerk auth

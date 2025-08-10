@@ -24,8 +24,10 @@ interface BookWithChapters extends Book {
  */
 export function generateChapterHTML(chapter: Chapter, children: Chapter[] = [], book: BookWithChapters): string {
   const { title, content, level = 1, order = 0, id } = chapter;
-  const headingLevel = Math.min((level || 1) + 1, 6); // Ensure we don't go beyond h6
-  const chapterId = `ch-${String(order).padStart(3, '0')}`;
+  // Use the chapter's level directly so top-level chapters render as <h1>, matching pandoc --epub-chapter-level=1
+  const headingLevel = Math.min((level || 1), 6); // Ensure we don't go beyond h6
+  // Use globally unique id based on DB id to avoid duplicate anchors across chapters
+  const chapterId = `ch-${id}`;
   
   // Find parent chapter if exists
   const parentChapter = chapter.parentChapterId 
@@ -46,7 +48,7 @@ export function generateChapterHTML(chapter: Chapter, children: Chapter[] = [], 
   // Generate the chapter content with proper heading
   let html = `
     <section id="${chapterId}" class="chapter" data-chapter-id="${id}" data-level="${level || 1}">
-      <h${headingLevel} class="chapter-title">${title}</h${headingLevel}>
+      <h${headingLevel} id="${chapterId}" class="chapter-title">${title}</h${headingLevel}>
       <div class="chapter-content">
         ${content || ''}
       </div>
@@ -87,10 +89,10 @@ export function generateCompleteChapterHTML(chapter: Chapter, children: Chapter[
       // Create metadata for the complete document
       const metadata: Partial<ChapterMetadata> = {
         book: book.title || 'untitled',
-        chapter_id: `ch-${String(chapter.order || 0).padStart(3, '0')}`,
+        chapter_id: `ch-${chapter.id}`,
         order: chapter.order || 0,
         level: chapter.level || 1,
-        title_tag: `h${Math.min((chapter.level || 1) + 1, 6)}`,
+        title_tag: `h${Math.min((chapter.level || 1), 6)}`,
         title: chapter.title || 'Untitled Chapter'
       };
       
@@ -110,7 +112,7 @@ export function generateCompleteChapterHTML(chapter: Chapter, children: Chapter[
   // If content is not a complete document, wrap it with metadata
   const metadata: Partial<ChapterMetadata> = {
     book: book.title || 'untitled',
-    chapter_id: `ch-${String(chapter.order || 0).padStart(3, '0')}`,
+    chapter_id: `ch-${chapter.id}`,
     order: chapter.order || 0,
     level: chapter.level || 1,
     title_tag: `h${Math.min((chapter.level || 1) + 1, 6)}`,

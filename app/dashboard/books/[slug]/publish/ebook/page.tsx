@@ -63,6 +63,26 @@ export default function GenerateEbookPage() {
     
     fetchToken();
   }, [getToken]);
+
+  // On mount, fetch book by slug to prefill status if EPUB already exists
+  useEffect(() => {
+    const init = async () => {
+      try {
+        if (!slug) return;
+        const res = await fetch(`/api/books/by-slug/${slug}`, { cache: 'no-store', credentials: 'include' });
+        if (!res.ok) return;
+        const book = await res.json();
+        setBookId(book.id);
+        if (book?.epubUrl) {
+          setDownloadUrl(book.epubUrl);
+          setStatus('completed');
+        }
+      } catch (e) {
+        console.warn('Init load book failed', e);
+      }
+    };
+    init();
+  }, [slug]);
   
   // Function to start polling for completion
   const startPollingForCompletion = (bookId: string) => {
@@ -71,7 +91,8 @@ export default function GenerateEbookPage() {
     setPolling(true);
     const poll = async () => {
       try {
-        const response = await fetch(`/api/books/${bookId}`);
+        // Poll the secure by-id endpoint for the latest book state
+        const response = await fetch(`/api/books/by-id/${bookId}`, { cache: 'no-store' });
         if (response.ok) {
           const book = await response.json();
           if (book.epubUrl) {
@@ -163,6 +184,11 @@ export default function GenerateEbookPage() {
       const book = await bookRes.json();
       setBookId(book.id);
       setDownloadUrl(book.epubUrl || null);
+
+      // If EPUB already exists, mark as completed immediately
+      if (book.epubUrl) {
+        setStatus('completed');
+      }
 
       // 2) Prepare payload options (query params)
       const params = new URLSearchParams({

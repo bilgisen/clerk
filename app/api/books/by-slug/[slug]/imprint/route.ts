@@ -5,6 +5,7 @@ import { books, users } from '@/db/schema';
 import { generateImprintHTML } from '@/lib/generateChapterHTML';
 import { verifyToken } from '@/lib/auth';
 import { headers } from 'next/headers';
+import { verifyGithubOidc, OidcAuthError } from '@/lib/auth/verifyGithubOidc';
 
 export const dynamic = 'force-dynamic';
 export const dynamicParams = true;
@@ -30,7 +31,11 @@ export async function GET(
     
     // Log request details for debugging
     const requestHeaders = await headers();
-    const authHeader = requestHeaders.get('authorization') || '';
+    const url = new URL(request.url);
+    // Prefer Authorization header; fall back to token query param for CI callers
+    const headerAuth = requestHeaders.get('authorization') || '';
+    const queryToken = url.searchParams.get('token') || '';
+    const authHeader = headerAuth || (queryToken ? `Bearer ${queryToken}` : '');
     
     // Log request info (excluding sensitive headers)
     const requestInfo = {
@@ -40,18 +45,40 @@ export async function GET(
     };
     console.log('Request details:', JSON.stringify(requestInfo, null, 2));
     let userId: string | null = null;
+    let ciAccess: boolean = false;
 
     // Check for JWT token in Authorization header (for GitHub Actions/Pandoc integration)
     if (authHeader?.startsWith('Bearer ')) {
       const token = authHeader.split(' ')[1];
-      const decoded = await verifyToken(token);
-      if (decoded) {
-        userId = decoded.userId;
-        console.log('Authenticated via JWT token for user:', userId);
+      // Try GitHub OIDC first for CI
+      try {
+        const claims = await verifyGithubOidc(token);
+        if (claims) {
+          ciAccess = true;
+          console.log('Authenticated via GitHub OIDC for CI workflow:', {
+            repository: claims.repository,
+            ref: claims.ref,
+            workflow: claims.workflow,
+          });
+        }
+      } catch (e) {
+        if (e instanceof OidcAuthError) {
+          console.warn('OIDC verification failed, will try app JWT fallback:', e.code);
+        } else {
+          console.warn('OIDC verification error, trying app JWT fallback');
+        }
       }
-    } 
-    // If no JWT token, check for Clerk session
-    else {
+
+      if (!ciAccess) {
+        // Fallback to app-specific JWT used elsewhere
+        const decoded = await verifyToken(token);
+        if (decoded) {
+          userId = decoded.userId;
+          console.log('Authenticated via app JWT token for user:', userId);
+        }
+      }
+    } else {
+      // If no Bearer token, check for Clerk session
       const session = await auth();
       if (session.userId) {
         userId = session.userId;
@@ -59,8 +86,8 @@ export async function GET(
       }
     }
 
-    if (!userId) {
-      console.error('No valid authentication found');
+    if (!userId && !ciAccess) {
+      console.error('No valid authentication found (neither Clerk/JWT nor GitHub OIDC)');
       return new NextResponse('Unauthorized', { status: 401 });
     }
 
@@ -95,7 +122,7 @@ export async function GET(
     // Check if the user owns the book
     const isOwner = bookResult.userId === userIdToCheck;
     
-    if (!isOwner) {
+    if (!isOwner && !ciAccess) {
       console.error(`User ${userId} does not have access to book ${bookResult.id}`);
       console.log(`Book owner: ${bookResult.userId}, Requesting user: ${userId}, User ID to check: ${userIdToCheck}`);
       

@@ -4,6 +4,7 @@ import { db } from '@/db/drizzle';
 import { books, chapters } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 import { auth, currentUser } from '@clerk/nextjs/server';
+import { verifyGithubOidc, OidcAuthError } from '@/lib/auth/verifyGithubOidc';
 
 type Headers = ReturnType<typeof headers>;
 
@@ -32,6 +33,7 @@ interface EbookPayload {
   book: {
     slug: string;
     title: string;
+    author: string;
     language: string;
     output_filename: string;
     cover_url: string;
@@ -109,8 +111,10 @@ export async function GET(
     const { slug } = await Promise.resolve(params);
     console.log('Requested slug:', slug);
     
-    // Get user ID from Clerk session
+    // Determine auth via GitHub OIDC (CI) or Clerk
     let userId: string | null = null;
+    let ciAccess = false;
+    let tokenForUrls: string = '';
     
     // Log all headers for debugging
     const headersList = await headers();
@@ -123,69 +127,91 @@ export async function GET(
     }
     console.log(headersObj);
     
-    try {
-      // Get the current user from Clerk
-      console.log('Getting current user from Clerk...');
-      const user = await currentUser();
-      
-      if (!user) {
-        console.error('No authenticated user found - checking auth()...');
-        // Try to get the session
-        const session = await auth();
-        console.log('Auth session:', session ? 'Found' : 'Not found');
-        
-        if (!session?.userId) {
-          console.error('No active session found - returning 401');
-          return NextResponse.json(
-            { 
-              error: 'Unauthorized',
-              message: 'Please sign in to access this resource',
-              debug: {
-                timestamp: new Date().toISOString(),
-                nodeEnv: process.env.NODE_ENV,
-                clerkDebug: process.env.NEXT_PUBLIC_CLERK_DEBUG,
-                hasSession: !!session,
-                userId: session?.userId || 'none'
-              }
-            },
-            { 
-              status: 401,
-              headers: {
-                'WWW-Authenticate': 'Bearer error="invalid_token"',
-                'Cache-Control': 'no-store',
-                'Pragma': 'no-cache'
-              }
-            }
-          );
+    // Inspect headers for Authorization or query token
+    const url = new URL(request.url);
+    const headerAuth = headersList.get('authorization') || headersList.get('Authorization') || '';
+    const queryToken = url.searchParams.get('token') || '';
+    const bearer = headerAuth || (queryToken ? `Bearer ${queryToken}` : '');
+
+    if (bearer.startsWith('Bearer ')) {
+      const raw = bearer.substring('Bearer '.length).trim();
+      try {
+        const claims = await verifyGithubOidc(raw);
+        if (claims) {
+          ciAccess = true;
+          tokenForUrls = raw;
+          console.log('Authenticated via GitHub OIDC for payload:', {
+            repository: claims.repository,
+            ref: claims.ref,
+            workflow: claims.workflow,
+          });
         }
-        
-        userId = session.userId;
-        console.log('Using session userId:', userId);
-      } else {
-        userId = user.id;
-        console.log('Current user:', {
-          id: user.id,
-          email: user.emailAddresses[0]?.emailAddress,
-          hasImage: !!user.imageUrl,
-          createdAt: user.createdAt
-        });
+      } catch (e) {
+        if (e instanceof OidcAuthError) {
+          console.warn('OIDC verification failed for payload:', e.code);
+        } else {
+          console.warn('OIDC verification error for payload, will try Clerk');
+        }
       }
-      
-      console.log('Authenticated user:', { 
-        userId, 
-        email: user ? user.emailAddresses[0]?.emailAddress : 'No email' 
-      });
-      
-    } catch (error) {
-      console.error('Authentication error:', error);
-      return NextResponse.json(
-        { 
-          error: 'Authentication failed', 
-          details: error instanceof Error ? error.message : 'Unknown error',
-          stack: process.env.NODE_ENV === 'development' ? (error as Error).stack : undefined
-        },
-        { status: 401 }
-      );
+    }
+
+    if (!ciAccess) {
+      try {
+        // Get the current user from Clerk
+        console.log('Getting current user from Clerk...');
+        const user = await currentUser();
+        
+        if (!user) {
+          console.error('No authenticated user found - checking auth()...');
+          const session = await auth();
+          console.log('Auth session:', session ? 'Found' : 'Not found');
+          if (!session?.userId) {
+            console.error('No active session found - returning 401');
+            return NextResponse.json(
+              { 
+                error: 'Unauthorized',
+                message: 'Please sign in to access this resource',
+                debug: {
+                  timestamp: new Date().toISOString(),
+                  nodeEnv: process.env.NODE_ENV,
+                  clerkDebug: process.env.NEXT_PUBLIC_CLERK_DEBUG,
+                  hasSession: !!session,
+                  userId: session?.userId || 'none'
+                }
+              },
+              { 
+                status: 401,
+                headers: {
+                  'WWW-Authenticate': 'Bearer error="invalid_token"',
+                  'Cache-Control': 'no-store',
+                  'Pragma': 'no-cache'
+                }
+              }
+            );
+          }
+          userId = session.userId;
+          console.log('Using session userId:', userId);
+        } else {
+          userId = user.id;
+          console.log('Current user:', {
+            id: user.id,
+            email: user.emailAddresses[0]?.emailAddress,
+            hasImage: !!user.imageUrl,
+            createdAt: user.createdAt
+          });
+        }
+        console.log('Authenticated user:', { userId });
+      } catch (error) {
+        console.error('Authentication error:', error);
+        return NextResponse.json(
+          { 
+            error: 'Authentication failed', 
+            details: error instanceof Error ? error.message : 'Unknown error',
+            stack: process.env.NODE_ENV === 'development' ? (error as Error).stack : undefined
+          },
+          { status: 401 }
+        );
+      }
     }
 
     console.log('Fetching book from database...');
@@ -217,7 +243,8 @@ export async function GET(
     const chapterTree = buildChapterTree(book.chapters);
     console.log('Chapter tree:', JSON.stringify(chapterTree, null, 2));
     
-    const flattenedChapters = flattenChapterTree(chapterTree, book.slug, 1, null, '');
+    // When CI is accessing, include the OIDC token on all chapter URLs
+    const flattenedChapters = flattenChapterTree(chapterTree, book.slug, 1, null, ciAccess ? tokenForUrls : '');
     console.log('Flattened chapters:', JSON.stringify(flattenedChapters, null, 2));
     
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
@@ -227,12 +254,20 @@ export async function GET(
       book: {
         slug: book.slug,
         title: book.title,
+        author: book.author || 'Unknown',
         language: book.language || 'tr',
         output_filename: `${book.slug}.epub`,
         cover_url: book.coverImageUrl ? new URL(book.coverImageUrl, baseUrl).toString() : '',
         stylesheet_url: new URL('/styles/epub.css', baseUrl).toString(),
         imprint: {
-          url: new URL(`/api/books/by-slug/${book.slug}/imprint`, baseUrl).toString()
+          // Append token for CI to access imprint route
+          url: (() => {
+            const u = new URL(`/api/books/by-slug/${book.slug}/imprint`, baseUrl);
+            if (ciAccess && tokenForUrls) {
+              u.searchParams.set('token', tokenForUrls);
+            }
+            return u.toString();
+          })()
         },
         chapters: flattenedChapters
       },

@@ -7,6 +7,10 @@ on:
         description: 'Content ID for the book'
         required: true
         type: string
+      slug:
+        description: 'URL-safe slug to use in the EPUB filename (optional)'
+        required: false
+        type: string
       format:
         description: 'Output format (epub, mobi, pdf, html, docx)'
         required: true
@@ -343,6 +347,61 @@ jobs:
           if-no-files-found: error
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Upload EPUB to Cloudflare R2
+        id: r2_upload
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          R2_UPLOAD_IMAGE_ACCESS_KEY_ID: ${{ secrets.R2_UPLOAD_IMAGE_ACCESS_KEY_ID }}
+          R2_UPLOAD_IMAGE_SECRET_ACCESS_KEY: ${{ secrets.R2_UPLOAD_IMAGE_SECRET_ACCESS_KEY }}
+          R2_UPLOAD_IMAGE_BUCKET_NAME: ${{ secrets.R2_UPLOAD_IMAGE_BUCKET_NAME }}
+          NEXT_PUBLIC_IMAGE_BASE_URL: ${{ secrets.NEXT_PUBLIC_IMAGE_BASE_URL }}
+        run: |
+          set -e
+          # Ensure S3 client is available for the upload script
+          npm i -D @aws-sdk/client-s3
+          CONTENT_ID="${{ github.event.inputs.content_id }}"
+          FILE_PATH="./output/${CONTENT_ID}.epub"
+          # Build a pretty, URL-safe slug for the EPUB key
+          RAW_SLUG="${{ github.event.inputs.slug }}"
+          if [ -z "$RAW_SLUG" ]; then
+            # Derive from title if not provided
+            RAW_SLUG="${{ steps.fetch-book.outputs.title }}"
+          fi
+          # Fallback if still empty
+          if [ -z "$RAW_SLUG" ] || [ "$RAW_SLUG" = "null" ]; then
+            RAW_SLUG="$CONTENT_ID"
+          fi
+          # Transliterate international characters to ASCII, then slugify
+          # iconv with //TRANSLIT will best-effort map characters like üğşçöİ to ugsc oI, etc.
+          # Fallback to original if iconv not available
+          TL=$(printf "%s" "$RAW_SLUG" | iconv -f UTF-8 -t ASCII//TRANSLIT 2>/dev/null || printf "%s" "$RAW_SLUG")
+          # slugify: lowercase, replace non-alnum with '-', collapse '-', trim '-'
+          SLUG=$(echo "$TL" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g' | sed -E 's/^-+|-+$//g')
+          if [ -z "$SLUG" ]; then SLUG="$CONTENT_ID"; fi
+          KEY="books/${SLUG}-${CONTENT_ID}.epub"
+          echo "Uploading $FILE_PATH to R2 as $KEY"
+          URL=$(node ./scripts/upload-epub-to-r2.mjs --file "$FILE_PATH" --key "$KEY")
+          echo "epub_url=$URL" >> "$GITHUB_OUTPUT"
+
+      - name: Notify API to update epubUrl
+        env:
+          JWT_HEADER: ${{ env.JWT_HEADER }}
+          EPUB_URL: ${{ steps.r2_upload.outputs.epub_url }}
+          BASE_URL: https://matbu.vercel.app
+        run: |
+          set -e
+          if [ -z "$EPUB_URL" ]; then
+            echo "::error::EPUB_URL is empty; upload may have failed"
+            exit 1
+          fi
+          CONTENT_ID="${{ github.event.inputs.content_id }}"
+          echo "Updating epubUrl for book $CONTENT_ID to $EPUB_URL"
+          curl -sS -X POST \
+            -H "Authorization: $JWT_HEADER" \
+            -H "Content-Type: application/json" \
+            "$BASE_URL/api/books/by-id/${CONTENT_ID}/epub" \
+            -d "{\"epubUrl\":\"$EPUB_URL\"}"
           
       - name: Upload Debug Artifacts
         if: always()
