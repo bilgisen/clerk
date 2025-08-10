@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import fs from 'fs';
-import path from 'path';
 
 function arg(name, def) {
   const idx = process.argv.indexOf(`--${name}`);

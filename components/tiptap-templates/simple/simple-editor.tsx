@@ -63,16 +63,9 @@ import { useWindowSize } from "@/hooks/use-window-size"
 import { useCursorVisibility } from "@/hooks/use-cursor-visibility"
 import { useScrolling } from "@/hooks/use-scrolling"
 
-// --- Components ---
-import { ThemeToggle } from "@/components/tiptap-templates/simple/theme-toggle"
-
-// --- Lib ---
-import { handleImageUpload, MAX_FILE_SIZE } from "@/lib/tiptap-utils"
-
 // --- Styles ---
 import "@/components/tiptap-templates/simple/simple-editor.scss"
 
-import content from "@/components/tiptap-templates/simple/data/content.json"
 
 const MainToolbarContent = ({
   onHighlighterClick,
@@ -143,12 +136,6 @@ const MainToolbarContent = ({
       </ToolbarGroup>
 
       <Spacer />
-
-      {isMobile && <ToolbarSeparator />}
-
-      <ToolbarGroup>
-        <ThemeToggle />
-      </ToolbarGroup>
     </>
   )
 }
@@ -242,9 +229,7 @@ export function SimpleEditor({
       Selection,
       ImageUploadNode.configure({
         accept: "image/*",
-        maxSize: MAX_FILE_SIZE,
         limit: 3,
-        upload: handleImageUpload,
         onError: (error) => console.error("Upload failed:", error),
       }),
     ],
