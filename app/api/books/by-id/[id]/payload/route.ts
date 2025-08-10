@@ -166,7 +166,7 @@ export async function GET(
         output_filename: `${bookResult.slug}.${outputExt}`,
         cover_url: includeCover ? (bookResult.coverImageUrl || '') : '',
         stylesheet_url: `${baseUrl}${stylesheetPath}`,
-        ...(includeImprint ? { imprint: { url: `${baseUrl}/api/books/by-id/${bookId}/imprint` } } : {}),
+        ...(includeImprint ? { imprint: { url: `${baseUrl}/api/books/by-slug/${bookResult.slug}/imprint` } } : {}),
         chapters: flattenedChapters
       },
       options: {
