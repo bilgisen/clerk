@@ -92,9 +92,15 @@ export default function GenerateEbookPage() {
     const poll = async () => {
       try {
         // Poll the secure by-id endpoint for the latest book state
-        const response = await fetch(`/api/books/by-id/${bookId}`, { cache: 'no-store' });
+        const response = await fetch(`/api/books/by-id/${bookId}`, { 
+          cache: 'no-store',
+          credentials: 'include' // Ensure cookies are sent with the request
+        });
+        
         if (response.ok) {
           const book = await response.json();
+          console.log('Polling response:', { book }); // Debug log
+          
           if (book.epubUrl) {
             // EPUB is ready
             setDownloadUrl(book.epubUrl);
@@ -108,16 +114,19 @@ export default function GenerateEbookPage() {
                     target="_blank" 
                     rel="noopener noreferrer"
                     className="text-blue-500 hover:underline"
+                    onClick={(e) => e.stopPropagation()}
                   >
                     Download EPUB
                   </a>
                 </div>
               ),
-              duration: 10000, // Keep the toast open longer
+              duration: 10000,
             });
             setPolling(false);
             return;
           }
+        } else {
+          console.error('Error polling for book:', await response.text());
         }
         
         // Continue polling if not found yet
@@ -128,11 +137,14 @@ export default function GenerateEbookPage() {
         console.error('Error polling for EPUB:', error);
         setStatus('failed');
         setPolling(false);
+        toast.error('Error checking EPUB status', {
+          description: 'Failed to check if EPUB is ready. Please refresh the page and try again.',
+        });
       }
     };
     
     // Start polling
-    setTimeout(poll, POLL_INTERVAL);
+    poll();
     
     // Cleanup function
     return () => {

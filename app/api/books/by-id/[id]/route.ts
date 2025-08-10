@@ -51,6 +51,22 @@ export async function GET(
         eq(books.id, id),
         eq(books.userId, user.id)
       ),
+      // Explicitly select the fields we want to return
+      columns: {
+        id: true,
+        userId: true,
+        title: true,
+        slug: true,
+        author: true,
+        publisher: true,
+        description: true,
+        coverImageUrl: true,
+        epubUrl: true,
+        isPublished: true,
+        isFeatured: true,
+        createdAt: true,
+        updatedAt: true,
+      },
     });
 
     if (!book) {

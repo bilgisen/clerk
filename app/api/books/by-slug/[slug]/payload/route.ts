@@ -48,6 +48,7 @@ interface EbookPayload {
     toc_depth: number;
     language: string;
     embed_metadata: boolean;
+    include_imprint: boolean;
     cover: boolean;
   };
 }
@@ -103,190 +104,28 @@ export async function GET(
   request: Request,
   { params }: { params: { slug: string } }
 ) {
-  console.log('=== Payload Route Debug ===');
-  console.log('Request URL:', request.url);
-  
   try {
-    // Get the slug from params
     const { slug } = await Promise.resolve(params);
-    console.log('Requested slug:', slug);
-    
-    // Determine auth via GitHub OIDC (CI) or Clerk
-    let userId: string | null = null;
-    let ciAccess = false;
-    let tokenForUrls: string = '';
-    
-    // Log all headers for debugging
-    const headersList = await headers();
-    console.log('Request Headers:');
-    // Convert headers to a plain object for logging
-    const headersObj: Record<string, string> = {};
-    // Convert headers to an array of entries and iterate
-    for (const [key, value] of headersList.entries()) {
-      headersObj[key] = key.toLowerCase().includes('cookie') ? '[REDACTED]' : value;
-    }
-    console.log(headersObj);
-    
-    // Inspect headers for Authorization or query token
-    const url = new URL(request.url);
-    const headerAuth = headersList.get('authorization') || headersList.get('Authorization') || '';
-    const queryToken = url.searchParams.get('token') || '';
-    const bearer = headerAuth || (queryToken ? `Bearer ${queryToken}` : '');
-
-    if (bearer.startsWith('Bearer ')) {
-      const raw = bearer.substring('Bearer '.length).trim();
-      try {
-        const claims = await verifyGithubOidc(raw);
-        if (claims) {
-          ciAccess = true;
-          tokenForUrls = raw;
-          console.log('Authenticated via GitHub OIDC for payload:', {
-            repository: claims.repository,
-            ref: claims.ref,
-            workflow: claims.workflow,
-          });
-        }
-      } catch (e) {
-        if (e instanceof OidcAuthError) {
-          console.warn('OIDC verification failed for payload:', e.code);
-        } else {
-          console.warn('OIDC verification error for payload, will try Clerk');
-        }
-      }
-    }
-
-    if (!ciAccess) {
-      try {
-        // Get the current user from Clerk
-        console.log('Getting current user from Clerk...');
-        const user = await currentUser();
-        
-        if (!user) {
-          console.error('No authenticated user found - checking auth()...');
-          const session = await auth();
-          console.log('Auth session:', session ? 'Found' : 'Not found');
-          if (!session?.userId) {
-            console.error('No active session found - returning 401');
-            return NextResponse.json(
-              { 
-                error: 'Unauthorized',
-                message: 'Please sign in to access this resource',
-                debug: {
-                  timestamp: new Date().toISOString(),
-                  nodeEnv: process.env.NODE_ENV,
-                  clerkDebug: process.env.NEXT_PUBLIC_CLERK_DEBUG,
-                  hasSession: !!session,
-                  userId: session?.userId || 'none'
-                }
-              },
-              { 
-                status: 401,
-                headers: {
-                  'WWW-Authenticate': 'Bearer error="invalid_token"',
-                  'Cache-Control': 'no-store',
-                  'Pragma': 'no-cache'
-                }
-              }
-            );
-          }
-          userId = session.userId;
-          console.log('Using session userId:', userId);
-        } else {
-          userId = user.id;
-          console.log('Current user:', {
-            id: user.id,
-            email: user.emailAddresses[0]?.emailAddress,
-            hasImage: !!user.imageUrl,
-            createdAt: user.createdAt
-          });
-        }
-        console.log('Authenticated user:', { userId });
-      } catch (error) {
-        console.error('Authentication error:', error);
-        return NextResponse.json(
-          { 
-            error: 'Authentication failed', 
-            details: error instanceof Error ? error.message : 'Unknown error',
-            stack: process.env.NODE_ENV === 'development' ? (error as Error).stack : undefined
-          },
-          { status: 401 }
-        );
-      }
-    }
-
-    console.log('Fetching book from database...');
-    const book = await db.query.books.findFirst({
-      where: eq(books.slug, slug),
-      with: {
-        chapters: true,
-      },
-    });
-    
-    console.log('Book query result:', book ? {
-      id: book.id,
-      slug: book.slug,
-      title: book.title,
-      chapterCount: book.chapters?.length || 0
-    } : 'No book found');
-
+    // Find the book id for this slug
+    const book = await db.query.books.findFirst({ where: eq(books.slug, slug) });
     if (!book) {
-      return NextResponse.json(
-        { error: 'Book not found' },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: 'Book not found' }, { status: 404 });
     }
 
-    // Log the raw chapters for debugging
-    console.log('Raw chapters from DB:', JSON.stringify(book.chapters, null, 2));
-    
-    // Build chapter tree
-    const chapterTree = buildChapterTree(book.chapters);
-    console.log('Chapter tree:', JSON.stringify(chapterTree, null, 2));
-    
-    // When CI is accessing, include the OIDC token on all chapter URLs
-    const flattenedChapters = flattenChapterTree(chapterTree, book.slug, 1, null, ciAccess ? tokenForUrls : '');
-    console.log('Flattened chapters:', JSON.stringify(flattenedChapters, null, 2));
-    
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
+    // Build base URL from request/env and redirect to by-id payload, preserving query params
+    const reqUrl = new URL(request.url);
+    const configuredBase = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_BASE_URL || '';
+    const baseUrl = configuredBase || `${reqUrl.protocol}//${reqUrl.host}`;
+    const redirectUrl = new URL(`/api/books/by-id/${book.id}/payload`, baseUrl);
+    reqUrl.searchParams.forEach((value, key) => {
+      redirectUrl.searchParams.set(key, value);
+    });
 
-    // Construct the payload
-    const payload: EbookPayload = {
-      book: {
-        slug: book.slug,
-        title: book.title,
-        author: book.author || 'Unknown',
-        language: book.language || 'tr',
-        output_filename: `${book.slug}.epub`,
-        cover_url: book.coverImageUrl ? new URL(book.coverImageUrl, baseUrl).toString() : '',
-        stylesheet_url: new URL('/styles/epub.css', baseUrl).toString(),
-        imprint: {
-          // Append token for CI to access imprint route
-          url: (() => {
-            const u = new URL(`/api/books/by-slug/${book.slug}/imprint`, baseUrl);
-            if (ciAccess && tokenForUrls) {
-              u.searchParams.set('token', tokenForUrls);
-            }
-            return u.toString();
-          })()
-        },
-        chapters: flattenedChapters
-      },
-      options: {
-        generate_toc: true,
-        toc_depth: 3,
-        language: book.language || 'tr',
-        embed_metadata: true,
-        cover: !!book.coverImageUrl
-      }
-    };
-
-    // Return the payload as JSON
-    return NextResponse.json(payload);
-
+    return NextResponse.redirect(redirectUrl.toString(), { status: 302 });
   } catch (error) {
-    console.error('Error generating payload:', error);
+    console.error('Error redirecting to by-id payload:', error);
     return NextResponse.json(
-      { error: 'Failed to generate payload' },
+      { error: 'Failed to resolve payload route' },
       { status: 500 }
     );
   }

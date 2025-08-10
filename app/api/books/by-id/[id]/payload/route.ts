@@ -30,6 +30,7 @@ interface EbookPayload {
   book: {
     slug: string;
     title: string;
+    author: string;
     language: string;
     output_filename: string;
     cover_url: string;
@@ -42,8 +43,8 @@ interface EbookPayload {
   options: {
     generate_toc: boolean;
     toc_depth: number;
-    language: string;
     embed_metadata: boolean;
+    include_imprint: boolean;
     cover: boolean;
   };
 }
@@ -160,6 +161,7 @@ export async function GET(
       book: {
         slug: bookResult.slug,
         title: bookResult.title,
+        author: bookResult.author || 'Unknown',
         language: languageOverride || bookResult.language || 'tr',
         output_filename: `${bookResult.slug}.${outputExt}`,
         cover_url: includeCover ? (bookResult.coverImageUrl || '') : '',
@@ -170,8 +172,8 @@ export async function GET(
       options: {
         generate_toc: generateToc,
         toc_depth: Number.isFinite(tocDepth) && tocDepth > 0 ? tocDepth : 3,
-        language: languageOverride || bookResult.language || 'tr',
         embed_metadata: true,
+        include_imprint: includeImprint,
         cover: includeCover
       }
     };
