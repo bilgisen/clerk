@@ -7,13 +7,13 @@ export async function GET(request: NextRequest) {
   
   if (!userId) {
     return NextResponse.json(
-      { error: 'Unauthorized' },
+      { error: 'Unauthorized - Please sign in' },
       { status: 401 }
     );
   }
 
   return NextResponse.json({
-    message: "This is a JWT protected route",
+    message: "This is a protected route",
     userId,
     timestamp: new Date().toISOString(),
   });
@@ -25,7 +25,7 @@ export async function POST(request: NextRequest) {
   
   if (!userId) {
     return NextResponse.json(
-      { error: 'Unauthorized' },
+      { error: 'Unauthorized - Please sign in' },
       { status: 401 }
     );
   }
@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
   const body = await request.json();
 
   return NextResponse.json({
-    message: "Protected POST endpoint accessed successfully",
+    message: "Protected endpoint accessed successfully",
     userId,
     data: body,
     timestamp: new Date().toISOString(),

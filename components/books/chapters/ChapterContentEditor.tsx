@@ -1,97 +1,195 @@
-'use client'
+"use client"
 
-import * as React from 'react'
-import { useEffect, useState } from 'react'
+import { useState, useEffect } from "react"
+import { SerializedEditorState } from "lexical"
+import { cn } from "@/lib/services/utils"
+import { Editor } from "@/components/blocks/editor-x/editor"
 import { useFormContext, Controller } from 'react-hook-form'
-import dynamic from 'next/dynamic'
-import { cn } from '@/lib/services/utils'
-import type { Editor } from '@tiptap/react'
 
-// Import SimpleEditor with proper typing
-const SimpleEditor = dynamic(
-  () => import('@/components/tiptap-templates/simple/simple-editor').then((mod) => mod.SimpleEditor),
-  { 
-    ssr: false,
-    loading: () => <EditorLoading />
+// Helper types for better type safety
+type TextNode = {
+  detail: number;
+  format: number;
+  mode: string;
+  style: string;
+  text: string;
+  type: 'text';
+  version: 1;
+};
+
+type ParagraphNode = {
+  children: TextNode[];
+  direction: 'ltr' | 'rtl';
+  format: string;
+  indent: number;
+  type: 'paragraph';
+  version: 1;
+};
+
+const createDefaultTextNode = (text = ''): TextNode => ({
+  detail: 0,
+  format: 0,
+  mode: 'normal',
+  style: '',
+  text,
+  type: 'text',
+  version: 1,
+});
+
+const createDefaultParagraphNode = (): ParagraphNode => ({
+  children: [createDefaultTextNode('')],
+  direction: 'ltr',
+  format: '',
+  indent: 0,
+  type: 'paragraph',
+  version: 1,
+});
+
+const initialValue: SerializedEditorState = {
+  root: {
+    children: [createDefaultParagraphNode()],
+    direction: 'ltr',
+    format: '',
+    indent: 0,
+    type: 'root',
+    version: 1,
+  },
+};
+
+// Type guard to check if an object is a valid TextNode
+const isValidTextNode = (node: any): node is TextNode => {
+  return (
+    node &&
+    typeof node === 'object' &&
+    typeof node.detail === 'number' &&
+    typeof node.format === 'number' &&
+    typeof node.mode === 'string' &&
+    typeof node.style === 'string' &&
+    typeof node.text === 'string' &&
+    node.type === 'text' &&
+    node.version === 1
+  );
+};
+
+// Type guard to check if an object is a valid ParagraphNode
+const isValidParagraphNode = (node: any): node is ParagraphNode => {
+  return (
+    node &&
+    typeof node === 'object' &&
+    Array.isArray(node.children) &&
+    node.children.every(isValidTextNode) &&
+    (node.direction === 'ltr' || node.direction === 'rtl') &&
+    typeof node.format === 'string' &&
+    typeof node.indent === 'number' &&
+    node.type === 'paragraph' &&
+    node.version === 1
+  );
+};
+
+// Validate and normalize the editor state
+const validateAndNormalizeState = (state: any): SerializedEditorState => {
+  try {
+    if (!state?.root) return initialValue;
+    
+    const validatedRoot = {
+      ...initialValue.root,
+      ...state.root,
+      children: Array.isArray(state.root.children) 
+        ? state.root.children.map((child: any) => {
+            if (isValidParagraphNode(child)) return child;
+            return createDefaultParagraphNode();
+          })
+        : [createDefaultParagraphNode()],
+    };
+
+    return {
+      root: validatedRoot,
+    };
+  } catch (e) {
+    console.error('Error validating editor state:', e);
+    return initialValue;
   }
-);
+};
+
+export interface ChapterContentEditorProps {
+  name: string
+  className?: string
+  initialContent?: SerializedEditorState
+  disabled?: boolean
+  onChange?: (content: SerializedEditorState) => void
+  placeholder?: string
+}
 
 function EditorLoading({ className }: { className?: string }) {
   return (
-    <div className={cn("flex items-center justify-center min-h-[300px] border rounded-lg bg-muted/20", className)}>
+    <div className={cn("flex items-center justify-center min-h-[300px] border rounded-3xl bg-muted/20", className)}>
       <div className="animate-spin h-8 w-8 text-muted-foreground" />
     </div>
   )
 }
 
-export interface ChapterContentEditorProps {
-  /** The name of the field in the form */
-  name: string;
-  /** Additional class name for the editor container */
-  className?: string;
-  /** Initial content for the editor */
-  initialContent?: string;
-  /** Whether the editor is disabled */
-  disabled?: boolean;
-  /** Callback when content changes */
-  onChange?: (content: string) => void;
-  /** Additional editor props */
-  editorProps?: {
-    attributes?: Record<string, string>;
-    handleDOMEvents?: Record<string, (props: { editor: Editor; event: Event }) => boolean | void>;
-  };
-  /** Placeholder text when content is empty */
-  placeholder?: string;
-}
-
 function ChapterContentEditorComponent({
   name,
   className,
-  initialContent = '',
+  initialContent = initialValue,
   disabled = false,
   onChange: externalOnChange,
-  editorProps = {},
   placeholder = 'Start writing your content here...',
 }: ChapterContentEditorProps) {
-  const { control, formState: { errors } } = useFormContext();
-  const error = errors[name]?.message as string | undefined;
+  const { control, formState: { errors } } = useFormContext()
+  const error = errors[name]?.message as string | undefined
+  const [isMounted, setIsMounted] = useState(false)
+
+  useEffect(() => {
+    setIsMounted(true)
+  }, [])
+
+  if (!isMounted) {
+    return <EditorLoading className={className} />
+  }
+
   return (
-    <div className="w-full">
-      <div className={cn("rounded-lg border", className, disabled && 'opacity-50')}>
+    <div className={cn("w-full", className)}>
+      <div className={cn(disabled && 'opacity-50')}>
         <Controller
           name={name}
           control={control}
           defaultValue={initialContent}
-          render={({ field: { onChange, value } }) => (
+          render={({ field: { onChange: formOnChange, value } }) => (
             <div className="relative">
-              <SimpleEditor
-                content={value || ''}
-                onChange={(content: string) => {
-                  // Only update if content has changed
-                  if (content !== value) {
-                    onChange(content);
-                    externalOnChange?.(content);
-                  }
-                }}
-                className={cn({
-                  'opacity-75': disabled,
-                  'border-destructive': error,
-                })}
-                editorProps={{
-                  ...editorProps,
-                  attributes: {
-                    ...editorProps.attributes,
-                    class: cn(
-                      "prose dark:prose-invert prose-sm sm:prose-base max-w-none p-4 focus:outline-none min-h-[300px] w-full",
-                      disabled ? 'cursor-not-allowed bg-muted/50' : 'bg-background',
-                      error && 'border border-destructive rounded',
-                      editorProps.attributes?.class
-                    ),
-                    'data-placeholder': placeholder,
-                  },
-                }}
-                editable={!disabled}
-              />
+              <div className={cn(
+                "min-h-[300px] w-full p-0",
+                disabled && 'cursor-not-allowed bg-muted/50',
+                error && 'border-destructive'
+              )}>
+                <div className="h-full w-full">
+                  <Editor
+                    editorState={undefined}
+                    editorSerializedState={(() => {
+                      try {
+                        if (!value) return initialValue;
+                        const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+                        return validateAndNormalizeState(parsed);
+                      } catch (e) {
+                        console.error('Error parsing editor content:', e);
+                        return initialValue;
+                      }
+                    })()}
+                    onSerializedChange={(content: SerializedEditorState) => {
+                      try {
+                        // Ensure we're passing a valid SerializedEditorState
+                        const validatedContent = validateAndNormalizeState(content);
+                        formOnChange(JSON.stringify(validatedContent));
+                        if (externalOnChange) {
+                          externalOnChange(validatedContent);
+                        }
+                      } catch (e) {
+                        console.error('Error handling editor change:', e);
+                      }
+                    }}
+                  />
+                </div>
+              </div>
               {!value && !disabled && (
                 <div className="absolute top-4 left-4 pointer-events-none text-muted-foreground">
                   {placeholder}
@@ -100,29 +198,22 @@ function ChapterContentEditorComponent({
             </div>
           )}
         />
-        {error && (
-          <p className="mt-1 text-sm text-destructive px-4">{error}</p>
-        )}
+        {error && <p className="mt-1 text-sm text-destructive px-4">{error}</p>}
       </div>
     </div>
-  );
+  )
 }
 
-export function ChapterContentEditor({
-  className,
-  ...props
-}: ChapterContentEditorProps) {
-  const [isMounted, setIsMounted] = useState(false);
+export default function ChapterContentEditor({ className, ...props }: ChapterContentEditorProps) {
+  const [isMounted, setIsMounted] = useState(false)
 
   useEffect(() => {
-    setIsMounted(true);
-  }, []);
+    setIsMounted(true)
+  }, [])
 
   if (!isMounted) {
-    return <EditorLoading className={className} />;
+    return <EditorLoading className={className} />
   }
 
-  return <ChapterContentEditorComponent className={className} {...props} />;
+  return <ChapterContentEditorComponent className={className} {...props} />
 }
-
-export default ChapterContentEditor;

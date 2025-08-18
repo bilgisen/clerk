@@ -64,6 +64,7 @@ export async function getChaptersByBook(bookId: string): Promise<ChapterNode[]> 
       const chapter: ChapterNode = {
         id: dbChapter.id,
         title: dbChapter.title,
+        book_id: bookId, // Add the required book_id property
         parent_chapter_id: dbChapter.parentChapterId || null,
         order: dbChapter.order || 0,
         level: dbChapter.level || 1,

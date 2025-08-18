@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm, Controller, type SubmitHandler } from "react-hook-form";
 import { useRouter } from "next/navigation";
@@ -19,22 +19,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ParentChapterSelect } from "./ParentChapterSelect";
-import dynamic from 'next/dynamic';
-
-const SimpleEditor = dynamic<{
-  content: string;
-  onChange: (content: string) => void;
-  className?: string;
-  editorProps?: {
-    attributes?: {
-      class?: string;
-      'data-placeholder'?: string;
-    };
-  };
-}>(
-  () => import('@/components/tiptap-templates/simple/simple-editor').then(mod => mod.SimpleEditor),
-  { ssr: false }
-);
+import ChapterContentEditor from './ChapterContentEditor';
 import { toast } from "sonner";
 
 export type Chapter = {
@@ -49,6 +34,7 @@ type ChapterContentFormProps = {
   parentChapters: Chapter[];
   currentChapterId?: string;
   onSubmit: (values: ChapterFormValues) => Promise<{ success: boolean; redirectUrl?: string }>;
+  onChange?: (values: any) => void;
   disabled?: boolean;
   loading?: boolean;
   submitButtonText?: string;
@@ -56,22 +42,21 @@ type ChapterContentFormProps = {
 };
 
 const ChapterContentForm = React.forwardRef<HTMLFormElement, ChapterContentFormProps>(
-  (
-    {
-      initialData,
-      parentChapters,
-      currentChapterId,
-      onSubmit: onSubmitProp,
-      bookSlug,
-      disabled = false,
-      loading = false,
-      submitButtonText = "Save Chapter",
-    },
-    ref
-  ) => {
+  ({
+    initialData = {},
+    parentChapters = [],
+    currentChapterId,
+    onSubmit: onSubmitProp,
+    bookSlug,
+    disabled = false,
+    loading = false,
+    submitButtonText = "Save Chapter",
+    onChange,
+    ...props
+  }, ref) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const router = useRouter();
-
+  
   const defaultValues: ChapterFormValues = {
     title: initialData?.title || "",
     content: initialData?.content || "",
@@ -85,13 +70,25 @@ const ChapterContentForm = React.forwardRef<HTMLFormElement, ChapterContentFormP
   };
 
   const form = useForm<ChapterFormValues>({
-    resolver: zodResolver(chapterFormSchema) as any, // Type assertion to handle resolver type mismatch
+    // @ts-ignore - TypeScript has issues with the resolver type
+    resolver: zodResolver(chapterFormSchema) as any,
     defaultValues,
+    mode: 'onChange',
   });
 
-  const { control, watch, setValue } = form;
+  // Notify parent component of changes
+  useEffect(() => {
+    if (typeof onChange === 'function') {
+      const subscription = form.watch((value) => {
+        onChange(value as ChapterFormValues);
+      });
+      return () => subscription.unsubscribe();
+    }
+  }, [form, onChange]);
 
-  const handleFormSubmit: SubmitHandler<ChapterFormValues> = async (formData) => {
+  const { control, setValue, handleSubmit } = form;
+
+  const handleFormSubmit: SubmitHandler<ChapterFormValues> = async (formData: ChapterFormValues) => {
     try {
       setIsSubmitting(true);
       const result = await onSubmitProp(formData);
@@ -117,20 +114,21 @@ const ChapterContentForm = React.forwardRef<HTMLFormElement, ChapterContentFormP
     }
   };
 
-  const filteredParentChapters = parentChapters.filter(
-    (chapter) => chapter.id !== currentChapterId
+  const filteredParentChapters = React.useMemo(() => 
+    (parentChapters || []).filter((chapter: Chapter) => chapter.id !== currentChapterId),
+    [parentChapters, currentChapterId]
   );
 
-  const handleSubmit = form.handleSubmit(handleFormSubmit);
+  const onSubmit = React.useCallback((e: React.FormEvent) => {
+    e.preventDefault();
+    handleSubmit(handleFormSubmit)(e);
+  }, [handleSubmit, handleFormSubmit]);
 
   return (
     <Form {...form}>
       <form 
         ref={ref}
-        onSubmit={(e) => {
-          e.preventDefault();
-          void handleSubmit(e);
-        }}
+        onSubmit={onSubmit}
         className="space-y-6"
       >
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -161,7 +159,7 @@ const ChapterContentForm = React.forwardRef<HTMLFormElement, ChapterContentFormP
                 <FormControl>
                   <ParentChapterSelect
                     parentChapters={filteredParentChapters}
-                    value={watch("parent_chapter_id")}
+                    value={form.watch("parent_chapter_id")}
                     onChange={(value) => setValue("parent_chapter_id", value)}
                     disabled={disabled}
                   />
@@ -172,27 +170,40 @@ const ChapterContentForm = React.forwardRef<HTMLFormElement, ChapterContentFormP
           />
         </div>
 
-        {/* Content with Tiptap */}
+        {/* Content Editor */}
         <Controller
-          name="content"          
+          name="content"
           control={control}
           render={({ field: { onChange, value } }) => (
             <FormItem>
               <FormControl>
-                    <div className="min-h-[300px] overflow-hidden rounded-md border">
-                      <SimpleEditor
-                        content={value || ''}
-                        onChange={(content) => onChange(content)}
-                        className="h-full min-h-[300px] p-4"
-                        editorProps={{
-                          attributes: {
-                            class: 'prose dark:prose-invert max-w-none focus:outline-none',
-                            'data-placeholder': 'Start writing your chapter content here...'
-                          }
-                        }}
-                      />
-                    </div>
-
+                <div className="overflow-hidden rounded-md">
+                  <ChapterContentEditor
+                    name="content"
+                    initialContent={(() => {
+                      try {
+                        return typeof value === 'string' && value.trim().startsWith('{') 
+                          ? JSON.parse(value) 
+                          : initialData?.content || '';
+                      } catch (e) {
+                        console.error('Error parsing content:', e);
+                        return initialData?.content || '';
+                      }
+                    })()}
+                    onChange={(content) => {
+                      try {
+                        const contentStr = typeof content === 'string' ? content : JSON.stringify(content);
+                        onChange(contentStr);
+                      } catch (e) {
+                        console.error('Error stringifying content:', e);
+                        onChange('');
+                      }
+                    }}
+                    disabled={disabled}
+                    placeholder="Start writing your chapter content here..."
+                    className="min-h-[400px]"
+                  />
+                </div>
               </FormControl>
               <FormMessage />
             </FormItem>

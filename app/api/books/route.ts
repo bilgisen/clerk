@@ -10,9 +10,11 @@ import { eq, and } from 'drizzle-orm';
  */
 export async function GET() {
   try {
+    console.log('GET /api/books - Starting request');
     // Get the current user session
     const session = await auth();
     const userId = session.userId;
+    console.log('Session user ID:', userId);
     
     if (!userId) {
       return NextResponse.json(
@@ -21,11 +23,27 @@ export async function GET() {
       );
     }
 
-    // Fetch all books for the current user
+    // First, get the user's database ID using their Clerk ID
+    console.log('Looking up user in database with clerkId:', userId);
+    const user = await db.query.users.findFirst({
+      where: (users, { eq }) => eq(users.clerkId, userId)
+    });
+    console.log('Database user found:', user ? 'Yes' : 'No');
+
+    if (!user) {
+      return NextResponse.json(
+        { error: 'User not found' }, 
+        { status: 404 }
+      );
+    }
+
+    // Fetch all books for the current user using their database ID
+    console.log('Fetching books for user ID:', user?.id);
     const userBooks = await db.query.books.findMany({
-      where: (books, { eq }) => eq(books.userId, userId),
+      where: (books, { eq }) => eq(books.userId, user.id),
       orderBy: (books, { desc }) => [desc(books.createdAt)],
     });
+    console.log('Books found:', userBooks.length);
 
     return NextResponse.json(userBooks);
   } catch (error) {
@@ -45,12 +63,24 @@ export async function POST(request: Request) {
   try {
     // Get the current user session
     const session = await auth();
-    const userId = session.userId;
+    const clerkUserId = session.userId;
     
-    if (!userId) {
+    if (!clerkUserId) {
       return NextResponse.json(
         { error: 'Unauthorized' }, 
         { status: 401 }
+      );
+    }
+    
+    // Get the user's database ID using their Clerk ID
+    const user = await db.query.users.findFirst({
+      where: (users, { eq }) => eq(users.clerkId, clerkUserId)
+    });
+
+    if (!user) {
+      return NextResponse.json(
+        { error: 'User not found' }, 
+        { status: 404 }
       );
     }
 
@@ -71,7 +101,7 @@ export async function POST(request: Request) {
       author,
       description: description || null,
       coverImageUrl: coverImageUrl || null,
-      userId,
+      userId: user.id,
       slug: title.toLowerCase().replace(/\s+/g, '-'), // Simple slug generation
     }).returning();
 

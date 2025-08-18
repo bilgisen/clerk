@@ -1,21 +1,23 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import { db } from '@/db';
-import { books, users } from '@/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { users } from '@/db/schema';
+import { eq } from 'drizzle-orm';
 
 /**
  * GET /api/books/by-id/[id]
  * Get a book by ID
  */
 export async function GET(
-  request: Request,
-  { params }: { params: { id: string } }
+  _request: Request,
+  context: { params: { id: string } }
 ) {
   try {
     const session = await auth();
     const userId = session.userId;
-    const { id } = params;
+    
+    // Await params before destructuring
+    const { id } = await context.params;
 
     if (!userId) {
       return NextResponse.json(

@@ -1,14 +1,20 @@
 "use client";
 
-import { useMemo, useCallback } from "react";
+import { useMemo, useCallback, useState, useEffect } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
 import { toast } from "sonner";
-
+import dynamic from 'next/dynamic';
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { Loader2, ArrowLeft, Edit, Plus, Download } from "lucide-react";
+import { Loader2, ArrowLeft, Edit, Download } from "lucide-react";
+import { BooksMenu } from "@/components/books/books-menu";
 import { generateCompleteChapterHTML } from "@/lib/generateChapterHTML";
+
+const LexicalRenderer = dynamic(
+  () => import('../../../../../../components/editor/lexical-renderer').then((mod) => mod.LexicalRenderer),
+  { ssr: false }
+);
 import { useChapter, useChaptersBySlug } from "@/hooks/api/use-chapters";
 import type { Book } from "@/db/schema";
 import type { Chapter, ChapterWithChildren } from "@/types/chapter";
@@ -88,6 +94,14 @@ export default function ChapterDetailPage() {
   const bookSlug = params?.slug as string;
   const chapterId = params?.chapterId as string;
   
+  const handleEditChapter = useCallback(() => {
+    router.push(`/dashboard/books/${bookSlug}/chapters/${chapterId}/edit`);
+  }, [bookSlug, chapterId, router]);
+  
+  const handleBackToBook = useCallback(() => {
+    router.push(`/dashboard/books/${bookSlug}`);
+  }, [bookSlug, router]);
+    
   // Fetch chapter data using React Query
   const { 
     data: chapterData, 
@@ -381,8 +395,20 @@ export default function ChapterDetailPage() {
   // Handle loading state
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-[calc(100vh-200px)]">
-        <Loader2 className="w-8 h-8 animate-spin" />
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="h-8 w-8 animate-spin" />
+      </div>
+    );
+  }
+
+  if (!chapter || !bookWithChapters) {
+    return (
+      <div className="p-8 text-center">
+        <p>Chapter or book not found</p>
+        <Button onClick={() => router.push(`/dashboard/books/${bookSlug}`)} variant="ghost" className="mt-4">
+          <ArrowLeft className="mr-2 h-4 w-4" />
+          Back to Book
+        </Button>
       </div>
     );
   }
@@ -402,54 +428,54 @@ export default function ChapterDetailPage() {
     );
   }
 
-  // Handle missing chapter
-  if (!chapter) {
-    return (
-      <div className="p-8 text-red-500">
-        Chapter not found
-      </div>
-    );
-  }
+  // Get book title from chapter data or fallback to bookSlug
+  const bookTitle = useMemo(() => {
+    if (!chapter) return 'Loading...';
+    // Try to get the book title from the chapter's book relation if it exists
+    const chapterWithBook = chapter as any;
+    return chapterWithBook.book?.title || bookSlug.split('-').map(word => 
+      word.charAt(0).toUpperCase() + word.slice(1)
+    ).join(' ');
+  }, [chapter, bookSlug]);
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      <div className="flex justify-between items-center mb-6">
-        <Button 
-          variant="outline" 
-          size="sm" 
-          onClick={() => router.push(`/dashboard/books/${bookSlug}`)}
-        >
-          <ArrowLeft className="mr-2 h-4 w-4" /> Back to Book
-        </Button>
-        
-        <div className="flex space-x-2">
-          <Button 
-            variant="outline" 
-            size="sm"
-            onClick={() => router.push(`/dashboard/books/${bookSlug}/chapters/${chapterId}/edit`)}
-          >
-            <Edit className="mr-2 h-4 w-4" /> Edit
-          </Button>
+    <div className="container mx-auto py-8">
+      <div className="mb-8">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold"><span className="text-muted-foreground">Chapter: </span> {chapter?.title || 'Loading...'}</h1>
+            <p className="text-muted-foreground">Book: {bookTitle}</p>
+          </div>
           
-          <Button 
-            variant="outline" 
-            size="sm"
-            onClick={handleExportHTML}
-          >
-            <Download className="mr-2 h-4 w-4" /> Export HTML
-          </Button>
+          <div className="flex items-center space-x-2">
+            <Button 
+              variant="outline" 
+              size="sm"
+              onClick={handleEditChapter}
+              className="flex items-center"
+            >
+              <Edit className="mr-2 h-4 w-4" />
+              Edit
+            </Button>
+            <BooksMenu 
+              slug={bookSlug}
+              onView={() => router.push(`/dashboard/books/${bookSlug}`)}
+              onEdit={() => router.push(`/dashboard/books/${bookSlug}/edit`)}
+              hideEdit={false}
+            />
+          </div>
         </div>
       </div>
       
       <div className="prose max-w-none">
-        <h1>{chapter.title}</h1>
         {parentTitle && <div className="text-sm text-muted-foreground mb-4">Parent: {parentTitle}</div>}
         <Separator className="my-6" />
         
-        <div 
-          className="prose max-w-none"
-          dangerouslySetInnerHTML={{ __html: chapter.content || '' }}
-        />
+        {chapter.content ? (
+          <LexicalRenderer content={chapter.content} />
+        ) : (
+          <p className="text-muted-foreground italic">No content available</p>
+        )}
       </div>
     </div>
   );

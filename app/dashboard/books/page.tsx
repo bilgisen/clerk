@@ -1,9 +1,10 @@
-'use server';
+'use client';
 
-import { redirect } from 'next/navigation';
-import { auth } from '@clerk/nextjs/server';
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { useAuth } from '@clerk/nextjs';
 import BooksPage from './books-client';
-import { getBooks } from '@/actions/books/get-books';
+import { useBooks } from '@/hooks/api/use-books';
 import { Book } from '@/types/book';
 
 // Helper function to map database book to our Book type
@@ -43,66 +44,53 @@ const mapToBook = (dbBook: any): Book => ({
   epubUrl: dbBook.epubUrl || null
 });
 
-export default async function BooksPageWrapper() {
-  try {
-    // This runs on the server side
-    const { userId } = await auth();
-    
-    if (!userId) {
-      console.log('[BooksPage] No user session found, redirecting to sign-in');
-      redirect('/sign-in');
+export default function BooksPageWrapper() {
+  const router = useRouter();
+  const { isLoaded, userId } = useAuth();
+  const { data: books = [], isLoading, error } = useBooks();
+  const [isClient, setIsClient] = useState(false);
+
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
+
+  useEffect(() => {
+    if (isLoaded && !userId) {
+      router.push('/sign-in');
     }
-    console.log(`[BooksPage] Fetching books for user ${userId}`);
-    
-    // Fetch books on the server side
-    const result = await getBooks();
-    
-    if (result.error) {
-      console.error('[BooksPage] Error fetching books:', result.error);
-      
-      // Handle 401 Unauthorized
-      if (result.status === 401) {
-        console.log('[BooksPage] Unauthorized, redirecting to sign-in');
-        redirect('/sign-in');
-      }
-      
-      // For other errors, show an error message
-      return (
-        <div className="p-4">
-          <h1 className="text-xl font-bold mb-2">Error loading books</h1>
-          <p className="text-red-600 dark:text-red-400">
-            {result.error}
-            {result.details && (
-              <span className="block text-sm mt-1 text-gray-600 dark:text-gray-400">
-                {result.details}
-              </span>
-            )}
-          </p>
-        </div>
-      );
-    }
-    
-    // Map database books to our Book type
-    const books: Book[] = (result.data || []).map(mapToBook);
-    console.log(`[BooksPage] Successfully fetched ${books.length} books`);
-    
-    // Pass the pre-fetched books to the client component
-    return <BooksPage initialBooks={books} />;
-    
-  } catch (error) {
-    console.error('[BooksPage] Unexpected error:', error);
+  }, [isLoaded, userId, router]);
+
+  if (!isClient || !isLoaded) {
     return (
-      <div className="p-4">
-        <h1 className="text-xl font-bold mb-2">Unexpected Error</h1>
-        <p className="text-red-600 dark:text-red-400">
-          An unexpected error occurred. Please try again later.
-          {process.env.NODE_ENV === 'development' && (
-            <span className="block text-sm mt-1 text-gray-600 dark:text-gray-400">
-              {error instanceof Error ? error.message : String(error)}
-            </span>
-          )}
-        </p>
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary" />
       </div>
     );
   }
+
+  if (error) {
+    return (
+      <div className="p-8 text-red-500">
+        Error loading books: {error.message}
+      </div>
+    );
+  }
+
+  console.log('Raw books data from API:', books);
+  console.log('Raw books data from API (before mapping):', JSON.stringify(books, null, 2));
+  
+  const mappedBooks = books.map(book => {
+    console.log('Mapping book:', book);
+    const mapped = mapToBook(book);
+    console.log('Mapped book:', mapped);
+    return mapped;
+  });
+  
+  console.log('Mapped books array:', mappedBooks);
+  
+  if (mappedBooks.length === 0) {
+    console.log('No books found after mapping. Raw data was:', books);
+  }
+  
+  return <BooksPage initialBooks={mappedBooks} />;
 }

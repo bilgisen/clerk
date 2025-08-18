@@ -92,14 +92,22 @@ interface BookTableProps {
 }
 
 export function BookTable({ data, isLoading = false, onDelete }: BookTableProps) {
+  console.log('[BookTable] Rendering with data:', data);
+  
   const [sorting, setSorting] = React.useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([]);
   const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({});
   const [rowSelection, setRowSelection] = React.useState({});
 
-  const columns = React.useMemo(() => getColumns(onDelete), [onDelete]);
+  const columns = React.useMemo(() => {
+    console.log('[BookTable] Creating columns with onDelete:', !!onDelete);
+    return getColumns(onDelete);
+  }, [onDelete]);
 
+  console.log('[BookTable] Columns:', columns);
+  
   const table = useReactTable({
+    debugAll: true,
     data,
     columns,
     onSortingChange: setSorting,
@@ -146,6 +154,14 @@ export function BookTable({ data, isLoading = false, onDelete }: BookTableProps)
             </TableRow>
           </TableBody>
         </Table>
+      </div>
+    );
+  }
+  
+  if (data.length === 0) {
+    return (
+      <div className="rounded-md border p-8 text-center">
+        <div className="text-muted-foreground">No books found. Create your first book to get started.</div>
       </div>
     );
   }

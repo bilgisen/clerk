@@ -19,13 +19,14 @@ export const config = {
 // GET: Get a single chapter by ID for a book by slug
 export async function GET(
   request: Request,
-  { params }: { params: { slug: string; chapterId: string } }
+  context: { params: { slug: string; chapterId: string } }
 ) {
   try {
     const user = await currentUser();
     if (!user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
 
-    const { slug, chapterId } = params;
+    // Await params before destructuring
+    const { slug, chapterId } = await context.params;
     if (!slug || !chapterId) {
       return NextResponse.json({ error: 'Book slug and chapter ID are required' }, { status: 400 });
     }
@@ -53,13 +54,14 @@ export async function GET(
 // PATCH: Update a chapter
 export async function PATCH(
   request: Request,
-  { params }: { params: { slug: string; chapterId: string } }
+  context: { params: { slug: string; chapterId: string } }
 ) {
   try {
     const user = await currentUser();
     if (!user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
 
-    const { slug, chapterId } = params;
+    // Await params before destructuring
+    const { slug, chapterId } = await context.params;
     if (!slug || !chapterId) {
       return NextResponse.json({ error: 'Book slug and chapter ID are required' }, { status: 400 });
     }
@@ -119,13 +121,14 @@ export async function PATCH(
 // DELETE: Delete a chapter
 export async function DELETE(
   _req: Request,
-  { params }: { params: { slug: string; chapterId: string } }
+  context: { params: { slug: string; chapterId: string } }
 ) {
   try {
     const user = await currentUser();
     if (!user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
 
-    const { slug, chapterId } = params;
+    // Await params before destructuring
+    const { slug, chapterId } = await context.params;
     if (!slug || !chapterId) {
       return NextResponse.json({ error: 'Book slug and chapter ID are required' }, { status: 400 });
     }

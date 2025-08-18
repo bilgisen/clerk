@@ -16,9 +16,6 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Progress } from '@/components/ui/progress';
 
-// Import the EPUB viewer component
-import { EpubViewer } from '@/components/epub-viewer';
-
 // Polling interval in milliseconds
 const POLL_INTERVAL = 10000; // 10 seconds
 
@@ -43,10 +40,8 @@ export default function GenerateEbookPage() {
   // Simple progress state
   const [status, setStatus] = useState<'idle' | 'starting' | 'triggered' | 'processing' | 'completed' | 'failed'>('idle');
   
-  // State for EPUB preview
-  const [showPreview, setShowPreview] = useState(false);
+  // State for file handling
   const [epubFile, setEpubFile] = useState<File | null>(null);
-  const [localEpubUrl, setLocalEpubUrl] = useState<string | null>(null);
 
   // Get the auth token when component mounts
   useEffect(() => {
@@ -99,11 +94,6 @@ export default function GenerateEbookPage() {
     
     setPolling(true);
     const poll = async (currentAttempt: number) => {
-      // Clean up any existing local URLs
-      if (localEpubUrl) {
-        URL.revokeObjectURL(localEpubUrl);
-        setLocalEpubUrl(null);
-      }
       try {
         // Add a cache-busting parameter to the URL
         const cacheBuster = `_t=${Date.now()}`;
@@ -132,9 +122,7 @@ export default function GenerateEbookPage() {
               const epubResponse = await fetch(downloadUrl);
               const epubBlob = await epubResponse.blob();
               const epubFile = new File([epubBlob], `book-${bookId}.epub`, { type: 'application/epub+zip' });
-              const fileUrl = URL.createObjectURL(epubFile);
               setEpubFile(epubFile);
-              setLocalEpubUrl(fileUrl);
             } catch (e) {
               console.warn('Failed to prepare EPUB for preview:', e);
             }
@@ -358,34 +346,26 @@ export default function GenerateEbookPage() {
 
       {/* Main Content */}
       <div className="space-y-6">
-        {/* Preview Toggle Button */}
-        {status === 'completed' && localEpubUrl && (
+        {/* Download Section */}
+        {status === 'completed' && downloadUrl && (
           <Card>
             <CardHeader>
               <CardTitle>E-Book Preview</CardTitle>
               <CardDescription>Preview your generated e-book</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="flex justify-between items-center">
-                <div className="text-sm text-muted-foreground">
-                  Click the button below to preview your e-book
-                </div>
-                <Button 
-                  variant={showPreview ? "outline" : "default"} 
-                  onClick={() => setShowPreview(!showPreview)}
-                >
-                  {showPreview ? 'Hide Preview' : 'Show Preview'}
-                </Button>
-              </div>
+              <p className="text-sm text-muted-foreground">
+                Your e-book is ready for download.
+              </p>
             </CardContent>
             <CardFooter className="flex justify-between border-t pt-4">
               <div className="space-x-2">
                 <Button
                   variant="outline"
                   onClick={() => {
-                    if (localEpubUrl) {
+                    if (downloadUrl) {
                       const a = document.createElement('a');
-                      a.href = localEpubUrl;
+                      a.href = downloadUrl;
                       a.download = `book-${bookId || 'preview'}.epub`;
                       document.body.appendChild(a);
                       a.click();
@@ -409,34 +389,6 @@ export default function GenerateEbookPage() {
           </Card>
         )}
 
-        {/* EPUB Viewer Section */}
-        {showPreview && localEpubUrl && (
-          <Card>
-            <CardHeader>
-              <div className="flex justify-between items-center">
-                <div>
-                  <CardTitle>E-Book Preview</CardTitle>
-                  <CardDescription>Reading your generated e-book</CardDescription>
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setShowPreview(false)}
-                >
-                  Close Preview
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="border rounded-lg overflow-hidden h-[600px] bg-white">
-                <EpubViewer url={localEpubUrl} style={{ width: '100%', height: '100%' }} />
-              </div>
-            </CardContent>
-          </Card>
-        )}
-        {/* Options Section */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Column - Publishing Options (2/3 width) */}
         <div className="lg:col-span-2 space-y-6">
           <Card>
             <CardHeader>
@@ -682,50 +634,27 @@ export default function GenerateEbookPage() {
         </div>
       </div>
 
-      {/* EPUB Viewer Section - Moved to bottom */}
-      {showPreview && localEpubUrl && (
+      {downloadUrl && (
         <div className="mt-8">
           <Card>
             <CardHeader>
-              <div className="flex justify-between items-center">
-                <div>
-                  <h3 className="text-lg font-medium">E-Book Preview</h3>
-                  <p className="text-sm text-muted-foreground">
-                    Preview your generated e-book
-                  </p>
-                </div>
-                <Button 
-                  variant="outline" 
-                  size="sm"
-                  onClick={() => setShowPreview(false)}
-                >
-                  Close Preview
-                </Button>
-              </div>
+              <CardTitle>E-Book</CardTitle>
+              <CardDescription>Download your generated e-book</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="border rounded-lg overflow-hidden h-[600px] bg-white">
-                {localEpubUrl && (
-                  <EpubViewer 
-                    url={localEpubUrl}
-                    style={{ width: '100%', height: '100%' }}
-                  />
-                )}
-              </div>
+              <p className="text-muted-foreground">Your e-book is ready for download.</p>
             </CardContent>
             <CardFooter className="flex justify-between border-t pt-4">
               <div className="space-x-2">
                 <Button
                   variant="outline"
                   onClick={() => {
-                    if (localEpubUrl) {
-                      const a = document.createElement('a');
-                      a.href = localEpubUrl;
-                      a.download = `book-${bookId || 'preview'}.epub`;
-                      document.body.appendChild(a);
-                      a.click();
-                      document.body.removeChild(a);
-                    }
+                    const a = document.createElement('a');
+                    a.href = downloadUrl;
+                    a.download = `book-${bookId || 'download'}.epub`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
                   }}
                 >
                   Download Local Copy
@@ -734,11 +663,7 @@ export default function GenerateEbookPage() {
               <Button
                 variant="default"
                 onClick={() => {
-                  if (downloadUrl) {
-                    window.open(downloadUrl, '_blank');
-                  } else {
-                    toast.warning('No download URL available');
-                  }
+                  window.open(downloadUrl, '_blank');
                 }}
               >
                 View in Cloud
@@ -747,7 +672,6 @@ export default function GenerateEbookPage() {
           </Card>
         </div>
       )}
-      </div>
     </div>
   );
 }

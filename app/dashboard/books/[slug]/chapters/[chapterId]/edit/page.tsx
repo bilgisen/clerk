@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useRef, useMemo, useEffect } from 'react';
+import { useState, useRef, useMemo, useEffect, useCallback } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { useAuth } from '@clerk/nextjs';
+import { debounce } from 'lodash';
 import { toast } from 'sonner';
 import { Loader2, ArrowLeft, AlertCircle } from 'lucide-react';
 
@@ -12,13 +13,13 @@ import { ChapterContentForm } from '@/components/books/chapters/chapter-content-
 import { BooksMenu } from '@/components/books/books-menu';
 import type { ChapterFormValues } from '@/schemas/chapter-schema';
 
-type Chapter = {
+interface Chapter {
   id: string;
   title: string;
   slug: string;
   order: number;
   level: number;
-  parent_chapter_id: string | null;
+  parent_chapter_id?: string | null;
   book_id: string;
   user_id?: string;
   created_at: string;
@@ -31,12 +32,53 @@ export default function EditChapterPage() {
   const { slug: bookSlug, chapterId } = useParams() as { slug: string; chapterId: string };
   const { userId, getToken } = useAuth();
   
+  // Debounced autosave function
+  const debouncedSave = useCallback(
+    debounce(async (data: ChapterFormValues) => {
+      if (!chapterId || !bookSlug) return;
+      
+      try {
+        const token = await getToken();
+        const response = await fetch(`/api/books/${bookSlug}/chapters/${chapterId}`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify(data),
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to autosave chapter');
+        }
+        
+        setLastSaved(new Date());
+      } catch (error) {
+        console.error('Autosave error:', error);
+      } finally {
+        setIsSaving(false);
+      }
+    }, 2000), // 2 second debounce
+    [chapterId, bookSlug, getToken]
+  );
+
+  // Cleanup debounce on unmount
+  useEffect(() => {
+    return () => {
+      debouncedSave.cancel();
+    };
+  }, [debouncedSave]);
+
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [chapter, setChapter] = useState<Chapter | null>(null);
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [formError, setFormError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
+  const formDataRef = useRef<ChapterFormValues | null>(null);
 
   // Fetch chapter and chapters data
   useEffect(() => {
@@ -121,7 +163,7 @@ export default function EditChapterPage() {
 
   const parentChapters = useMemo(() => {
     if (!chapter) return [];
-    return chapters.filter((c) => c.id !== chapter.id && !descendants.has(c.id)).map(ch => ({
+    return chapters.filter((c: Chapter) => c.id !== chapter.id && !descendants.has(c.id)).map((ch: Chapter) => ({
       id: ch.id,
       title: ch.title,
       level: ch.level,
@@ -129,53 +171,57 @@ export default function EditChapterPage() {
     }));
   }, [chapters, chapter, descendants]);
 
-  const handleSubmit = async (data: ChapterFormValues): Promise<{ success: boolean; redirectUrl?: string }> => {
-    if (!chapter || !userId) {
-      setFormError("Authentication required");
-      return { success: false };
+  const handleFormChange = useCallback((data: ChapterFormValues) => {
+    formDataRef.current = data;
+    if (!isSaving) {
+      setIsSaving(true);
+      debouncedSave(data);
     }
+  }, [debouncedSave, isSaving]);
+
+  const handleSubmit = async (formData: ChapterFormValues): Promise<{ success: boolean; redirectUrl?: string }> => {
+    if (!userId) return { success: false };
     
-    setIsSubmitting(true);
-    setFormError(null);
-
     try {
+      setIsSubmitting(true);
+      setError(null);
+      
       const token = await getToken();
-      const parentId = data.parent_chapter_id || null;
-      const parent = parentId ? chapters.find((c) => c.id === parentId) : null;
-      const level = parent ? (parent.level || 0) + 1 : 0;
-
-      const response = await fetch(`/api/books/by-slug/${bookSlug}/chapters/${chapterId}`, {
+      const response = await fetch(`/api/books/${bookSlug}/chapters/${chapterId}`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
+          'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({
-          title: data.title,
-          content: data.content,
-          book_id: chapter.book_id,
-          user_id: userId,
-          parent_chapter_id: parentId,
-          parentId: parentId, // Include both for backward compatibility
-          order: chapter.order || 0,
-          level,
-          updated_at: new Date().toISOString(),
-        }),
+        body: JSON.stringify(formData),
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
+        const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.message || 'Failed to update chapter');
       }
 
-      toast.success('Chapter updated successfully');
-      router.push(`/dashboard/books/${bookSlug}/chapters`);
-      return { success: true };
+      const updatedChapter = await response.json();
+      setChapter(updatedChapter);
+      setLastSaved(new Date());
+      
+      // Show success message and prepare for redirect
+      toast.success('Chapter updated successfully', {
+        duration: 2000,
+        onAutoClose: () => {
+          // Redirect after the toast is closed
+          router.push(`/dashboard/books/${bookSlug}/chapters/${chapterId}`);
+          router.refresh(); // Ensure the latest data is shown
+        }
+      });
+      
+      return { 
+        success: true,
+        redirectUrl: `/dashboard/books/${bookSlug}/chapters/${chapterId}`
+      };
     } catch (error) {
       console.error('Error updating chapter:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Failed to update chapter. Please try again.';
-      setFormError(errorMessage);
-      toast.error('Failed to update chapter');
+      setError('Failed to update chapter');
       return { success: false };
     } finally {
       setIsSubmitting(false);
@@ -212,21 +258,17 @@ export default function EditChapterPage() {
       <div className="flex flex-col space-y-6">
         <div className="flex items-center justify-between">
           <div>
-            <div className="flex items-center space-x-2">
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              onClick={() => router.back()}
-              className="h-8 w-8 p-0"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              <span className="sr-only">Back</span>
-            </Button>
-            <div>
-              <h1 className="text-2xl font-bold">Edit Chapter</h1>
-              <p className="text-sm text-muted-foreground">{chapter.title}</p>
+            <div className="flex items-center gap-2">
+              <h1 className="text-2xl font-bold"><span className="text-muted-foreground">Edit:</span> {chapter.title}</h1>
+              {isSaving ? (
+                <span className="text-sm text-muted-foreground">Saving...</span>
+              ) : lastSaved ? (
+                <span className="text-sm text-muted-foreground">
+                  Saved at {lastSaved.toLocaleTimeString()}
+                </span>
+              ) : null}
             </div>
-          </div>
+            <p className="text-sm text-muted-foreground">Book: {bookSlug}</p>
           </div>
           <BooksMenu 
             slug={bookSlug}
@@ -236,24 +278,34 @@ export default function EditChapterPage() {
 
         <Separator />
 
-        <ChapterContentForm
-          ref={formRef}
-          onSubmit={handleSubmit}
-          initialData={{
-            title: chapter.title,
-            content: chapter.content,
-            parent_chapter_id: chapter.parent_chapter_id || null,
-            book_id: chapter.book_id,
-            id: chapter.id,
-            level: chapter.level,
-            order: chapter.order,
-            slug: chapter.slug,
-          }}
-          parentChapters={parentChapters}
-          loading={isSubmitting}
-          bookSlug={bookSlug}
-          currentChapterId={chapterId}
-        />
+        <div className="relative">
+          {isSubmitting && (
+            <div className="absolute inset-0 bg-background/80 z-10 flex items-center justify-center">
+              <div className="flex items-center gap-2 bg-background p-4 rounded-lg shadow-lg border">
+                <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                <span>Saving changes...</span>
+              </div>
+            </div>
+          )}
+          <ChapterContentForm
+            ref={formRef}
+            onSubmit={handleSubmit}
+            onChange={handleFormChange}
+            initialData={{
+              title: chapter.title,
+              content: chapter.content || '',
+              parent_chapter_id: chapter.parent_chapter_id,
+              book_id: chapter.book_id,
+              order: chapter.order,
+              level: chapter.level,
+              slug: chapter.slug,
+            }}
+            parentChapters={parentChapters}
+            loading={isSubmitting}
+            bookSlug={bookSlug}
+            currentChapterId={chapterId}
+          />
+        </div>
 
         {formError && (
           <div className="mt-4 p-4 text-sm text-destructive bg-destructive/10 rounded-md">

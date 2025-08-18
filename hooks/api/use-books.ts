@@ -36,8 +36,9 @@ export function useBooks() {
           throw error;
         }
       }
-      const result: BooksResponse = await response.json();
-      return result.data || [];
+      const result = await response.json();
+      // Handle both direct array response and { data: [] } format
+      return Array.isArray(result) ? result : result.data || [];
     },
     // Don't retry on 401 Unauthorized
     retry: (failureCount, error) => {
@@ -213,12 +214,13 @@ export function useOptimisticBookUpdate() {
       return { previousBook, previousBooks };
     },
     // If the mutation fails, use the context returned from onMutate to roll back
-    onError: (err: Error, newBook: UpdateBookInput, context: { previousBook?: Book; previousBooks?: Book[] } | undefined) => {
-      if (context?.previousBook) {
-        queryClient.setQueryData(['books', newBook.id], context.previousBook);
+    onError: (err: Error, newBook: UpdateBookInput, context: unknown) => {
+      const typedContext = context as { previousBook?: Book; previousBooks?: Book[] } | undefined;
+      if (typedContext?.previousBook) {
+        queryClient.setQueryData(['books', newBook.id], typedContext.previousBook);
       }
-      if (context?.previousBooks) {
-        queryClient.setQueryData(['books'], context.previousBooks);
+      if (typedContext?.previousBooks) {
+        queryClient.setQueryData(['books'], typedContext.previousBooks);
       }
     },
     // Always refetch after error or success:

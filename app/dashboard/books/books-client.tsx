@@ -20,6 +20,8 @@ export default function BooksPage({ initialBooks = [] }: BooksPageProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [books, setBooks] = useState<Book[]>(initialBooks);
   
+  console.log('[BooksPage] Initial props:', { initialBooks });
+  
   // Log auth state and initialize
   useEffect(() => {
     console.log('[BooksClient] Auth state:', { userId, sessionId });
@@ -40,7 +42,9 @@ export default function BooksPage({ initialBooks = [] }: BooksPageProps) {
   
   // Update books when initialBooks changes
   useEffect(() => {
+    console.log('[BooksPage] initialBooks changed:', initialBooks);
     if (initialBooks.length > 0) {
+      console.log('[BooksPage] Setting books state with:', initialBooks);
       setBooks(initialBooks);
     }
   }, [initialBooks]);
@@ -81,6 +85,8 @@ export default function BooksPage({ initialBooks = [] }: BooksPageProps) {
     );
   }
   
+  console.log('[BooksPage] Rendering with books:', books);
+  
   return (
     <div className="container mx-auto py-6">
       <div className="flex items-center justify-between mb-6">
@@ -89,6 +95,12 @@ export default function BooksPage({ initialBooks = [] }: BooksPageProps) {
           <Plus className="mr-2 h-4 w-4" />
           Add Book
         </Button>
+      </div>
+      
+      <div className="mb-4">
+        <p className="text-sm text-muted-foreground">
+          {books.length} book{books.length !== 1 ? 's' : ''} found
+        </p>
       </div>
       
       <BookTable 
