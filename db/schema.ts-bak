@@ -10,29 +10,26 @@ export const users = pgTable('users', {
   // Clerk Authentication
   id: uuid('id').primaryKey().defaultRandom(),
   clerkId: text('clerk_id').unique().notNull(),
-
+  
   // Basic Info
   email: text('email').notNull(),
   firstName: text('first_name'),
   lastName: text('last_name'),
   imageUrl: text('image_url'),
-
+  
   // Role & Permissions
   role: userRoleEnum('role').default('MEMBER').notNull(),
   isActive: boolean('is_active').default(true).notNull(),
   permissions: text('permissions').array().default(['read:books']).notNull(),
-
-  // Subscription (Polar.sh)
+  
+  // Subscription & Billing
   subscriptionId: text('subscription_id').unique(),
   subscriptionStatus: subscriptionStatusEnum('subscription_status').default('TRIAL'),
   subscriptionPlan: text('subscription_plan'),
   subscriptionStartDate: timestamp('subscription_start_date'),
   subscriptionEndDate: timestamp('subscription_end_date'),
-  polarCustomerId: text('polar_customer_id').unique(),
-
-  // Credits System
-  credits: integer('credits').default(0).notNull(),
-
+  stripeCustomerId: text('stripe_customer_id').unique(),
+    
   // Metadata
   metadata: jsonb('metadata').default({}),
   createdAt: timestamp('created_at').defaultNow().notNull(),
@@ -46,12 +43,12 @@ export const users = pgTable('users', {
   lastLoginIdx: { columns: [table.lastLoginAt] },
 }));
 
-// Subscription Plans (Polar-linked)
+// Subscription Plans
 export const subscriptionPlans = pgTable('subscription_plans', {
   id: uuid('id').primaryKey().defaultRandom(),
   name: text('name').notNull(),
   description: text('description'),
-  monthlyCreditQuota: integer('monthly_credit_quota').notNull(),
+  monthlyBookQuota: integer('monthly_book_quota').notNull(),
   priceMonthly: integer('price_monthly').notNull(),
   priceYearly: integer('price_yearly'),
   features: text('features').array().notNull(),
@@ -92,42 +89,42 @@ export const bookGenreEnum = pgEnum('book_genre', [
 export const books = pgTable('books', {
   id: uuid('id').primaryKey().defaultRandom(),
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-
+  
   // Core Information
   title: text('title').notNull(),
   subtitle: text('subtitle'),
   slug: text('slug').notNull().unique(),
-
+  
   // Author Information
   author: text('author').notNull(),
   contributor: text('contributor'),
   translator: text('translator'),
-
+  
   // Publication Details
   publisher: text('publisher'),
   publisherWebsite: text('publisher_website'),
   publishYear: integer('publish_year'),
   isbn: text('isbn'),
-
+  
   // Classification
   genre: bookGenreEnum('genre'),
   series: text('series'),
   seriesIndex: integer('series_index'),
   tags: text('tags').array(),
-
+  
   // Content
   description: text('description'),
   language: text('language').default('tr'),
-
+  
   // Media
   coverImageUrl: text('cover_image_url'),
-  epubUrl: text('epub_url'),
-
+  epubUrl: text('epub_url'), // Using snake_case to match database column name
+  
   // Metadata
   isPublished: boolean('is_published').default(false).notNull(),
   isFeatured: boolean('is_featured').default(false).notNull(),
   viewCount: integer('view_count').default(0).notNull(),
-
+  
   // Timestamps
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -147,7 +144,7 @@ export const media = pgTable('media', {
   id: uuid('id').primaryKey().defaultRandom(),
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   bookId: uuid('book_id').references(() => books.id, { onDelete: 'cascade' }),
-
+  
   // File Information
   url: text('url').notNull(),
   name: text('name').notNull(),
@@ -155,11 +152,11 @@ export const media = pgTable('media', {
   size: integer('size').notNull(),
   width: integer('width'),
   height: integer('height'),
-
+  
   // Metadata
   altText: text('alt_text'),
   caption: text('caption'),
-
+  
   // Timestamps
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -174,26 +171,26 @@ export const media = pgTable('media', {
 export const chapters = pgTable('chapters', {
   id: uuid('id').primaryKey().defaultRandom(),
   bookId: uuid('book_id').notNull().references(() => books.id, { onDelete: 'cascade' }),
-
+  
   // Hierarchy
   parentChapterId: uuid('parent_chapter_id').references((): AnyPgColumn => {
     return chapters.id as unknown as AnyPgColumn;
   }, { onDelete: 'set null' }),
-
+  
   // Content
   title: text('title').notNull(),
   content: jsonb('content').notNull(),
   excerpt: text('excerpt'),
-
+  
   // Organization
   order: integer('order').default(0).notNull(),
   level: integer('level').default(1).notNull(),
   isDraft: boolean('is_draft').default(false).notNull(),
-
+  
   // Metadata
   wordCount: integer('word_count').default(0).notNull(),
   readingTime: integer('reading_time'),
-
+  
   // Timestamps
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

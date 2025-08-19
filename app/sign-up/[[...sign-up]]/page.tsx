@@ -1,8 +1,8 @@
-import { SignIn } from "@clerk/nextjs";
+import { SignUp } from "@clerk/nextjs";
 import { redirect } from "next/navigation";
 import { currentUser } from "@clerk/nextjs/server";
 
-export default async function SignInPage() {
+export default async function SignUpPage() {
   const user = await currentUser();
   if (user) {
     redirect("/dashboard");
@@ -10,13 +10,13 @@ export default async function SignInPage() {
 
   return (
     <div className="flex justify-center py-24">
-      <SignIn 
-        path="/sign-in"
+      <SignUp 
+        path="/sign-up"
         routing="path"
-        signUpUrl="/sign-up"
+        signInUrl="/sign-in"
         redirectUrl="/dashboard"
-        afterSignInUrl="/dashboard"
         afterSignUpUrl="/dashboard"
+        afterSignInUrl="/dashboard"
       />
     </div>
   );

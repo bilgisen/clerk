@@ -3,9 +3,8 @@
 import { z } from "zod";
 import { db } from "@/db/drizzle";
 import { books, users } from "@/db/schema";
-import { redirect } from "next/navigation";
 import { v4 as uuidv4 } from "uuid";
-import { eq, and } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { auth } from "@clerk/nextjs/server";
 
 // Helper function to generate a slug from a title

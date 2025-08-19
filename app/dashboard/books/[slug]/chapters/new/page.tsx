@@ -2,15 +2,26 @@
 
 import React from "react";
 import { useRouter, useParams } from "next/navigation";
-import ChapterContentEditor from "@/components/books/chapters/ChapterContentEditor";
 import { ParentChapterSelect } from "@/components/books/chapters/ParentChapterSelect";
-import { useForm } from "react-hook-form";
+import { useForm, type SubmitHandler } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
+import type { Control } from "react-hook-form";
 import { Button } from "@/components/ui/button";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Loader2 } from "lucide-react";
+import { toast } from "sonner";
+import dynamic from "next/dynamic";
+
+// Import editor dynamically to avoid SSR issues
+const ChapterContentEditor = dynamic(
+  () => import("@/components/books/chapters/ChapterContentEditor"),
+  { 
+    ssr: false,
+    loading: () => <div className="min-h-[400px] border rounded-md p-4">Loading editor...</div>
+  }
+);
 
 // Define chapter type for parent chapter selection
 interface Chapter {
@@ -20,14 +31,38 @@ interface Chapter {
   parentId?: string;
 }
 
-// Define form schema
+// Define base form schema with all required fields
+const baseFormSchema = {
+  title: z.string().min(1, "Title is required"),
+  content: z.union([
+    z.string().min(1, "Content is required"),
+    z.record(z.any(), z.any()).refine(val => val !== null && typeof val === 'object', {
+      message: "Content is required"
+    })
+  ]),
+  parent_chapter_id: z.string().nullable().optional(),
+  order: z.number().default(0),
+  isDraft: z.boolean().default(true)
+} as const;
+
+// Create form schema with proper typing
 const formSchema = z.object({
   title: z.string().min(1, "Title is required"),
-  content: z.string().min(1, "Content is required"),
+  content: z.union([
+    z.string().min(1, "Content is required"),
+    z.record(z.any(), z.any()).refine(val => val !== null && typeof val === 'object', {
+      message: "Content is required"
+    })
+  ]),
   parent_chapter_id: z.string().nullable().optional(),
+  order: z.number().default(0),
+  isDraft: z.boolean().default(true)
 });
 
 type FormValues = z.infer<typeof formSchema>;
+
+// Define form control type
+type FormControlType = Control<FormValues>;
 
 export default function NewChapterPage() {
   const router = useRouter();
@@ -70,13 +105,39 @@ export default function NewChapterPage() {
     loadChapters();
   }, [bookSlug]);
 
-  // Initialize form
+  // Initialize form with explicit type and default values
   const form = useForm<FormValues>({
-    resolver: zodResolver(formSchema),
+    resolver: zodResolver(formSchema) as any,
     defaultValues: {
       title: "",
-      content: "",
+      content: JSON.stringify({
+        root: {
+          children: [{
+            children: [{
+              text: "",
+              type: "text" as const,
+              detail: 0,
+              format: 0,
+              mode: "normal" as const,
+              style: "",
+              version: 1
+            }],
+            direction: "ltr" as const,
+            format: "",
+            indent: 0,
+            type: "paragraph" as const,
+            version: 1
+          }],
+          direction: "ltr" as const,
+          format: "",
+          indent: 0,
+          type: "root" as const,
+          version: 1
+        }
+      }),
       parent_chapter_id: null,
+      order: 0,
+      isDraft: true,
     },
   });
 
@@ -92,27 +153,37 @@ export default function NewChapterPage() {
     [chapters, bookSlug]
   );
 
-  const onSubmit = async (values: FormValues) => {
-    if (!bookSlug) return { success: false };
-    
+  const onSubmit: SubmitHandler<FormValues> = async (values) => {
     try {
-      setIsLoading(true);
+      setIsLoading(true)
       
+      // Content is already a string from the form, but ensure it's valid JSON
+      let contentToSend = values.content;
+      try {
+        // If it's a string, parse it to validate it's valid JSON
+        if (typeof contentToSend === 'string') {
+          JSON.parse(contentToSend);
+        } else {
+          // If it's not a string, stringify it
+          contentToSend = JSON.stringify(contentToSend);
+        }
+      } catch (e) {
+        console.error('Invalid content format:', e);
+        toast.error('Invalid content format. Please try again.');
+        return;
+      }
+
       const response = await fetch(`/api/books/by-slug/${bookSlug}/chapters`, {
-        method: 'POST',
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          title: values.title,
-          content: values.content,
-          parent_chapter_id: values.parent_chapter_id || null,
-          order: chapters.length, // Add to the end by default
-          level: values.parent_chapter_id ? 1 : 0, // Set level based on parent
-          isDraft: false,
+          ...values,
+          content: contentToSend
         }),
-      });
-      
+      })
+
       if (!response.ok) {
         const error = await response.json();
         throw new Error(error.message || 'Failed to create chapter');
@@ -147,11 +218,11 @@ export default function NewChapterPage() {
         <div className="max-w-4xl mx-auto">
           <h1 className="text-3xl font-bold mb-6">Create New Chapter</h1>
           
-          <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+          <Form {...form as any}>
+            <form onSubmit={form.handleSubmit(onSubmit as any)} className="space-y-6">
               {/* Title Field */}
-              <FormField
-                control={form.control}
+              <FormField<FormValues>
+                control={form.control as unknown as Control<FormValues>}
                 name="title"
                 render={({ field }) => (
                   <FormItem>
@@ -165,8 +236,8 @@ export default function NewChapterPage() {
               />
 
               {/* Parent Chapter Select */}
-              <FormField
-                control={form.control}
+              <FormField<FormValues>
+                control={form.control as unknown as Control<FormValues>}
                 name="parent_chapter_id"
                 render={({ field }) => (
                   <FormItem>
@@ -185,8 +256,8 @@ export default function NewChapterPage() {
               />
 
               {/* Content Editor */}
-              <FormField
-                control={form.control}
+              <FormField<FormValues>
+                control={form.control as unknown as Control<FormValues>}
                 name="content"
                 render={({ field }) => (
                   <FormItem>
@@ -195,7 +266,17 @@ export default function NewChapterPage() {
                       <div className="border rounded-md overflow-hidden">
                         <ChapterContentEditor
                           name="content"
-                          initialContent={field.value}
+                          initialContent={(() => {
+                            try {
+                              if (!field.value) return undefined;
+                              return typeof field.value === 'string' 
+                                ? JSON.parse(field.value) 
+                                : field.value;
+                            } catch (e) {
+                              console.error('Error parsing initial content:', e);
+                              return undefined; // Will use default from component
+                            }
+                          })()}
                           onChange={field.onChange}
                           className="min-h-[400px] p-4"
                           placeholder="Start writing your chapter content here..."

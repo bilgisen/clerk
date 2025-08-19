@@ -1,3 +1,4 @@
+// middleware.ts
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { NextResponse } from 'next/server';
 
@@ -5,6 +6,7 @@ import { NextResponse } from 'next/server';
 const isPublicRoute = createRouteMatcher([
   '/',
   '/sign-in(.*)',
+  '/sign-up(.*)',
   '/api/auth/token',
   '/api/webhooks(.*)',
 ]);
@@ -142,16 +144,7 @@ export default clerkMiddleware(async (auth, req) => {
 // Configure which routes should be processed by the middleware
 export const config = {
   matcher: [
-    // Match all request paths except:
-    // - _next/static (static files)
-    // - _next/image (image optimization files)
-    // - favicon.ico (favicon file)
-    // - public folder
-    // - public files
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
-    // Always run for API routes
-    "/api/:path*",
-    // Protect dashboard routes
-    "/dashboard/:path*"
+    "/((?!.*\\..*|_next).*)", // Match all routes except for files and _next
+    "/"
   ],
 };
