@@ -1,5 +1,5 @@
 {
-  "name": "matbu.app",
+  "name": "editor.bookshall.com",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -13,6 +13,7 @@
     "@aws-sdk/client-s3": "^3.859.0",
     "@clerk/clerk-sdk-node": "^5.1.6",
     "@clerk/nextjs": "6.31.1",
+    "@clerk/types": "^4.79.0",
     "@floating-ui/react": "^0.27.15",
     "@hookform/resolvers": "^5.2.1",
     "@lexical/code": "^0.34.0",

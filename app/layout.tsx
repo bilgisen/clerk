@@ -1,38 +1,24 @@
 import { ClerkProvider } from "@clerk/nextjs";
 import type { Appearance } from "@clerk/types";
 import "./globals.css";
-import Script from "next/script";
 import localFont from "next/font/local";
 import { ThemeProvider } from "next-themes";
-import { templateMetadata } from "./_template/content/metadata";
 
-export const metadata = templateMetadata;
+export const metadata = {
+  title: "Bookshall - Document Management System",
+  description: "Your powerful document management system",
+};
 
 const geistSans = localFont({
   src: "./fonts/GeistVF.woff",
   variable: "--font-geist-sans",
 });
 
-const geistMono = localFont({
-  src: "./fonts/GeistMonoVF.woff",
-  variable: "--font-geist-mono",
-});
-
-/**
- * This object can be customized to change Clerk's built-in appearance. To learn more: https://clerk.com/docs/customization/overview
- */
-const clerkAppearanceObject = {
-  cssLayerName: "clerk",
+const clerkAppearance = {
   variables: { colorPrimary: "#000000" },
   elements: {
-    socialButtonsBlockButton:
-      "bg-white border-gray-200 hover:bg-transparent hover:border-black text-gray-600 hover:text-black",
-    socialButtonsBlockButtonText: "font-semibold",
-    formButtonReset:
-      "bg-white border border-solid border-gray-200 hover:bg-transparent hover:border-black text-gray-500 hover:text-black",
-    membersPageInviteButton:
-      "bg-black border border-black border-solid hover:bg-white hover:text-black",
-    card: "bg-[#fafafa]",
+    formButtonPrimary: "bg-black hover:bg-gray-800",
+    footerActionLink: "text-black hover:text-gray-800",
   },
 } satisfies Appearance;
 
@@ -42,19 +28,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={`${geistSans.variable} ${geistMono.variable}`} suppressHydrationWarning>
-      <head>
-        <Script 
-          src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-core.min.js" 
-          strategy="afterInteractive"
-        />
-        <Script 
-          src="https://cdn.jsdelivr.net/npm/prismjs@1/plugins/autoloader/prism-autoloader.min.js" 
-          strategy="afterInteractive"
-        />
-      </head>
-      <ClerkProvider appearance={clerkAppearanceObject}>
-        <body className="min-h-screen flex flex-col antialiased" suppressHydrationWarning>
+    <html lang="en" className={geistSans.variable} suppressHydrationWarning>
+      <ClerkProvider appearance={clerkAppearance}>
+        <body className="min-h-screen bg-background">
           <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
             {children}
           </ThemeProvider>
