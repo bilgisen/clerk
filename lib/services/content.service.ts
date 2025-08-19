@@ -1,6 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
 import { randomUUID } from 'crypto';
-import { createToken } from '../auth';
 
 export type EbookFormat = 'epub' | 'mobi' | 'pdf' | 'html' | 'docx';
 
@@ -15,7 +14,7 @@ export class ContentService {
   private static async getAuthenticatedUserId() {
     const session = await auth();
     if (!session?.userId) {
-      throw new Error('Kullanıcı girişi gerekli');
+      throw new Error('Authentication required');
     }
     return session.userId;
   }
@@ -26,20 +25,7 @@ export class ContentService {
     
     // Validate content
     if (!params.content || params.content.trim().length < 10) {
-      throw new Error('İçerik çok kısa');
-    }
-
-    // Create a JWT token for this content generation job
-    const tokenData = await createToken(userId, {
-      metadata: {
-        contentId,
-        format: params.format,
-        ...(params.metadata || {})
-      }
-    });
-    
-    if (!tokenData?.token) {
-      throw new Error('Failed to generate authentication token');
+      throw new Error('Content is too short');
     }
 
     // Prepare content for processing
@@ -57,12 +43,10 @@ export class ContentService {
     // In a real app, you would save this to a database
     // await db.content.create({ data: contentData });
 
+    // Return the content ID for client-side use
     return {
       contentId,
-      jobToken: tokenData.token,
-      status: 'processing',
-      timestamp: new Date().toISOString(),
-      expiresAt: tokenData.expiresAt
+      status: 'pending'
     };
   }
 

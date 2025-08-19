@@ -8,7 +8,7 @@ const Navbar01Page = () => {
   return (
     <nav className="h-16 bg-background border-b sticky top-0 z-50">
       <div className="h-full flex items-center justify-between max-w-screen-xl mx-auto px-4 sm:px-6 lg:px-8">
-        <h1 className="text-lg font-bold"><a href="/dashboard">Matbu</a></h1>
+        <h1 className="text-lg font-bold"><a href="/dashboard">Bookshall</a></h1>
 
         {/* Desktop Menu */}
         <NavMenu className="hidden md:block" />
