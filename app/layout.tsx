@@ -3,6 +3,7 @@ import type { Appearance } from "@clerk/types";
 import "./globals.css";
 import localFont from "next/font/local";
 import { ThemeProvider } from "next-themes";
+import { headers } from 'next/headers';
 
 export const metadata = {
   title: "Bookshall - Document Management System",
@@ -22,14 +23,21 @@ const clerkAppearance = {
   },
 } satisfies Appearance;
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  // Get the nonce from headers in a way that works with Next.js 13+
+  const nonce = (await headers()).get('x-nonce') || '';
+  
   return (
     <html lang="en" className={geistSans.variable} suppressHydrationWarning>
-      <ClerkProvider appearance={clerkAppearance}>
+      <ClerkProvider 
+        appearance={clerkAppearance}
+        nonce={nonce}
+        dynamic
+      >
         <body className="min-h-screen bg-background">
           <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
             {children}
