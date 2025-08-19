@@ -26,7 +26,6 @@ export default clerkMiddleware(
   async (auth, req) => {
     const { pathname } = req.nextUrl;
     const method = req.method;
-    const url = req.nextUrl.toString();
 
     console.log(
       `[Middleware] ${method} ${pathname}`,
@@ -83,7 +82,7 @@ export default clerkMiddleware(
         response.headers.set("x-auth-user-id", session.userId);
         return response;
       } catch (error) {
-        console.error("[Middleware] Error verifying Clerk session:", error);
+        console.error("[Middleware] Error verifying session:", error);
         return new NextResponse(
           JSON.stringify({
             error: "Authentication failed",
@@ -103,52 +102,26 @@ export default clerkMiddleware(
 
     if (isProtected) {
       try {
-        const session = await auth();
-        console.log("[Middleware] Auth result:", {
-          userId: session.userId,
-          sessionId: session.sessionId,
-          sessionClaims: session.sessionClaims,
-        });
-
-        if (!session?.userId) {
-          console.log("[Middleware] No user session found, redirecting");
-          const signInUrl = new URL("/sign-in", req.nextUrl.origin);
-          signInUrl.searchParams.set("redirect_url", pathname);
-          return NextResponse.redirect(signInUrl);
-        }
-
-        console.log(
-          `[Middleware] User ${session.userId} authenticated, allowing access`
-        );
-
-        if (pathname.startsWith("/api/")) {
-          const requestHeaders = new Headers(req.headers);
-          requestHeaders.set("x-user-id", session.userId);
-          requestHeaders.set("x-auth-method", "session");
-          return NextResponse.next({ request: { headers: requestHeaders } });
-        }
-
-        return NextResponse.next();
+        await auth.protect();
       } catch (error) {
-        console.error("[Middleware] Error in protected route handler:", error);
-        const signInUrl = new URL("/sign-in", req.nextUrl.origin);
-        signInUrl.searchParams.set("redirect_url", pathname);
-        return NextResponse.redirect(signInUrl);
+        console.error("[Middleware] Error protecting route:", error);
+        return new NextResponse(
+          JSON.stringify({
+            error: "Authentication required",
+            status: 401,
+            path: pathname,
+          }),
+          { status: 401, headers: { "Content-Type": "application/json" } }
+        );
       }
     }
 
     return NextResponse.next();
   },
   {
-    // ✅ Clerk ayarları → authorizedParties eklendi
-    authorizedParties: ["https://editor.bookshall.com"],
+    // Enable automatic CSP configuration for Vercel
+    contentSecurityPolicy: {
+      strict: true, // Enable strict CSP for better security
+    },
   }
 );
-
-// ✅ Middleware config
-export const config = {
-  matcher: [
-    "/((?!.*\\..*|_next).*)", // Match all routes except static files & _next
-    "/",
-  ],
-};
