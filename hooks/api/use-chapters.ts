@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChapterNode, ChapterOrderUpdate } from '@/types/dnd';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
+import { useAuth } from '@clerk/nextjs';
 import { Chapter, ChapterWithChildren } from '@/types/chapter';
 
 // Types
@@ -25,144 +26,249 @@ type UpdateChapterInput = {
   parentChapterId?: string | null;
 };
 
+import { fetchWithAuth } from '@/lib/api';
+
 // API functions
 /**
- * @deprecated Use fetchChaptersByBookSlug instead
+ * Fetches chapters for a book by its ID
+ * @param bookId The ID of the book
+ * @returns Promise with the list of chapters
  */
 const fetchChaptersByBook = async (bookId: string): Promise<ChapterNode[]> => {
-  // This is a fallback that will be removed in the future
-  // First try to get the book by ID to get its slug
-  const bookResponse = await fetch(`/api/books/by-id/${bookId}`, {
-    credentials: 'include',
-  });
-  
-  if (!bookResponse.ok) {
-    const error = await bookResponse.json();
-    throw new Error(error.message || 'Failed to fetch book details');
-  }
-  
-  const book = await bookResponse.json();
-  
-  // Now fetch chapters using the slug
-  return fetchChaptersByBookSlug(book.slug);
-};
-
-const fetchChaptersByBookSlug = async (bookSlug: string): Promise<ChapterWithChildren[]> => {
-  const response = await fetch(`/api/books/by-slug/${bookSlug}/chapters`, {
-    credentials: 'include',
-  });
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.message || 'Failed to fetch chapters by slug');
-  }
-  return response.json();
-};
-
-const fetchChapterBySlug = async (bookSlug: string, chapterId: string): Promise<Chapter> => {
-  const response = await fetch(`/api/books/by-slug/${bookSlug}/chapters/${chapterId}`, {
-    credentials: 'include',
-  });
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.message || 'Failed to fetch chapter');
-  }
-  return response.json();
-};
-
-const createChapter = async (data: CreateChapterInput): Promise<ChapterNode> => {
-  const response = await fetch(`/api/books/${data.bookId}/chapters`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(data),
-  });
-  
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.message || 'Failed to create chapter');
-  }
-  
-  return response.json();
-};
-
-const updateChapter = async ({ id, ...data }: UpdateChapterInput): Promise<ChapterNode> => {
-  const response = await fetch(`/api/chapters/${id}`, {
-    method: 'PATCH',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(data),
-  });
-  
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.message || 'Failed to update chapter');
-  }
-  
-  return response.json();
-};
-
-const deleteChapter = async (id: string): Promise<{ success: boolean }> => {
-  const response = await fetch(`/api/chapters/${id}`, {
-    method: 'DELETE',
-  });
-  
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.message || 'Failed to delete chapter');
-  }
-  
-  return { success: true };
-};
-
-const updateChapterOrder = async (updates: ChapterOrderUpdate[]): Promise<{ success: boolean }> => {
   try {
-    console.log('Updating chapter order with:', updates);
+    const { getToken } = useAuth();
+    const token = await getToken();
     
-    // Format updates to match the server's expected format
-    // Note: book_id is not part of ChapterOrderUpdate, so we'll add it from the URL params
-    const formattedUpdates = updates.map(update => ({
-      id: update.id,
-      order: update.order,
-      level: update.level,
-      parent_chapter_id: update.parent_chapter_id,
-      // The server will add the book_id from the URL params
-    }));
+    if (!token) {
+      throw new Error('No authentication token found');
+    }
     
-    // Wrap updates in an object with an 'updates' property to match server expectation
-    const response = await fetch('/api/chapters/order', {
-      method: 'PATCH',
+    const response = await fetch(`/api/books/${bookId}/chapters`, {
       headers: {
+        'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json',
       },
       credentials: 'include',
-      body: JSON.stringify({ updates: formattedUpdates }), // Wrap in { updates: [...] }
     });
     
-    let responseData;
-    try {
-      responseData = await response.json();
-    } catch (error) {
-      console.error('Failed to parse response:', error);
-      throw new Error('Invalid response from server');
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.message || 'Failed to fetch chapters');
     }
+    
+    return response.json();
+  } catch (error) {
+    console.error('Error fetching chapters:', error);
+    throw error;
+  }
+};
+
+/**
+ * Fetches chapters for a book by its slug
+ * @param bookSlug The slug of the book
+ * @returns Promise with the hierarchical list of chapters
+ */
+const fetchChaptersByBookSlug = async (bookSlug: string): Promise<ChapterWithChildren[]> => {
+  try {
+    const { getToken } = useAuth();
+    const token = await getToken();
+    
+    if (!token) {
+      throw new Error('No authentication token found');
+    }
+    
+    const response = await fetch(`/api/books/by-slug/${bookSlug}/chapters`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      credentials: 'include',
+    });
     
     if (!response.ok) {
-      console.error('Error updating chapter order:', {
-        status: response.status,
-        statusText: response.statusText,
-        response: responseData,
-        requestBody: formattedUpdates
-      });
-      
-      throw new Error(
-        responseData?.message || 
-        responseData?.error || 
-        `Failed to update chapter order: ${response.status} ${response.statusText}`
-      );
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.message || 'Failed to fetch chapters by slug');
     }
     
+    return await response.json();
+  } catch (error) {
+    console.error('Error fetching chapters by slug:', error);
+    throw error;
+  }
+};
+
+/**
+ * Fetches a single chapter by book slug and chapter ID
+ * @param bookSlug The slug of the book
+ * @param chapterId The ID of the chapter
+ * @returns Promise with the chapter data
+ */
+const fetchChapterBySlug = async (bookSlug: string, chapterId: string): Promise<Chapter> => {
+  try {
+    const { getToken } = useAuth();
+    const token = await getToken();
+    
+    if (!token) {
+      throw new Error('No authentication token found');
+    }
+    
+    const response = await fetch(`/api/books/by-slug/${bookSlug}/chapters/${chapterId}`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      credentials: 'include',
+    });
+    
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.message || 'Failed to fetch chapter');
+    }
+    
+    return await response.json();
+  } catch (error) {
+    console.error('Error fetching chapter:', error);
+    throw error;
+  }
+};
+
+/**
+ * Creates a new chapter
+ * @param data The chapter data to create
+ * @returns Promise with the created chapter
+ */
+const createChapter = async (data: CreateChapterInput): Promise<ChapterNode> => {
+  try {
+    const { getToken } = useAuth();
+    const token = await getToken();
+    
+    if (!token) {
+      throw new Error('No authentication token found');
+    }
+    
+    const response = await fetch(`/api/books/${data.bookId}/chapters`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      credentials: 'include',
+      body: JSON.stringify(data),
+    });
+    
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.message || 'Failed to create chapter');
+    }
+    
+    return await response.json();
+  } catch (error) {
+    console.error('Error creating chapter:', error);
+    throw error;
+  }
+};
+
+const updateChapter = async ({ id, ...data }: UpdateChapterInput): Promise<ChapterNode> => {
+  try {
+    const { getToken } = useAuth();
+    const token = await getToken();
+    
+    if (!token) {
+      throw new Error('No authentication token found');
+    }
+    
+    const response = await fetch(`/api/chapters/${id}`, {
+      method: 'PATCH',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      credentials: 'include',
+      body: JSON.stringify(data),
+    });
+    
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.message || 'Failed to update chapter');
+    }
+    
+    return await response.json();
+  } catch (error) {
+    console.error('Error updating chapter:', error);
+    throw error;
+  }
+};
+
+const deleteChapter = async (id: string): Promise<{ success: boolean }> => {
+  try {
+    const { getToken } = useAuth();
+    const token = await getToken();
+    
+    if (!token) {
+      throw new Error('No authentication token found');
+    }
+    
+    const response = await fetch(`/api/chapters/${id}`, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      credentials: 'include',
+    });
+    
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.message || 'Failed to delete chapter');
+    }
+    
+    return await response.json();
+  } catch (error) {
+    console.error('Error deleting chapter:', error);
+    throw error;
+  }
+};
+
+interface UpdateChapterOrderParams {
+  updates: ChapterOrderUpdate[];
+  token: string;
+}
+
+const updateChapterOrder = async ({ updates, token }: UpdateChapterOrderParams): Promise<{ success: boolean }> => {
+  try {
+    if (!token) {
+      throw new Error('No authentication token provided');
+    }
+    
+    console.log('Updating chapter order with:', updates);
+    
+    const formattedUpdates = updates.map(update => ({
+      id: update.id,
+      order: update.order,
+      parent_chapter_id: update.parent_chapter_id || null,
+      level: update.level || 0,
+    }));
+
+    const response = await fetch(`/api/chapters/reorder`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      credentials: 'include',
+      body: JSON.stringify({ chapters: formattedUpdates }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      const errorMessage = error.message || 
+                         error.error || 
+                         `Failed to update chapter order: ${response.status} ${response.statusText}`;
+      console.error('Failed to update chapter order:', errorMessage);
+      throw new Error(errorMessage);
+    }
+    
+    const responseData = await response.json();
     console.log('Successfully updated chapter order:', responseData);
     return { success: true };
   } catch (error) {
@@ -287,10 +393,17 @@ export function useDeleteChapter(bookId: string) {
 
 export function useUpdateChapterOrder(bookId: string) {
   const queryClient = useQueryClient();
+  const { getToken } = useAuth();
   
   return useMutation({
-    mutationFn: updateChapterOrder,
-    onMutate: async (updates) => {
+    mutationFn: async (updates: ChapterOrderUpdate[]) => {
+      const token = await getToken();
+      if (!token) {
+        throw new Error('No authentication token found');
+      }
+      return updateChapterOrder({ updates, token });
+    },
+    onMutate: async (updates: ChapterOrderUpdate[]) => {
       await queryClient.cancelQueries({ queryKey: ['chapters', bookId] });
       
       const previousChapters = queryClient.getQueryData<ChapterNode[]>(['chapters', bookId]);
