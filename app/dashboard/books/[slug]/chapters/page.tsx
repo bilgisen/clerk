@@ -9,11 +9,11 @@ import { Loader2, Plus, AlertCircle, CheckCircle2, BookOpen, RefreshCw } from 'l
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { BooksMenu } from '@/components/books/books-menu';
 import dynamic from 'next/dynamic';
-import type { ChapterNode } from '@/components/books/chapters/chapter-tree-wrapper';
 import { useChapters, useUpdateChapterOrder } from '@/hooks/api/use-chapters';
+import type { ChapterNode } from '@/components/books/chapters/chapter-tree-wrapper';
 
 // Extend the ChapterNode type with additional properties needed by the page
-interface ExtendedChapterNode extends Omit<ChapterNode, 'children'> {
+interface ExtendedChapterNode extends ChapterNode {
   children?: ExtendedChapterNode[];
   bookId?: string;
   content?: string;
@@ -29,8 +29,8 @@ interface Book {
 }
 
 interface ChapterTreeWrapperProps {
-  initialData: ChapterNode[];
-  onReorder?: (updated: ChapterNode[]) => void;
+  initialData: ExtendedChapterNode[];
+  onReorder?: (updated: ExtendedChapterNode[]) => void;
 }
 
 // Dynamic import of drag-drop tree wrapper
@@ -70,43 +70,92 @@ export default function ChaptersPage() {
   const { data: chapters = [], isLoading, isError, error, refetch } = useChapters(book?.id || '');
   const { mutateAsync: updateChapterOrder } = useUpdateChapterOrder(book?.id || '');
 
-  // Process chapters into hierarchical tree
+  // Process chapters into hierarchical tree with all required properties
   const processedChapters = useMemo<ExtendedChapterNode[]>(() => {
     if (!chapters.length) return [];
     
     const map: Record<string, ExtendedChapterNode> = {};
     const roots: ExtendedChapterNode[] = [];
 
+    // First pass: create all nodes with required properties
     chapters.forEach(ch => {
-      map[ch.id] = { ...ch, children: [], bookId: book?.id };
+      const chapterData = ch as ChapterNode & { isDirectory?: boolean; className?: string; subtitle?: string };
+      const node: ExtendedChapterNode = {
+        // Base ChapterNode properties
+        id: ch.id,
+        title: ch.title || 'Untitled Chapter',
+        book_id: ch.book_id || book?.id || '',
+        parent_chapter_id: ch.parent_chapter_id || null,
+        order: ch.order ?? 0,
+        level: ch.level ?? 0,
+        slug: ch.slug,
+        created_at: ch.created_at,
+        updated_at: ch.updated_at,
+        
+        // Extended properties
+        children: [],
+        bookId: book?.id,
+        expanded: false,
+        isDirectory: chapterData.isDirectory ?? false,
+        disableDrag: false,
+        className: chapterData.className,
+        subtitle: chapterData.subtitle,
+        
+        // Optional properties from ChapterNode
+        isEditing: ch.isEditing,
+        isExpanded: ch.isExpanded
+      };
+      
+      map[ch.id] = node;
     });
 
+    // Second pass: build the tree
     chapters.forEach(ch => {
       const node = map[ch.id];
       const parentId = ch.parent_chapter_id;
       if (parentId && map[parentId]) {
+        map[parentId].children = map[parentId].children || [];
         map[parentId].children!.push(node);
       } else {
         roots.push(node);
       }
     });
 
+    // Sort the tree by order
     const sortTree = (nodes: ExtendedChapterNode[]): ExtendedChapterNode[] =>
       nodes
-        .sort((a,b) => (a.order ?? 0) - (b.order ?? 0))
-        .map(n => ({ ...n, children: n.children ? sortTree(n.children) : [] }));
+        .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+        .map(n => ({
+          ...n,
+          children: n.children ? sortTree(n.children) : [],
+          expanded: n.expanded ?? false,
+          isDirectory: n.isDirectory ?? false,
+          disableDrag: n.disableDrag ?? false
+        }));
 
     return sortTree(roots);
   }, [chapters, book?.id]);
 
   // Handle saving updated chapter order
-  const handleSave = useCallback(async (updatedChapters: ChapterNode[]) => {
+  const handleSave = useCallback(async (updatedChapters: ExtendedChapterNode[]) => {
     try {
-      const updates: Array<{ id: string; order: number; level: number; parent_chapter_id: string | null }> = [];
+      const updates: Array<{ 
+        id: string; 
+        order: number; 
+        level: number; 
+        parent_chapter_id: string | null; 
+        book_id: string;
+      }> = [];
 
-      const collectUpdates = (nodes: ChapterNode[], parentId: string | null = null, level = 0) => {
+      const collectUpdates = (nodes: ExtendedChapterNode[], parentId: string | null = null, level = 0) => {
         nodes.forEach((node, idx) => {
-          updates.push({ id: node.id, order: idx, level, parent_chapter_id: parentId });
+          updates.push({ 
+            id: node.id, 
+            order: idx, 
+            level, 
+            parent_chapter_id: parentId,
+            book_id: node.book_id || book?.id || ''
+          });
           if (node.children?.length) collectUpdates(node.children, node.id, level + 1);
         });
       };
@@ -199,45 +248,64 @@ export default function ChaptersPage() {
       <div className="w-full p-8">
         {processedChapters.length > 0 ? (
           <ChapterTreeWrapper 
-            initialData={processedChapters.map(ch => ({
-              id: ch.id,
-              title: ch.title || `Chapter ${ch.order + 1}`,
-              children: (ch.children || []).map(child => ({
+            initialData={processedChapters.map(ch => {
+              // Map children to ExtendedChapterNode
+              const childrenNodes: ExtendedChapterNode[] = (ch.children || []).map(child => ({
+                // Base ChapterNode properties
                 id: child.id,
                 title: child.title || `Chapter ${child.order + 1}`,
+                book_id: child.book_id || book?.id || '',
+                parent_chapter_id: child.parent_chapter_id || null,
+                order: child.order || 0,
+                level: child.level || 0,
+                slug: child.slug || `chapter-${child.id.substring(0, 8)}`,
+                created_at: child.created_at || new Date().toISOString(),
+                updated_at: child.updated_at || new Date().toISOString(),
+                
+                // Extended properties
                 children: [],
+                bookId: book?.id,
                 expanded: false,
                 isDirectory: false,
                 disableDrag: false,
-                order: child.order || 0,
-                level: child.level || 0,
                 className: 'chapter-node',
                 subtitle: `Order: ${child.order || 0}`,
-                book_id: child.book_id || book?.id || '',
-                parent_chapter_id: child.parent_chapter_id || null,
-                slug: child.slug || `chapter-${child.id.substring(0, 8)}`,
-                created_at: child.created_at || new Date().toISOString(),
-                updated_at: child.updated_at || new Date().toISOString()
-              })) as ChapterNode[],
-              expanded: Boolean(ch.isExpanded),
-              isDirectory: Boolean(ch.children && ch.children.length > 0),
-              order: ch.order || 0,
-              level: ch.level || 0,
-              disableDrag: false,
-              className: 'chapter-node',
-              subtitle: `Order: ${ch.order || 0}`,
-              book_id: ch.book_id || book?.id || '',
-              parent_chapter_id: ch.parent_chapter_id || null,
-              slug: ch.slug || `chapter-${ch.id.substring(0, 8)}`,
-              created_at: ch.created_at || new Date().toISOString(),
-              updated_at: ch.updated_at || new Date().toISOString()
-            }))}
-            onReorder={(updatedChapters) => {
-              // Handle chapter reordering here
-              console.log('Chapters reordered:', updatedChapters);
-              // You can add your reorder logic here
-              // For example: handleChapterReorder(updatedChapters);
-            }}
+                
+                // Optional properties
+                isEditing: child.isEditing,
+                isExpanded: child.isExpanded,
+                content: child.content
+              }));
+              
+              // Return parent node with properly typed children
+              return {
+                // Base ChapterNode properties
+                id: ch.id,
+                title: ch.title || `Chapter ${ch.order + 1}`,
+                book_id: ch.book_id || book?.id || '',
+                parent_chapter_id: ch.parent_chapter_id || null,
+                order: ch.order || 0,
+                level: ch.level || 0,
+                slug: ch.slug || `chapter-${ch.id.substring(0, 8)}`,
+                created_at: ch.created_at || new Date().toISOString(),
+                updated_at: ch.updated_at || new Date().toISOString(),
+                
+                // Extended properties
+                children: childrenNodes,
+                bookId: book?.id,
+                expanded: Boolean(ch.isExpanded),
+                isDirectory: childrenNodes.length > 0,
+                disableDrag: false,
+                className: 'chapter-node',
+                subtitle: `Order: ${ch.order || 0}`,
+                
+                // Optional properties
+                isEditing: ch.isEditing,
+                isExpanded: ch.isExpanded,
+                content: ch.content
+              };
+            })}
+            onReorder={handleSave}
           />
         ) : (
           <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
