@@ -1,196 +1,47 @@
 "use client";
 
-import { useCallback, useMemo, useState, useEffect } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import {
-  DndContext,
-  DragEndEvent,
-  KeyboardSensor,
-  PointerSensor,
-  closestCenter,
-  useSensor,
-  useSensors,
-} from "@dnd-kit/core";
-import {
-  SortableContext,
-  arrayMove,
-  sortableKeyboardCoordinates,
-  verticalListSortingStrategy,
-} from "@dnd-kit/sortable";
-import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
-import { ChapterNode } from "@/types/chapters";
-import { ChapterTreeItem } from "@/components/chapters/ChapterTreeItem";
-import { Loader2 } from "lucide-react";
-import { toast } from "sonner";
-import { sortByOrder } from "@/lib/tree-utils";
+  Tree,
+  NodeModel,
+  DropOptions,
+} from "@minoru/react-dnd-treeview";
+import { ChapterTreeItem, ChapterNode } from "./ChapterTreeItem";
 
-// Match the API's expected format
-export interface ChapterUpdate {
-  id: string;
-  order: number;
-  level: number;
-  parentChapterId: string | null; // Match API's expected format
-}
+const initialTree: NodeModel<ChapterNode>[] = [
+  { id: 1, parent: 0, droppable: true, text: "Bölüm 1", data: { id: "1", title: "Giriş" } },
+  { id: 2, parent: 1, droppable: false, text: "Alt bölüm", data: { id: "2", title: "Ön Bilgi" } },
+  { id: 3, parent: 0, droppable: true, text: "Bölüm 2", data: { id: "3", title: "Konu" } },
+];
 
-interface ChapterTreeProps {
-  bookId: string;
-  chapters: ChapterNode[];
-  onSelect?: (chapterId: string) => void;
-  selectedId?: string;
-  onSave?: (updates: ChapterUpdate[]) => Promise<void>;
-}
+export function ChapterTreeWrapper() {
+  const [treeData, setTreeData] = useState<NodeModel<ChapterNode>[]>(initialTree);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
-export function ChapterTree({
-  bookId,
-  chapters,
-  onSelect,
-  selectedId,
-  onSave,
-}: ChapterTreeProps) {
-  const [items, setItems] = useState<ChapterNode[]>(() => [...chapters].sort(sortByOrder));
-  const queryClient = useQueryClient();
-
-  useEffect(() => {
-    setItems([...chapters].sort(sortByOrder));
-  }, [chapters]);
-
-  const reorderMutation = useMutation({
-    mutationFn: async (updates: ChapterUpdate[]) => {
-      if (onSave) {
-        await onSave(updates);
-      } else {
-        const res = await fetch('/api/chapters/reorder', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ bookId, patches: updates })
-        });
-
-        if (!res.ok) {
-          const error = await res.json().catch(() => ({}));
-          throw new Error(error.message || 'Failed to reorder chapters');
-        }
-
-        return res.json();
-      }
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['chapters', bookId] });
-    },
-    onError: (error: Error) => {
-      toast.error(error.message || 'Failed to reorder chapters');
-      setItems([...chapters].sort(sortByOrder)); // rollback
-    },
-  });
-
-  const sensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: {
-        distance: 8,
-      },
-    }),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates,
-    })
-  );
-
-  const handleDragEnd = useCallback(
-    (event: DragEndEvent) => {
-      const { active, over } = event;
-
-      if (!over || active.id === over.id) return;
-
-      setItems((currentItems) => {
-        const oldIndex = currentItems.findIndex((item) => item.id === active.id);
-        const newIndex = currentItems.findIndex((item) => item.id === over!.id);
-
-        if (oldIndex === -1 || newIndex === -1) return currentItems;
-
-        const newItems = arrayMove(currentItems, oldIndex, newIndex);
-
-        // ✅ Assign new order, preserve parent_chapter_id
-        const updatedItems = newItems.map((item, index) => ({
-          ...item,
-          order: index,
-          // Only use existing snake_case field
-        }));
-
-        // Prepare update payload matching the API's expected format
-        const updates = updatedItems.map((item) => ({
-          id: item.id,
-          order: item.order,
-          level: item.level,
-          parentChapterId: item.parent_chapter_id, // Match API's expected format
-        }));
-
-        reorderMutation.mutate(updates);
-
-        return updatedItems;
-      });
-    },
-    [reorderMutation]
-  );
-
-  // Build a tree structure with proper children
-  const buildTree = (items: ChapterNode[], parentId: string | null = null): ChapterNode[] => {
-    return items
-      .filter(item => item.parent_chapter_id === parentId)
-      .sort(sortByOrder)
-      .map(item => {
-        const children = items.filter(child => child.parent_chapter_id === item.id);
-        return {
-          ...item,
-          children: children.length > 0 ? buildTree(items, item.id) : []
-        };
-      });
-  };
-
-  // Create a flat map for sorting context
-  const itemsForSorting = useMemo(() => {
-    return items.map((item) => ({
-      id: item.id,
-      order: item.order,
-      level: item.level,
-      parent_chapter_id: item.parent_chapter_id,
-    }));
-  }, [items]);
-
-  // Build the tree structure
-  const tree = useMemo(() => buildTree(items), [items]);
-
-  // Only render root level items, children will be rendered recursively by ChapterTreeItem
-  const renderTreeItems = () => {
-    return tree.map((node) => (
-      <ChapterTreeItem
-        key={node.id}
-        id={node.id}
-        chapter={node}
-        level={0}
-        onSelect={onSelect}
-        isSelected={selectedId === node.id}
-        selectedId={selectedId}
-        disabled={reorderMutation.isPending}
-      />
-    ));
+  const handleDrop = (newTree: NodeModel<ChapterNode>[], options: DropOptions) => {
+    setTreeData(newTree);
+    console.log("Dropped:", options);
   };
 
   return (
-    <div className="space-y-2">
-      <DndContext
-        sensors={sensors}
-        collisionDetection={closestCenter}
-        onDragEnd={handleDragEnd}
-        modifiers={[restrictToVerticalAxis]}
-      >
-        <SortableContext items={itemsForSorting} strategy={verticalListSortingStrategy}>
-          {renderTreeItems()}
-        </SortableContext>
-      </DndContext>
-      {reorderMutation.isPending && (
-        <div className="flex items-center justify-center p-4">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          <span className="ml-2 text-sm text-muted-foreground">Saving changes...</span>
+    <Tree
+      tree={treeData}
+      rootId={0}
+      render={(node, { depth }) => (
+        <ChapterTreeItem
+          id={String(node.id)}
+          chapter={node.data!}
+          level={depth}
+          isSelected={selectedId === String(node.id)}
+          onSelect={(id) => setSelectedId(id)}
+        />
+      )}
+      dragPreviewRender={(monitorProps) => (
+        <div className="px-2 py-1 rounded bg-muted shadow">
+          {monitorProps.item.text}
         </div>
       )}
-    </div>
+      onDrop={handleDrop}
+    />
   );
 }
