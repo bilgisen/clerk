@@ -4,8 +4,8 @@ import { ChapterTreeWrapper } from "@/components/chapters/ChapterTree";
 import { useChapters } from "@/hooks/api/use-chapters";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useQuery } from "@tanstack/react-query";
-import { fetchWithAuth } from "@/lib/api";
 import { ChapterNode } from "@/types/dnd";
+import { useAuth } from "@clerk/nextjs";
 
 interface Book {
   id: string;
@@ -14,10 +14,16 @@ interface Book {
 }
 
 export default function ChaptersPage({ params }: { params: { slug: string } }) {
+  const { getToken } = useAuth();
+
   const { data: book, isLoading: isLoadingBook, error: bookError } = useQuery({
     queryKey: ["book", params.slug],
     queryFn: async () => {
-      const response = await fetchWithAuth(`/api/books/by-slug/${params.slug}`);
+      const response = await fetch(`/api/books/by-slug/${params.slug}`, {
+        headers: {
+          'Authorization': `Bearer ${await getToken()}`,
+        },
+      });
       if (!response.ok) throw new Error("Failed to fetch book");
       return (await response.json()) as Book;
     },

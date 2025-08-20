@@ -26,38 +26,30 @@ type UpdateChapterInput = {
   parentChapterId?: string | null;
 };
 
-import { fetchWithAuth } from '@/lib/api';
-
 // API functions
 /**
  * Fetches chapters for a book by its ID
  * @param bookId The ID of the book
  * @returns Promise with the list of chapters
  */
-const fetchChaptersByBook = async (bookId: string, token: string): Promise<ChapterNode[]> => {
-  try {
-    if (!token) {
-      throw new Error('No authentication token provided');
-    }
-    
-    const response = await fetch(`/api/books/${bookId}/chapters`, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      credentials: 'include',
-    });
-    
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      throw new Error(error.message || 'Failed to fetch chapters');
-    }
-    
-    return response.json();
-  } catch (error) {
-    console.error('Error fetching chapters:', error);
-    throw error;
+const fetchChaptersByBook = async (bookId: string, getToken: () => Promise<string | null>): Promise<ChapterNode[]> => {
+  const token = await getToken();
+  if (!token) {
+    throw new Error('Not authenticated');
   }
+  
+  const response = await fetch(`/api/books/${bookId}/chapters`, {
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+  });
+  
+  if (!response.ok) {
+    throw new Error('Failed to fetch chapters');
+  }
+  
+  return response.json();
 };
 
 /**
@@ -65,30 +57,24 @@ const fetchChaptersByBook = async (bookId: string, token: string): Promise<Chapt
  * @param bookSlug The slug of the book
  * @returns Promise with the hierarchical list of chapters
  */
-const fetchChaptersByBookSlug = async (bookSlug: string, token: string): Promise<ChapterWithChildren[]> => {
-  try {
-    if (!token) {
-      throw new Error('No authentication token provided');
-    }
-    
-    const response = await fetch(`/api/books/by-slug/${bookSlug}/chapters`, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      credentials: 'include',
-    });
-    
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      throw new Error(error.message || 'Failed to fetch chapters');
-    }
-    
-    return response.json();
-  } catch (error) {
-    console.error('Error fetching chapters by slug:', error);
-    throw error;
+const fetchChaptersByBookSlug = async (bookSlug: string, getToken: () => Promise<string | null>): Promise<ChapterWithChildren[]> => {
+  const token = await getToken();
+  if (!token) {
+    throw new Error('Not authenticated');
   }
+  
+  const response = await fetch(`/api/books/by-slug/${bookSlug}/chapters`, {
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+  });
+  
+  if (!response.ok) {
+    throw new Error('Failed to fetch chapters by slug');
+  }
+  
+  return response.json();
 };
 
 /**
@@ -97,13 +83,12 @@ const fetchChaptersByBookSlug = async (bookSlug: string, token: string): Promise
  * @param chapterId The ID of the chapter
  * @returns Promise with the chapter data
  */
-const fetchChapterBySlug = async (bookSlug: string, chapterId: string): Promise<Chapter> => {
+const fetchChapterBySlug = async (bookSlug: string, chapterId: string, getToken: () => Promise<string | null>): Promise<Chapter> => {
   try {
-    const { getToken } = useAuth();
     const token = await getToken();
     
     if (!token) {
-      throw new Error('No authentication token found');
+      throw new Error('Not authenticated');
     }
     
     const response = await fetch(`/api/books/by-slug/${bookSlug}/chapters/${chapterId}`, {
@@ -131,13 +116,12 @@ const fetchChapterBySlug = async (bookSlug: string, chapterId: string): Promise<
  * @param data The chapter data to create
  * @returns Promise with the created chapter
  */
-const createChapter = async (data: CreateChapterInput): Promise<ChapterNode> => {
+const createChapter = async (data: CreateChapterInput, getToken: () => Promise<string | null>): Promise<ChapterNode> => {
   try {
-    const { getToken } = useAuth();
     const token = await getToken();
     
     if (!token) {
-      throw new Error('No authentication token found');
+      throw new Error('Not authenticated');
     }
     
     const response = await fetch(`/api/books/${data.bookId}/chapters`, {
@@ -162,13 +146,12 @@ const createChapter = async (data: CreateChapterInput): Promise<ChapterNode> => 
   }
 };
 
-const updateChapter = async ({ id, ...data }: UpdateChapterInput): Promise<ChapterNode> => {
+const updateChapter = async ({ id, ...data }: UpdateChapterInput, getToken: () => Promise<string | null>): Promise<ChapterNode> => {
   try {
-    const { getToken } = useAuth();
     const token = await getToken();
     
     if (!token) {
-      throw new Error('No authentication token found');
+      throw new Error('Not authenticated');
     }
     
     const response = await fetch(`/api/chapters/${id}`, {
@@ -193,13 +176,12 @@ const updateChapter = async ({ id, ...data }: UpdateChapterInput): Promise<Chapt
   }
 };
 
-const deleteChapter = async (id: string): Promise<{ success: boolean }> => {
+const deleteChapter = async (id: string, getToken: () => Promise<string | null>): Promise<{ success: boolean }> => {
   try {
-    const { getToken } = useAuth();
     const token = await getToken();
     
     if (!token) {
-      throw new Error('No authentication token found');
+      throw new Error('Not authenticated');
     }
     
     const response = await fetch(`/api/chapters/${id}`, {
@@ -275,17 +257,13 @@ const updateChapterOrder = async ({ updates, token }: UpdateChapterOrderParams):
 // Hook to fetch all chapters for a book by ID
 export const useChapters = (bookId: string) => {
   const { getToken } = useAuth();
+  const queryClient = useQueryClient();
   
   return useQuery<ChapterNode[], Error>({
     queryKey: ['chapters', bookId],
-    queryFn: async () => {
-      const token = await getToken();
-      if (!token) {
-        throw new Error('No authentication token found');
-      }
-      return fetchChaptersByBook(bookId, token);
-    },
+    queryFn: () => fetchChaptersByBook(bookId, getToken),
     enabled: !!bookId,
+    retry: 1,
   });
 };
 
@@ -295,32 +273,33 @@ export const useChaptersBySlug = (bookSlug: string) => {
   
   return useQuery<ChapterWithChildren[], Error>({
     queryKey: ['chapters', bookSlug],
-    queryFn: async () => {
-      const token = await getToken();
-      if (!token) {
-        throw new Error('No authentication token found');
-      }
-      return fetchChaptersByBookSlug(bookSlug, token);
-    },
+    queryFn: () => fetchChaptersByBookSlug(bookSlug, getToken),
     enabled: !!bookSlug,
   });
 };
 
 // Hook to fetch a single chapter by book slug and chapter ID
 export const useChapter = (bookSlug: string, chapterId: string) => {
+  const { getToken } = useAuth();
+  
   return useQuery<Chapter, Error>({
     queryKey: ['chapter', bookSlug, chapterId],
-    queryFn: () => fetchChapterBySlug(bookSlug, chapterId),
+    queryFn: () => fetchChapterBySlug(bookSlug, chapterId, getToken),
     enabled: !!bookSlug && !!chapterId,
   });
 };
 
-export function useCreateChapter(bookId: string) {
+export const useCreateChapter = (bookId: string) => {
   const queryClient = useQueryClient();
   const router = useRouter();
+  const { getToken } = useAuth();
   
   return useMutation({
-    mutationFn: createChapter,
+    mutationFn: async (data: CreateChapterInput) => {
+      const token = await getToken();
+      if (!token) throw new Error('Not authenticated');
+      return createChapter(data, getToken);
+    },
     onSuccess: (data) => {
       // Invalidate and refetch the chapters list
       queryClient.invalidateQueries({ queryKey: ['chapters', bookId] });
@@ -333,12 +312,17 @@ export function useCreateChapter(bookId: string) {
   });
 }
 
-export function useUpdateChapter(bookId: string) {
+export const useUpdateChapter = (bookId: string) => {
   const queryClient = useQueryClient();
+  const { getToken } = useAuth();
   
-  return useMutation({
-    mutationFn: updateChapter,
-    onMutate: async (updatedChapter) => {
+  return useMutation<ChapterNode, Error, UpdateChapterInput, { previousChapters: ChapterNode[] | undefined }>({
+    mutationFn: async (data: UpdateChapterInput) => {
+      const token = await getToken();
+      if (!token) throw new Error('Not authenticated');
+      return updateChapter(data, getToken);
+    },
+    onMutate: async (newChapter: UpdateChapterInput) => {
       // Cancel any outgoing refetches
       await queryClient.cancelQueries({ queryKey: ['chapters', bookId] });
       
@@ -346,22 +330,21 @@ export function useUpdateChapter(bookId: string) {
       const previousChapters = queryClient.getQueryData<ChapterNode[]>(['chapters', bookId]);
       
       // Optimistically update to the new value
-      if (previousChapters) {
-        queryClient.setQueryData<ChapterNode[]>(['chapters', bookId], (old) => 
-          old?.map((chapter) => 
-            chapter.id === updatedChapter.id ? { ...chapter, ...updatedChapter } : chapter
-          ) || []
-        );
-      }
+      queryClient.setQueryData<ChapterNode[]>(['chapters', bookId], (old) =>
+        old?.map((chapter) =>
+          chapter.id === newChapter.id ? { ...chapter, ...newChapter } : chapter
+        )
+      );
       
+      // Return a context object with the snapshotted value
       return { previousChapters };
     },
-    onError: (err, updatedChapter, context) => {
-      // Rollback on error
+    onError: (error: Error, variables: UpdateChapterInput, context?: { previousChapters: ChapterNode[] | undefined }) => {
+      // If the mutation fails, use the context returned from onMutate to roll back
       if (context?.previousChapters) {
         queryClient.setQueryData(['chapters', bookId], context.previousChapters);
       }
-      toast.error(`Error updating chapter: ${err.message}`);
+      toast.error(`Failed to update chapter: ${error.message}`);
     },
     onSettled: () => {
       // Always refetch after error or success
@@ -372,10 +355,15 @@ export function useUpdateChapter(bookId: string) {
 
 export function useDeleteChapter(bookId: string) {
   const queryClient = useQueryClient();
+  const { getToken } = useAuth();
   
-  return useMutation({
-    mutationFn: deleteChapter,
-    onMutate: async (chapterId) => {
+  return useMutation<{ success: boolean }, Error, string, { previousChapters: ChapterNode[] | undefined }>({
+    mutationFn: async (id: string) => {
+      const token = await getToken();
+      if (!token) throw new Error('Not authenticated');
+      return deleteChapter(id, getToken);
+    },
+    onMutate: async (chapterId: string) => {
       await queryClient.cancelQueries({ queryKey: ['chapters', bookId] });
       
       const previousChapters = queryClient.getQueryData<ChapterNode[]>(['chapters', bookId]);
@@ -389,11 +377,11 @@ export function useDeleteChapter(bookId: string) {
       
       return { previousChapters };
     },
-    onError: (err, chapterId, context) => {
+    onError: (error: Error, chapterId: string, context?: { previousChapters: ChapterNode[] | undefined }) => {
       if (context?.previousChapters) {
         queryClient.setQueryData(['chapters', bookId], context.previousChapters);
       }
-      toast.error(`Error deleting chapter: ${err.message}`);
+      toast.error(`Error deleting chapter: ${error.message}`);
     },
     onSuccess: () => {
       toast.success('Chapter deleted successfully');
