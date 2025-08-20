@@ -1,3 +1,4 @@
+// lib/tree-utils.ts
 import type { ChapterNode } from '@/types/chapters';
 
 export type FlatItem = ChapterNode & { index: number };

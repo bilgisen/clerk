@@ -6,11 +6,8 @@ import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { Loader2, Plus, AlertCircle, FileText, Folder, RefreshCw, CheckCircle2 } from 'lucide-react';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
-import { ChapterTree } from "@/components/chapters/ChapterTree";
+import { ChapterTree, type ChapterUpdate } from "@/components/chapters/ChapterTree";
 import { useChapters } from '@/hooks/api/use-chapters';
-import type { ChapterNode as DndChapterNode } from '@/types/dnd'; // Import with alias
-
-// Import the shared ChapterNode type
 import type { ChapterNode } from '@/types/dnd';
 
 // Type for chapters with children from the API
@@ -96,31 +93,27 @@ export default function ChaptersPage() {
     router.push(`/dashboard/books/${bookSlug}/chapters/${chapter.id}/edit`);
   }, [bookSlug, router]);
 
-  interface ChapterUpdate {
-    id: string;
-    order: number;
-    level: number;
-    parent_chapter_id: string | null;
-  }
-
-  const handleSave = useCallback(async (updates: Array<{
-    id: string;
-    order: number;
-    level: number;
-    parent_chapter_id: string | null;
-  }>) => {
+  const handleSave = useCallback(async (updates: Array<ChapterUpdate>) => {
     if (!book?.id) return;
     
     try {
       setIsSaving(true);
       
       // Send updates to the server
-      const response = await fetch(`/api/books/${book.id}/chapters/reorder`, {
+      const response = await fetch('/api/chapters/reorder', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ updates }),
+        body: JSON.stringify({
+          bookId: book.id,
+          patches: updates.map(update => ({
+            id: update.id,
+            order: update.order,
+            level: update.level,
+            parentChapterId: update.parentChapterId
+          }))
+        }),
       });
 
       if (!response.ok) {

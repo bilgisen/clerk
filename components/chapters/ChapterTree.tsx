@@ -22,14 +22,14 @@ import { ChapterNode } from "@/types/chapters";
 import { ChapterTreeItem } from "@/components/chapters/ChapterTreeItem";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { buildChildrenMap, flattenTree, getNewOrder, sortByOrder } from "@/lib/tree-utils";
+import { sortByOrder } from "@/lib/tree-utils";
 
-// ✅ Use snake_case to match your backend/ChapterNode
+// Match the API's expected format
 export interface ChapterUpdate {
   id: string;
   order: number;
   level: number;
-  parent_chapter_id: string | null; // ← Fixed: snake_case
+  parentChapterId: string | null; // Match API's expected format
 }
 
 interface ChapterTreeProps {
@@ -114,12 +114,12 @@ export function ChapterTree({
           // Only use existing snake_case field
         }));
 
-        // ✅ Prepare update payload with snake_case
-        const updates: ChapterUpdate[] = updatedItems.map((item) => ({
+        // Prepare update payload matching the API's expected format
+        const updates = updatedItems.map((item) => ({
           id: item.id,
           order: item.order,
           level: item.level,
-          parent_chapter_id: item.parent_chapter_id, // ← Correct field
+          parentChapterId: item.parent_chapter_id, // Match API's expected format
         }));
 
         reorderMutation.mutate(updates);
@@ -130,11 +130,18 @@ export function ChapterTree({
     [reorderMutation]
   );
 
-  const flatItems = useMemo(() => {
-    return flattenTree(items);
-  }, [items]);
+  // Build a tree structure
+  const buildTree = (items: ChapterNode[], parentId: string | null = null): ChapterNode[] => {
+    return items
+      .filter(item => item.parent_chapter_id === parentId)
+      .sort(sortByOrder)
+      .map(item => ({
+        ...item,
+        children: buildTree(items, item.id)
+      }));
+  };
 
-  // ✅ Use consistent snake_case in sorting context
+  // Create a flat map for sorting context
   const itemsForSorting = useMemo(() => {
     return items.map((item) => ({
       id: item.id,
@@ -143,6 +150,30 @@ export function ChapterTree({
       parent_chapter_id: item.parent_chapter_id,
     }));
   }, [items]);
+
+  // Build the tree structure
+  const tree = useMemo(() => buildTree(items), [items]);
+
+  // Recursive function to render tree items
+  const renderTreeItems = (nodes: ChapterNode[], level: number = 0) => {
+    return nodes.map((node) => (
+      <div key={node.id}>
+        <ChapterTreeItem
+          id={node.id}
+          chapter={node}
+          level={level}
+          onSelect={onSelect}
+          isSelected={selectedId === node.id}
+          disabled={reorderMutation.isPending}
+        />
+        {node.children && node.children.length > 0 && (
+          <div className="ml-4">
+            {renderTreeItems(node.children, level + 1)}
+          </div>
+        )}
+      </div>
+    ));
+  };
 
   return (
     <div className="space-y-2">
@@ -153,16 +184,7 @@ export function ChapterTree({
         modifiers={[restrictToVerticalAxis]}
       >
         <SortableContext items={itemsForSorting} strategy={verticalListSortingStrategy}>
-          {flatItems.map((item) => (
-            <ChapterTreeItem
-              key={item.id}
-              id={item.id}
-              chapter={item}
-              onSelect={onSelect}
-              isSelected={selectedId === item.id}
-              disabled={reorderMutation.isPending}
-            />
-          ))}
+          {renderTreeItems(tree)}
         </SortableContext>
       </DndContext>
       {reorderMutation.isPending && (
