@@ -28,6 +28,10 @@ export interface ChapterNode {
   isEditing?: boolean;
   /** Whether the chapter is currently expanded in the UI */
   isExpanded?: boolean;
+  /** Whether the chapter is a draft */
+  is_draft?: boolean;
+  /** The content of the chapter */
+  content?: string;
 }
 
 /**
