@@ -1,43 +1,80 @@
-'use client';
+"use client";
 
-import { useEffect, useState } from 'react';
-import { DndProvider } from 'react-dnd';
-import { HTML5Backend } from 'react-dnd-html5-backend';
-import { RdtChapterTree } from './rst-chapter-tree';
-import { ChapterNode } from '@/lib/services/chapter-tree';
+import { useState, useCallback } from "react";
+import SortableTree, { TreeItem } from "react-sortable-tree";
+import "react-sortable-tree/style.css";
 
-export interface ChapterTreeWrapperProps {
-  chapters: ChapterNode[];
-  onSave: (chapters: ChapterNode[]) => Promise<ChapterNode[] | void>;
-  onSaveSuccess?: () => void;
-  onEdit?: (id: string) => void;
-  onView?: (id: string) => void;
-  onDelete?: (id: string) => void | Promise<void>;
-  className?: string;
-  isSaving?: boolean;
+// Define the base TreeItem type that matches react-sortable-tree's expectations
+interface BaseTreeItem extends TreeItem {
+  title: string;
+  children?: BaseTreeItem[];
+  expanded?: boolean;
+  isDirectory?: boolean;
+  disableDrag?: boolean;
 }
 
-export function ChapterTreeWrapper(props: ChapterTreeWrapperProps) {
-  const [isMounted, setIsMounted] = useState(false);
+// Our custom ChapterNode type that extends the base TreeItem
+export interface ChapterNode extends BaseTreeItem {
+  id: string;
+  title: string;
+  children?: ChapterNode[];
+  order: number;
+  level: number;
+  expanded: boolean;
+  isDirectory: boolean;
+  disableDrag: boolean;
+  className?: string;
+  subtitle?: string;
+  book_id: string;
+  parent_chapter_id: string | null;
+  slug?: string;
+  created_at?: string;
+  updated_at?: string;
+}
 
-  // This is a workaround for Next.js SSR - wait for component to mount on client
-  useEffect(() => {
-    setIsMounted(true);
-    return () => setIsMounted(false);
+interface ChapterTreeWrapperProps {
+  initialData: ChapterNode[];
+  onReorder?: (updated: ChapterNode[]) => void;
+}
+
+export default function ChapterTreeWrapper({
+  initialData,
+  onReorder,
+}: ChapterTreeWrapperProps) {
+  const [treeData, setTreeData] = useState<ChapterNode[]>(initialData);
+
+  const handleChange = useCallback((data: TreeItem[]) => {
+    // Cast to ChapterNode[] since we know the shape matches
+    const chapterData = data as unknown as ChapterNode[];
+    setTreeData(chapterData);
+    onReorder?.(chapterData);
+    return null; // Required by react-sortable-tree
+  }, [onReorder]);
+
+  const handleMoveNode = useCallback((args: any) => {
+    const { node, nextParentNode, prevPath, nextPath } = args;
+    console.log("Moved node:", node);
+    console.log("New parent:", nextParentNode);
+    console.log("From path:", prevPath, "To path:", nextPath);
   }, []);
 
-  // Don't render DnD context during SSR
-  if (!isMounted) {
-    return (
-      <div className="flex items-center justify-center p-8">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-      </div>
-    );
-  }
-
   return (
-    <DndProvider backend={HTML5Backend}>
-      <RdtChapterTree {...props} />
-    </DndProvider>
+    <div style={{ height: 600 }}>
+      <SortableTree
+        treeData={treeData as any}
+        onChange={handleChange}
+        generateNodeProps={({ node }: { node: any }) => ({
+          title: node.title,
+        })}
+        onMoveNode={handleMoveNode}
+        canDrop={({ nextParent }: { nextParent: any }) => {
+          // Prevent dropping nodes into themselves or their own children
+          if (!nextParent) return true;
+          return nextParent.isDirectory !== false;
+        }}
+        canDrag={({ node }: { node: any }) => !node.disableDrag}
+        canNodeHaveChildren={(node: any) => node.isDirectory !== false}
+      />
+    </div>
   );
 }

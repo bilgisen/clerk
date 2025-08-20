@@ -1,97 +1,140 @@
-import type { ChapterNode } from '@/types/dnd';
-import { buildTree, flattenTree } from './tree-utils';
+"use client";
 
-export type { ChapterNode };
+import React, { useState, useEffect } from "react";
+import { DndContext, DragEndEvent, closestCenter } from "@dnd-kit/core";
+import { SortableContext, useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { moveItemToNewParentAndReorder } from "@/lib/services/tree-utils";
 
-/**
- * Calculates the level and order for each node in the tree
- * @param nodes Array of tree nodes
- * @returns Array of nodes with updated levels and orders
- */
-export function calculateLevelsAndOrders(nodes: any[], parentLevel: number = 0, startOrder: number = 0): any[] {
-  return nodes.map((node, index) => {
-    const order = startOrder + index;
-    const level = parentLevel;
-    
-    // Process children recursively if they exist
-    const children = node.children 
-      ? calculateLevelsAndOrders(node.children, level + 1, order * 100) 
-      : [];
-    
-    return {
-      ...node,
-      level,
-      order,
-      ...(children.length > 0 && { children })
-    };
-  });
+export interface ChapterNode {
+  id: string;
+  title: string;
+  order: number;
+  parentId: string | null;
+  children?: ChapterNode[];
+  book_id?: string;
+  created_at?: string;
+  updated_at?: string;
+  level?: number;
+  isEditing?: boolean;
+  isExpanded?: boolean;
+  content?: string;
 }
 
-/**
- * Converts a tree structure to a flat array of chapters
- * @param tree Tree structure to convert
- * @param bookId ID of the book these chapters belong to
- * @returns Flat array of chapter nodes
- */
-export function treeToChapters(tree: any[], bookId: string): ChapterNode[] {
-  const flatNodes: ChapterNode[] = [];
-  
-  function processNode(node: any, parentId: string | null = null) {
-    const { children, text, data, ...rest } = node;
-    
-    const chapter: ChapterNode = {
-      id: node.id,
-      title: text || data?.title || 'Untitled Chapter',
-      slug: data?.slug,
-      book_id: bookId,
-      parent_chapter_id: parentId,
-      order: node.order ?? 0,
-      level: node.level ?? 0,
-      created_at: data?.created_at || new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      isEditing: data?.isEditing ?? false,
-      isExpanded: data?.isExpanded ?? true,
-      ...(data || {})
-    };
-    
-    // Remove any undefined values to avoid overriding with undefined
-    Object.keys(chapter).forEach(key => {
-      if (chapter[key as keyof ChapterNode] === undefined) {
-        delete chapter[key as keyof ChapterNode];
-      }
-    });
-    
-    flatNodes.push(chapter);
-    
-    // Process children recursively
-    if (children && children.length > 0) {
-      children.forEach((child: any) => processNode(child, node.id));
-    }
-  }
-  
-  tree.forEach(node => processNode(node));
-  return flatNodes;
-}
+type ChapterTreeProps = {
+  initialChapters: ChapterNode[];
+  onChaptersChange?: (chapters: ChapterNode[]) => void;
+  onChapterSelect?: (chapter: ChapterNode) => void;
+  selectedChapterId?: string | null;
+};
 
-/**
- * Sorts tree data by visual order (based on the order property)
- * @param treeData Tree data to sort
- * @returns Sorted tree data
- */
-export function sortTreeDataByVisualOrder(treeData: any[]): any[] {
-  if (!treeData || !treeData.length) return [];
-  
-  // Sort the current level
-  const sorted = [...treeData].sort((a, b) => (a.order || 0) - (b.order || 0));
-  
-  // Recursively sort children
-  return sorted.map(node => ({
-    ...node,
-    ...(node.children && {
-      children: sortTreeDataByVisualOrder(node.children)
-    })
-  }));
-}
+const SortableChapterItem = ({ 
+  chapter, 
+  onSelect, 
+  isSelected 
+}: { 
+  chapter: ChapterNode; 
+  onSelect: (chapter: ChapterNode) => void; 
+  isSelected: boolean;
+}) => {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+  } = useSortable({ id: chapter.id });
 
-// Re-export other utilities
-export * from './tree-utils';
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
+  return (
+    <div 
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+      className={`flex items-center p-2 rounded cursor-move ${isSelected ? 'bg-blue-100' : 'hover:bg-gray-100'}`}
+      onClick={() => onSelect(chapter)}
+    >
+      <span className="mr-2">
+        {chapter.children?.length ? '📁' : '📄'}
+      </span>
+      <span className="flex-1">{chapter.title}</span>
+    </div>
+  );
+};
+
+export function ChapterTree({ 
+  initialChapters = [], 
+  onChaptersChange, 
+  onChapterSelect,
+  selectedChapterId 
+}: ChapterTreeProps) {
+  const [chapters, setChapters] = useState<ChapterNode[]>(initialChapters);
+
+  useEffect(() => {
+    setChapters(initialChapters);
+  }, [initialChapters]);
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over) return;
+    if (active.id === over.id) return;
+
+    const newParentId = over.data.current?.parentId ?? null;
+    const newIndex = over.data.current?.index ?? 0;
+
+    const updatedChapters = moveItemToNewParentAndReorder(
+      [...chapters],
+      active.id.toString(),
+      newParentId,
+      newIndex
+    );
+
+    setChapters(updatedChapters);
+    onChaptersChange?.(updatedChapters);
+  };
+
+  const renderChapter = (chapter: ChapterNode, parentId: string | null = null) => {
+    const hasChildren = chapter.children && chapter.children.length > 0;
+    const isSelected = selectedChapterId === chapter.id;
+
+    return (
+      <div key={chapter.id} className="pl-4">
+        <SortableChapterItem 
+          chapter={chapter}
+          onSelect={onChapterSelect || (() => {})}
+          isSelected={isSelected}
+        />
+        {hasChildren && (
+          <div className="ml-4">
+            <SortableContext items={chapter.children?.map(c => c.id) || []}>
+              {chapter.children?.map((child) => 
+                renderChapter(child, chapter.id)
+              )}
+            </SortableContext>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const rootChapters = chapters.filter(chapter => chapter.parentId === null);
+  const rootChapterIds = rootChapters.map(chapter => chapter.id);
+
+  return (
+    <DndContext
+      collisionDetection={closestCenter}
+      onDragEnd={handleDragEnd}
+    >
+      <div className="space-y-1">
+        <SortableContext items={rootChapterIds}>
+          {rootChapters.map((chapter) => renderChapter(chapter, null))}
+        </SortableContext>
+      </div>
+    </DndContext>
+  );
+}

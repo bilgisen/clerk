@@ -1,72 +1,57 @@
-// lib/utils/tree-utils.ts
-import type { ChapterNode } from '@/types/dnd';
+// lib/tree-utils.ts
+export type ChapterNode = {
+  id: string;
+  title: string;
+  parentId: string | null;
+  order: number;
+  level: number;
+};
 
-export function buildTree(flat: ChapterNode[]): ChapterNode[] {
-  const map = new Map<string, ChapterNode>();
-  const roots: ChapterNode[] = [];
-
-  flat.forEach(item => {
-    map.set(item.id, { ...item, children: [] });
-  });
-
-  map.forEach(item => {
-    if (item.parent_chapter_id) {
-      const parent = map.get(item.parent_chapter_id);
-      if (parent) {
-        parent.children!.push(item);
-      }
-    } else {
-      roots.push(item);
-    }
-  });
-
-  return roots;
-}
-
-export function flattenTree(tree: ChapterNode[], parentId: string | null = null): ChapterNode[] {
-  let result: ChapterNode[] = [];
-
-  tree.forEach((node, index) => {
-    const { children, ...rest } = node;
-    result.push({
-      ...rest,
-      parent_chapter_id: parentId,
-      order: index,
-    });
-
-    if (children && children.length > 0) {
-      result = result.concat(flattenTree(children, node.id));
-    }
-  });
-
-  return result;
-}
-
+/**
+ * Bir item'ı yeni parent altına taşı ve tüm order/level değerlerini normalize et
+ */
 export function moveItemToNewParentAndReorder(
-  items: ChapterNode[],
-  draggedId: string,
+  flat: ChapterNode[],
+  itemId: string,
   newParentId: string | null,
   newIndex: number
 ): ChapterNode[] {
-  let updatedItems = items.map(item =>
-    item.id === draggedId ? { ...item, parent_chapter_id: newParentId } : item,
-  );
+  let updated = [...flat];
 
-  const siblings = updatedItems
-    .filter(item => item.parent_chapter_id === newParentId && item.id !== draggedId)
-    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  // Item bul
+  const item = updated.find((ch) => ch.id === itemId);
+  if (!item) return updated;
 
-  siblings.splice(newIndex, 0, updatedItems.find(i => i.id === draggedId)!);
+  // Eski yerinden çıkar
+  updated = updated.filter((ch) => ch.id !== itemId);
 
-  const reorderedSiblings = siblings.map((item, index) => ({
-    ...item,
-    order: index,
-  }));
+  // Parent güncelle
+  item.parentId = newParentId;
 
-  updatedItems = updatedItems.map(item => {
-    const updated = reorderedSiblings.find(i => i.id === item.id);
-    return updated ?? item;
+  // Yeni parent'ın siblings listesi
+  const siblings = updated.filter((ch) => ch.parentId === newParentId);
+
+  // Yeni index'e ekle
+  siblings.splice(newIndex, 0, item);
+
+  // Siblings order normalize
+  siblings.forEach((s, idx) => {
+    s.order = idx;
   });
 
-  return updatedItems;
+  // Level’ları recursive hesapla
+  const recalcLevels = (nodes: ChapterNode[], parentId: string | null, level: number) => {
+    nodes
+      .filter((n) => n.parentId === parentId)
+      .sort((a, b) => a.order - b.order)
+      .forEach((n, idx) => {
+        n.order = idx;
+        n.level = level;
+        recalcLevels(nodes, n.id, level + 1);
+      });
+  };
+
+  recalcLevels(updated, null, 0);
+
+  return updated;
 }
