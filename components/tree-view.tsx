@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Collapsible,
@@ -57,13 +58,13 @@ export interface TreeViewItem {
 }
 
 export interface TreeViewIconMap {
-  [key: string]: React.ReactNode | undefined;
+  [key: string]: ReactNode | undefined;
 }
 
 export interface TreeViewMenuItem {
   id: string;
   label: string;
-  icon?: React.ReactNode;
+  icon?: ReactNode;
   action: (items: TreeViewItem[]) => void;
 }
 
@@ -80,7 +81,7 @@ export interface TreeViewProps {
     check: string;
     uncheck: string;
   };
-  getIcon?: (item: TreeViewItem, depth: number) => React.ReactNode;
+  getIcon?: (item: TreeViewItem, depth: number) => ReactNode;
   onSelectionChange?: (selectedItems: TreeViewItem[]) => void;
   onAction?: (action: string, items: TreeViewItem[]) => void;
   onCheckChange?: (item: TreeViewItem, checked: boolean) => void;
@@ -106,7 +107,7 @@ interface TreeItemProps {
   onSelect: (ids: Set<string>) => void;
   expandedIds: Set<string>;
   onToggleExpand: (id: string, isOpen: boolean) => void;
-  getIcon?: (item: TreeViewItem, depth: number) => React.ReactNode;
+  getIcon?: (item: TreeViewItem, depth: number) => ReactNode;
   onAction?: (action: string, items: TreeViewItem[]) => void;
   onAccessChange?: (item: TreeViewItem, hasAccess: boolean) => void;
   allItems: TreeViewItem[];

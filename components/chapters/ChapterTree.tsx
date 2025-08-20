@@ -1,5 +1,6 @@
 "use client";
 
+import * as React from "react";
 import TreeView, { TreeViewItem } from "@/components/tree-view";
 import { convertChaptersToTree, buildOrderPayload } from "@/lib/convert-chapters";
 import { ChapterNode as ApiChapterNode } from "@/types/dnd";
