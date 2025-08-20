@@ -34,13 +34,10 @@ import { fetchWithAuth } from '@/lib/api';
  * @param bookId The ID of the book
  * @returns Promise with the list of chapters
  */
-const fetchChaptersByBook = async (bookId: string): Promise<ChapterNode[]> => {
+const fetchChaptersByBook = async (bookId: string, token: string): Promise<ChapterNode[]> => {
   try {
-    const { getToken } = useAuth();
-    const token = await getToken();
-    
     if (!token) {
-      throw new Error('No authentication token found');
+      throw new Error('No authentication token provided');
     }
     
     const response = await fetch(`/api/books/${bookId}/chapters`, {
@@ -68,13 +65,10 @@ const fetchChaptersByBook = async (bookId: string): Promise<ChapterNode[]> => {
  * @param bookSlug The slug of the book
  * @returns Promise with the hierarchical list of chapters
  */
-const fetchChaptersByBookSlug = async (bookSlug: string): Promise<ChapterWithChildren[]> => {
+const fetchChaptersByBookSlug = async (bookSlug: string, token: string): Promise<ChapterWithChildren[]> => {
   try {
-    const { getToken } = useAuth();
-    const token = await getToken();
-    
     if (!token) {
-      throw new Error('No authentication token found');
+      throw new Error('No authentication token provided');
     }
     
     const response = await fetch(`/api/books/by-slug/${bookSlug}/chapters`, {
@@ -87,10 +81,10 @@ const fetchChaptersByBookSlug = async (bookSlug: string): Promise<ChapterWithChi
     
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
-      throw new Error(error.message || 'Failed to fetch chapters by slug');
+      throw new Error(error.message || 'Failed to fetch chapters');
     }
     
-    return await response.json();
+    return response.json();
   } catch (error) {
     console.error('Error fetching chapters by slug:', error);
     throw error;
@@ -280,18 +274,34 @@ const updateChapterOrder = async ({ updates, token }: UpdateChapterOrderParams):
 // Hooks
 // Hook to fetch all chapters for a book by ID
 export const useChapters = (bookId: string) => {
+  const { getToken } = useAuth();
+  
   return useQuery<ChapterNode[], Error>({
     queryKey: ['chapters', bookId],
-    queryFn: () => fetchChaptersByBook(bookId),
+    queryFn: async () => {
+      const token = await getToken();
+      if (!token) {
+        throw new Error('No authentication token found');
+      }
+      return fetchChaptersByBook(bookId, token);
+    },
     enabled: !!bookId,
   });
 };
 
 // Hook to fetch all chapters for a book by slug
 export const useChaptersBySlug = (bookSlug: string) => {
+  const { getToken } = useAuth();
+  
   return useQuery<ChapterWithChildren[], Error>({
     queryKey: ['chapters', bookSlug],
-    queryFn: () => fetchChaptersByBookSlug(bookSlug),
+    queryFn: async () => {
+      const token = await getToken();
+      if (!token) {
+        throw new Error('No authentication token found');
+      }
+      return fetchChaptersByBookSlug(bookSlug, token);
+    },
     enabled: !!bookSlug,
   });
 };

@@ -1,5 +1,6 @@
 "use client";
 
+import * as React from "react";
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,6 +14,9 @@ import {
   ChevronDown,
   Box,
   Search,
+  Info,
+  X,
+  Share2,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -21,16 +25,28 @@ import {
   ContextMenuItem,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
-import { X, Share2 } from "lucide-react";
 import {
   HoverCard,
   HoverCardContent,
   HoverCardTrigger,
 } from "@/components/ui/hover-card";
-import { Info } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
+
+/** dnd-kit */
+import {
+  DndContext,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+  DragStartEvent,
+  DragOverEvent,
+  useDroppable,
+  useDraggable,
+} from "@dnd-kit/core";
+import { CSS } from "@dnd-kit/utilities";
 
 export interface TreeViewItem {
   id: string;
@@ -70,6 +86,16 @@ export interface TreeViewProps {
   onCheckChange?: (item: TreeViewItem, checked: boolean) => void;
   iconMap?: TreeViewIconMap;
   menuItems?: TreeViewMenuItem[];
+
+  /** DnD: item taşındığında tetiklenir */
+  onMoveItem?: (
+    item: TreeViewItem,
+    newParentId: string | null,
+    newIndex: number
+  ) => void;
+
+  /** Ağaç her değiştiğinde (drag-drop sonrası) tüm ağaç döner */
+  onTreeChange?: (newTree: TreeViewItem[]) => void;
 }
 
 interface TreeItemProps {
@@ -89,9 +115,13 @@ interface TreeItemProps {
   iconMap?: TreeViewIconMap;
   menuItems?: TreeViewMenuItem[];
   getSelectedItems: () => TreeViewItem[];
+
+  /** DnD helpers */
+  parentId: string | null;
 }
 
-// Helper function to build a map of all items by ID
+/** ---- helpers ---- */
+
 const buildItemMap = (items: TreeViewItem[]): Map<string, TreeViewItem> => {
   const map = new Map<string, TreeViewItem>();
   const processItem = (item: TreeViewItem) => {
@@ -102,50 +132,124 @@ const buildItemMap = (items: TreeViewItem[]): Map<string, TreeViewItem> => {
   return map;
 };
 
-// Update the getCheckState function to work bottom-up
+const buildParentMap = (
+  items: TreeViewItem[],
+  parentId: string | null = null,
+  parentMap: Map<string, string | null> = new Map()
+) => {
+  items.forEach((it) => {
+    parentMap.set(it.id, parentId);
+    if (it.children?.length) buildParentMap(it.children, it.id, parentMap);
+  });
+  return parentMap;
+};
+
 const getCheckState = (
   item: TreeViewItem,
   itemMap: Map<string, TreeViewItem>
 ): "checked" | "unchecked" | "indeterminate" => {
-  // Get the original item from the map
   const originalItem = itemMap.get(item.id);
   if (!originalItem) return "unchecked";
-
-  // If it's a leaf node (no children), return its check state
   if (!originalItem.children || originalItem.children.length === 0) {
     return originalItem.checked ? "checked" : "unchecked";
   }
-
-  // Count the check states of immediate children
   let checkedCount = 0;
   let indeterminateCount = 0;
-
-  originalItem.children.forEach(child => {
+  originalItem.children.forEach((child) => {
     const childState = getCheckState(child, itemMap);
     if (childState === "checked") checkedCount++;
     if (childState === "indeterminate") indeterminateCount++;
   });
 
-  // Calculate parent state based on children states
   const totalChildren = originalItem.children.length;
-
-  // If all children are checked
-  if (checkedCount === totalChildren) {
-    return "checked";
-  }
-  // If any child is checked or indeterminate
-  if (checkedCount > 0 || indeterminateCount > 0) {
-    return "indeterminate";
-  }
-  // If no children are checked or indeterminate
+  if (checkedCount === totalChildren) return "checked";
+  if (checkedCount > 0 || indeterminateCount > 0) return "indeterminate";
   return "unchecked";
 };
 
-// Add this default icon map
 const defaultIconMap: TreeViewIconMap = {
   file: <Box className="h-4 w-4 text-red-600" />,
   folder: <Folder className="h-4 w-4 text-primary/80" />,
+  chapter: <Folder className="h-4 w-4 text-primary/80" />,
 };
+
+/** ağacı immutably taşı: itemId -> (newParentId, newIndex) */
+function moveInTree(
+  tree: TreeViewItem[],
+  itemId: string,
+  newParentId: string | null,
+  newIndex: number
+): TreeViewItem[] {
+  const clone = structuredClone(tree) as TreeViewItem[];
+
+  // node'u ve ebeveynini bul, çıkar
+  let targetNode: TreeViewItem | null = null;
+
+  const removeFromParent = (
+    items: TreeViewItem[],
+    parent: TreeViewItem | null
+  ): boolean => {
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      if (it.id === itemId) {
+        targetNode = it;
+        items.splice(i, 1);
+        return true;
+      }
+      if (it.children && removeFromParent(it.children, it)) return true;
+    }
+    return false;
+  };
+
+  removeFromParent(clone, null);
+  if (!targetNode) return clone;
+
+  // yeni ebeveyni bul, ilgili yere yerleştir
+  const insertTo = (items: TreeViewItem[], parentId: string | null) => {
+    if (parentId === null) {
+      const idx = Math.min(Math.max(newIndex, 0), items.length);
+      items.splice(idx, 0, targetNode!);
+      return true;
+    }
+    for (const it of items) {
+      if (it.id === parentId) {
+        if (!it.children) it.children = [];
+        const idx = Math.min(Math.max(newIndex, 0), it.children.length);
+        it.children.splice(idx, 0, targetNode!);
+        return true;
+      }
+      if (it.children && insertTo(it.children, parentId)) return true;
+    }
+    return false;
+  };
+
+  insertTo(clone, newParentId);
+  return clone;
+}
+
+/** görünür (expand edilmiş) düz liste */
+function flattenVisible(
+  items: TreeViewItem[],
+  expandedIds: Set<string>,
+  parentId: string | null = null,
+  depth = 0,
+  acc: Array<{
+    item: TreeViewItem;
+    parentId: string | null;
+    depth: number;
+    indexWithinParent: number;
+  }> = []
+) {
+  items.forEach((it, idx) => {
+    acc.push({ item: it, parentId, depth, indexWithinParent: idx });
+    if (it.children?.length && expandedIds.has(it.id)) {
+      flattenVisible(it.children, expandedIds, it.id, depth + 1, acc);
+    }
+  });
+  return acc;
+}
+
+/** ---- TreeItem (tek satır) ---- */
 
 function TreeItem({
   item,
@@ -164,24 +268,42 @@ function TreeItem({
   iconMap = defaultIconMap,
   menuItems,
   getSelectedItems,
-}: TreeItemProps): JSX.Element {
+  parentId,
+}: TreeItemProps): React.JSX.Element {
   const isOpen = expandedIds.has(item.id);
   const isSelected = selectedIds.has(item.id);
   const itemRef = useRef<HTMLDivElement>(null);
   const [selectionStyle, setSelectionStyle] = useState("");
 
-  // Get all visible items in order
+  /** dnd refs */
+  const {
+    setNodeRef: setDropRef,
+    isOver,
+  } = useDroppable({ id: item.id });
+
+  const {
+    attributes,
+    listeners,
+    setNodeRef: setDragRef,
+    transform,
+    isDragging,
+  } = useDraggable({ id: item.id });
+
+  const style = {
+    transform: CSS.Translate.toString(transform),
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  // görünür bloklar arası yuvarlatma
   const getVisibleItems = useCallback(
     (items: TreeViewItem[]): TreeViewItem[] => {
       let visibleItems: TreeViewItem[] = [];
-
-      items.forEach((item) => {
-        visibleItems.push(item);
-        if (item.children && expandedIds.has(item.id)) {
-          visibleItems = [...visibleItems, ...getVisibleItems(item.children)];
+      items.forEach((i) => {
+        visibleItems.push(i);
+        if (i.children && expandedIds.has(i.id)) {
+          visibleItems = [...visibleItems, ...getVisibleItems(i.children)];
         }
       });
-
       return visibleItems;
     },
     [expandedIds]
@@ -192,38 +314,24 @@ function TreeItem({
       setSelectionStyle("");
       return;
     }
-
-    // Get all visible items from the entire tree
     const visibleItems = getVisibleItems(allItems);
     const currentIndex = visibleItems.findIndex((i) => i.id === item.id);
-
     const prevItem = visibleItems[currentIndex - 1];
     const nextItem = visibleItems[currentIndex + 1];
-
     const isPrevSelected = prevItem && selectedIds.has(prevItem.id);
     const isNextSelected = nextItem && selectedIds.has(nextItem.id);
-
     const roundTop = !isPrevSelected;
     const roundBottom = !isNextSelected;
-
     setSelectionStyle(
       `${roundTop ? "rounded-t-md" : ""} ${roundBottom ? "rounded-b-md" : ""}`
     );
-  }, [
-    isSelected,
-    selectedIds,
-    expandedIds,
-    item.id,
-    getVisibleItems,
-    allItems,
-  ]);
+  }, [isSelected, selectedIds, expandedIds, item.id, getVisibleItems, allItems]);
 
   const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     e.preventDefault();
 
     let newSelection = new Set(selectedIds);
-
     if (!itemRef.current) return;
 
     if (e.shiftKey && lastSelectedId.current !== null) {
@@ -238,25 +346,20 @@ function TreeItem({
         Math.min(lastIndex, currentIndex),
         Math.max(lastIndex, currentIndex),
       ];
-
       items.slice(start, end + 1).forEach((el) => {
         const id = el.getAttribute("data-id");
         const parentFolderClosed = el.closest('[data-folder-closed="true"]');
         const isClosedFolder = el.getAttribute("data-folder-closed") === "true";
-
         if (id && (isClosedFolder || !parentFolderClosed)) {
           newSelection.add(id);
         }
       });
     } else if (e.ctrlKey || e.metaKey) {
-      if (newSelection.has(item.id)) {
-        newSelection.delete(item.id);
-      } else {
-        newSelection.add(item.id);
-      }
+      if (newSelection.has(item.id)) newSelection.delete(item.id);
+      else newSelection.add(item.id);
     } else {
       newSelection = new Set([item.id]);
-      // Open folder on single click if it's a folder
+      // tek tıkta klasör aç/kapa
       if (item.children && isSelected) {
         onToggleExpand(item.id, !isOpen);
       }
@@ -268,108 +371,83 @@ function TreeItem({
 
   const handleAction = (action: string) => {
     if (onAction) {
-      // Get all selected items, or just this item if none selected
       const selectedItems =
         selectedIds.size > 0
           ? allItems
-              .flatMap((item) => getAllDescendants(item))
-              .filter((item) => selectedIds.has(item.id))
+              .flatMap((i) => getAllDescendants(i))
+              .filter((i) => selectedIds.has(i.id))
           : [item];
       onAction(action, selectedItems);
     }
   };
 
-  // Helper function to get all descendants of an item (including the item itself)
-  const getAllDescendants = (item: TreeViewItem): TreeViewItem[] => {
-    const descendants = [item];
-    if (item.children) {
-      item.children.forEach((child) => {
-        descendants.push(...getAllDescendants(child));
-      });
-    }
-    return descendants;
+  const getAllDescendants = (i: TreeViewItem): TreeViewItem[] => {
+    const d = [i];
+    if (i.children) i.children.forEach((c) => d.push(...getAllDescendants(c)));
+    return d;
   };
 
   const handleAccessClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (onAccessChange) {
       const currentState = getCheckState(item, itemMap);
-      // Toggle between checked and unchecked, treating indeterminate as unchecked
       const newChecked = currentState === "checked" ? false : true;
       onAccessChange(item, newChecked);
     }
   };
 
   const renderIcon = () => {
-    if (getIcon) {
-      return getIcon(item, depth);
-    }
-
-    // Use the provided iconMap or fall back to default
+    if (getIcon) return getIcon(item, depth);
     return iconMap[item.type] || iconMap.folder || defaultIconMap.folder;
   };
 
-  const getItemPath = (item: TreeViewItem, items: TreeViewItem[]): string => {
-    const path: string[] = [item.name];
-
-    const findParent = (
-      currentItem: TreeViewItem,
-      allItems: TreeViewItem[]
-    ) => {
-      for (const potentialParent of allItems) {
-        if (
-          potentialParent.children?.some((child) => child.id === currentItem.id)
-        ) {
-          path.unshift(potentialParent.name);
-          findParent(potentialParent, allItems);
+  const getItemPath = (i: TreeViewItem, items: TreeViewItem[]): string => {
+    const path: string[] = [i.name];
+    const findParent = (curr: TreeViewItem, all: TreeViewItem[]) => {
+      for (const p of all) {
+        if (p.children?.some((c) => c.id === curr.id)) {
+          path.unshift(p.name);
+          findParent(p, all);
           break;
         }
-        if (potentialParent.children) {
-          findParent(currentItem, potentialParent.children);
-        }
+        if (p.children) findParent(curr, p.children);
       }
     };
-
-    findParent(item, items);
+    findParent(i, items);
     return path.join(" → ");
   };
 
-  // Add function to count selected items in a folder
-  const getSelectedChildrenCount = (item: TreeViewItem): number => {
+  const getSelectedChildrenCount = (i: TreeViewItem): number => {
     let count = 0;
-
-    if (!item.children) return 0;
-
-    item.children.forEach((child) => {
-      if (selectedIds.has(child.id)) {
-        count++;
-      }
-      if (child.children) {
-        count += getSelectedChildrenCount(child);
-      }
+    if (!i.children) return 0;
+    i.children.forEach((child) => {
+      if (selectedIds.has(child.id)) count++;
+      if (child.children) count += getSelectedChildrenCount(child);
     });
-
     return count;
   };
 
-  // Get selected count only if item has children and is collapsed
   const selectedCount =
     (item.children && !isOpen && getSelectedChildrenCount(item)) || null;
 
   return (
     <ContextMenu>
       <ContextMenuTrigger>
-        <div>
+        <div ref={(node) => { itemRef.current = node; setDropRef(node as any); }}>
           <div
-            ref={itemRef}
+            ref={setDragRef as any}
+            {...attributes}
+            {...listeners}
             data-tree-item
             data-id={item.id}
             data-depth={depth}
             data-folder-closed={item.children && !isOpen}
-            className={`select-none cursor-pointer ${
-              isSelected ? `bg-orange-100 ${selectionStyle}` : "text-foreground"
-            } px-1`}
-            style={{ paddingLeft: `${depth * 20}px` }}
+            className={cn(
+              "select-none cursor-pointer px-1",
+              isSelected ? `bg-orange-100 ${selectionStyle}` : "text-foreground",
+              isOver && "ring-2 ring-primary/40"
+            )}
+            style={{ paddingLeft: `${depth * 20}px`, ...style }}
             onClick={handleClick}
           >
             <div className="flex items-center h-8">
@@ -394,6 +472,7 @@ function TreeItem({
                       </Button>
                     </CollapsibleTrigger>
                   </Collapsible>
+                  {/* checkbox (opsiyonel) */}
                   {showAccessRights && (
                     <div
                       className="relative flex items-center justify-center w-4 h-4 cursor-pointer hover:opacity-80"
@@ -571,6 +650,7 @@ function TreeItem({
                           iconMap={iconMap}
                           menuItems={menuItems}
                           getSelectedItems={getSelectedItems}
+                          parentId={item.id}
                         />
                       ))}
                     </motion.div>
@@ -603,12 +683,11 @@ function TreeItem({
   );
 }
 
+/** ---- Ana TreeView ---- */
+
 export default function TreeView({
   className,
-  checkboxLabels = {
-    check: "Check",
-    uncheck: "Uncheck",
-  },
+  checkboxLabels = { check: "Check", uncheck: "Uncheck" },
   data,
   iconMap,
   searchPlaceholder = "Search...",
@@ -620,13 +699,19 @@ export default function TreeView({
   onAction,
   onCheckChange,
   menuItems,
+  onMoveItem,
+  onTreeChange,
 }: TreeViewProps) {
+  /** ✅ tree state (drag-drop sonrası biz güncelliyoruz) */
+  const [tree, setTree] = useState<TreeViewItem[]>(data);
+
+  useEffect(() => {
+    setTree(data);
+  }, [data]);
+
   const [currentMousePos, setCurrentMousePos] = useState<number>(0);
   const [dragStart, setDragStart] = useState<number | null>(null);
-  const [dragStartPosition, setDragStartPosition] = useState<{
-    x: number;
-    y: number;
-  } | null>(null);
+  const [dragStartPosition, setDragStartPosition] = useState<{ x: number; y: number } | null>(null);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [isDragging, setIsDragging] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -636,90 +721,72 @@ export default function TreeView({
   const lastSelectedId = useRef<string | null>(null);
   const treeRef = useRef<HTMLDivElement>(null);
 
-  const DRAG_THRESHOLD = 10; // pixels
+  const itemMap = useMemo(() => buildItemMap(tree), [tree]);
+  const parentMap = useMemo(() => buildParentMap(tree), [tree]);
 
-  // Create a map of all items by ID
-  const itemMap = useMemo(() => buildItemMap(data), [data]);
+  /** dnd-kit sensors */
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
+  );
 
-  // Memoize the search results and expanded IDs
+  /** arama filtresi */
   const { filteredData, searchExpandedIds } = useMemo(() => {
     if (!searchQuery.trim()) {
-      return { filteredData: data, searchExpandedIds: new Set<string>() };
+      return { filteredData: tree, searchExpandedIds: new Set<string>() };
     }
-
     const searchLower = searchQuery.toLowerCase();
     const newExpandedIds = new Set<string>();
 
-    // Helper function to check if an item or its descendants match the search
     const itemMatches = (item: TreeViewItem): boolean => {
       const nameMatches = item.name.toLowerCase().includes(searchLower);
       if (nameMatches) return true;
-
-      if (item.children) {
-        return item.children.some((child) => itemMatches(child));
-      }
-
+      if (item.children) return item.children.some((child) => itemMatches(child));
       return false;
     };
 
-    // Helper function to filter tree while keeping parent structure
     const filterTree = (items: TreeViewItem[]): TreeViewItem[] => {
       return items
         .map((item) => {
           if (!item.children) {
             return itemMatches(item) ? item : null;
           }
-
           const filteredChildren = filterTree(item.children);
           if (filteredChildren.length > 0 || itemMatches(item)) {
-            if (item.children) {
-              newExpandedIds.add(item.id);
-            }
-            return {
-              ...item,
-              children: filteredChildren,
-            };
+            if (item.children) newExpandedIds.add(item.id);
+            return { ...item, children: filteredChildren };
           }
           return null;
         })
-        .filter((item): item is TreeViewItem => item !== null);
+        .filter((i): i is TreeViewItem => i !== null);
     };
 
-    return {
-      filteredData: filterTree(data),
-      searchExpandedIds: newExpandedIds,
-    };
-  }, [data, searchQuery]);
+    return { filteredData: filterTree(tree), searchExpandedIds: newExpandedIds };
+  }, [tree, searchQuery]);
 
-  // Update expanded IDs when search changes
   useEffect(() => {
     if (searchQuery.trim()) {
-      setExpandedIds(prev => new Set([...prev, ...searchExpandedIds]));
+      setExpandedIds((prev) => new Set([...prev, ...searchExpandedIds]));
     }
   }, [searchExpandedIds, searchQuery]);
 
+  /** dışarı tıklayınca seçim temizle */
   useEffect(() => {
     const handleClickAway = (e: MouseEvent) => {
       const target = e.target as Element;
-
       const clickedInside =
         (treeRef.current && treeRef.current.contains(target)) ||
         (dragRef.current && dragRef.current.contains(target)) ||
-        // Ignore clicks on context menus
         target.closest('[role="menu"]') ||
         target.closest("[data-radix-popper-content-wrapper]");
-
       if (!clickedInside) {
         setSelectedIds(new Set());
         lastSelectedId.current = null;
       }
     };
-
     document.addEventListener("mousedown", handleClickAway);
     return () => document.removeEventListener("mousedown", handleClickAway);
   }, []);
 
-  // Function to collect all folder IDs
   const getAllFolderIds = (items: TreeViewItem[]): string[] => {
     let ids: string[] = [];
     items.forEach((item) => {
@@ -731,91 +798,60 @@ export default function TreeView({
     return ids;
   };
 
-  const handleExpandAll = () => {
-    setExpandedIds(new Set(getAllFolderIds(data)));
-  };
-
-  const handleCollapseAll = () => {
-    setExpandedIds(new Set());
-  };
+  const handleExpandAll = () => setExpandedIds(new Set(getAllFolderIds(tree)));
+  const handleCollapseAll = () => setExpandedIds(new Set());
 
   const handleToggleExpand = (id: string, isOpen: boolean) => {
     const newExpandedIds = new Set(expandedIds);
-    if (isOpen) {
-      newExpandedIds.add(id);
-    } else {
-      newExpandedIds.delete(id);
-    }
+    if (isOpen) newExpandedIds.add(id);
+    else newExpandedIds.delete(id);
     setExpandedIds(newExpandedIds);
   };
 
-  // Get selected items
   const getSelectedItems = useCallback((): TreeViewItem[] => {
     const items: TreeViewItem[] = [];
     const processItem = (item: TreeViewItem) => {
-      if (selectedIds.has(item.id)) {
-        items.push(item);
-      }
+      if (selectedIds.has(item.id)) items.push(item);
       item.children?.forEach(processItem);
     };
-    data.forEach(processItem);
+    tree.forEach(processItem);
     return items;
-  }, [selectedIds, data]);
+  }, [selectedIds, tree]);
 
-  // Get selected items, filtering out parents if their children are selected
   const getEffectiveSelectedItems = useCallback((): TreeViewItem[] => {
     const selectedItems = getSelectedItems();
-
-    // Build a set of all selected IDs for quick lookup
-    const selectedIdsSet = new Set(selectedItems.map((item) => item.id));
-
-    // Filter out parents whose children are also selected
-    return selectedItems.filter((item) => {
-      // If this item has no children, always include it
-      if (!item.children) return true;
-
-      // Check if any children of this item are selected
-      const hasSelectedChildren = item.children.some((child) =>
-        selectedIdsSet.has(child.id)
-      );
-
-      // Only include this item if none of its children are selected
+    const selectedIdsSet = new Set(selectedItems.map((i) => i.id));
+    return selectedItems.filter((i) => {
+      if (!i.children) return true;
+      const hasSelectedChildren = i.children.some((c) => selectedIdsSet.has(c.id));
       return !hasSelectedChildren;
     });
   }, [getSelectedItems]);
 
+  /** eski “drag to select” (fare ile alan çizme) aynen korundu */
+  const DRAG_THRESHOLD = 10;
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    // Only track on left click and not on buttons
     if (e.button !== 0 || (e.target as HTMLElement).closest("button")) return;
-
     setDragStartPosition({ x: e.clientX, y: e.clientY });
   }, []);
-
   const handleMouseMove = useCallback(
     (e: React.MouseEvent) => {
-      // Check if primary button is still held down
       if (!(e.buttons & 1)) {
         setIsDragging(false);
         setDragStart(null);
         setDragStartPosition(null);
         return;
       }
-
-      // If we haven't registered a potential drag start position, ignore
       if (!dragStartPosition) return;
 
-      // Calculate distance moved
       const deltaX = e.clientX - dragStartPosition.x;
       const deltaY = e.clientY - dragStartPosition.y;
       const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
 
-      // If we haven't started dragging yet, check if we should start
       if (!isDragging) {
         if (distance > DRAG_THRESHOLD) {
           setIsDragging(true);
           setDragStart(dragStartPosition.y);
-
-          // Clear selection if not holding shift/ctrl
           if (!e.shiftKey && !e.ctrlKey) {
             setSelectedIds(new Set());
             lastSelectedId.current = null;
@@ -824,9 +860,7 @@ export default function TreeView({
         return;
       }
 
-      // Rest of the existing drag logic
       if (!dragRef.current) return;
-
       const items = Array.from(
         dragRef.current.querySelectorAll("[data-tree-item]")
       ) as HTMLElement[];
@@ -846,18 +880,12 @@ export default function TreeView({
         const rect = item.getBoundingClientRect();
         const itemTop = rect.top;
         const itemBottom = rect.top + rect.height;
-
         if (itemBottom >= selectionStart && itemTop <= selectionEnd) {
           const id = item.getAttribute("data-id");
           const isClosedFolder =
             item.getAttribute("data-folder-closed") === "true";
-          const parentFolderClosed = item.closest(
-            '[data-folder-closed="true"]'
-          );
-
-          if (id && (isClosedFolder || !parentFolderClosed)) {
-            newSelection.add(id);
-          }
+          const parentFolderClosed = item.closest('[data-folder-closed="true"]');
+          if (id && (isClosedFolder || !parentFolderClosed)) newSelection.add(id);
         }
       });
 
@@ -866,14 +894,11 @@ export default function TreeView({
     },
     [isDragging, dragStart, selectedIds, dragStartPosition]
   );
-
   const handleMouseUp = useCallback(() => {
     setIsDragging(false);
     setDragStart(null);
     setDragStartPosition(null);
   }, []);
-
-  // Add cleanup for mouse events
   useEffect(() => {
     if (isDragging) {
       document.addEventListener("mouseup", handleMouseUp);
@@ -885,12 +910,61 @@ export default function TreeView({
     };
   }, [isDragging, handleMouseUp]);
 
-  // Call onSelectionChange when selection changes
   useEffect(() => {
-    if (onSelectionChange) {
-      onSelectionChange(getSelectedItems());
-    }
+    onSelectionChange?.(getSelectedItems());
   }, [selectedIds, onSelectionChange, getSelectedItems]);
+
+  /** ---- dnd-kit olayları ---- */
+
+  const visibleFlat = useMemo(
+    () => flattenVisible(tree, expandedIds),
+    [tree, expandedIds]
+  );
+
+  const handleDragStart = (_e: DragStartEvent) => {
+    // noop, ama istersen highlight yapabilirsin
+  };
+
+  const handleDragOver = (_e: DragOverEvent) => {
+    // noop
+  };
+
+  const handleDragEnd = (e: DragEndEvent) => {
+    const { active, over } = e;
+    if (!over) return;
+
+    const activeId = String(active.id);
+    const overId = String(over.id);
+    if (activeId === overId) return;
+
+    const overEntry = visibleFlat.find((v) => v.item.id === overId);
+    const activeEntry = visibleFlat.find((v) => v.item.id === activeId);
+    if (!overEntry || !activeEntry) return;
+
+    const overItem = overEntry.item;
+
+    let nextParentId: string | null;
+    let nextIndex: number;
+
+    // ✅ Klasör üstüne bırakınca içine at (reparent)
+    if (overItem.children && overItem.children.length >= 0) {
+      nextParentId = overItem.id;
+      nextIndex = overItem.children?.length ?? 0; // klasörün sonuna
+      // istersen hep başa koy: nextIndex = 0;
+      setExpandedIds((prev) => new Set([...prev, overItem.id]));
+    } else {
+      // ✅ Yoksa hedefin ebeveyninde, hedeften HEMEN SONRA sırala
+      nextParentId = parentMap.get(overId) ?? null;
+      nextIndex = overEntry.indexWithinParent + 1;
+    }
+
+    const newTree = moveInTree(tree, activeId, nextParentId, nextIndex);
+    setTree(newTree);
+    onTreeChange?.(newTree);
+
+    const movedItem = itemMap.get(activeId);
+    if (movedItem) onMoveItem?.(movedItem, nextParentId, nextIndex);
+  };
 
   return (
     <div className="flex gap-4">
@@ -997,50 +1071,56 @@ export default function TreeView({
           )}
         </AnimatePresence>
 
-        <div
-          ref={dragRef}
-          className={cn(
-            "rounded-lg bg-card relative select-none",
-            className
-          )}
-          onMouseDown={handleMouseDown}
-          onMouseMove={handleMouseMove}
+        <DndContext
+          sensors={sensors}
+          onDragStart={handleDragStart}
+          onDragOver={handleDragOver}
+          onDragEnd={handleDragEnd}
         >
-          {isDragging && (
-            <div
-              className="absolute inset-0 bg-blue-500/0 pointer-events-none"
-              style={{
-                top: Math.min(
-                  dragStart || 0,
-                  dragStart === null ? 0 : currentMousePos
-                ),
-                height: Math.abs(
-                  (dragStart || 0) - (dragStart === null ? 0 : currentMousePos)
-                ),
-              }}
-            />
-          )}
-          {filteredData.map((item) => (
-            <TreeItem
-              key={item.id}
-              item={item}
-              selectedIds={selectedIds}
-              lastSelectedId={lastSelectedId}
-              onSelect={setSelectedIds}
-              expandedIds={expandedIds}
-              onToggleExpand={handleToggleExpand}
-              getIcon={getIcon}
-              onAction={onAction}
-              onAccessChange={onCheckChange}
-              allItems={data}
-              showAccessRights={showCheckboxes}
-              itemMap={itemMap}
-              iconMap={iconMap}
-              menuItems={menuItems}
-              getSelectedItems={getSelectedItems}
-            />
-          ))}
-        </div>
+          <div
+            ref={dragRef}
+            className={cn("rounded-lg bg-card relative select-none", className)}
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+          >
+            {isDragging && (
+              <div
+                className="absolute inset-0 bg-blue-500/0 pointer-events-none"
+                style={{
+                  top: Math.min(
+                    dragStart || 0,
+                    dragStart === null ? 0 : currentMousePos
+                  ),
+                  height: Math.abs(
+                    (dragStart || 0) - (dragStart === null ? 0 : currentMousePos)
+                  ),
+                }}
+              />
+            )}
+
+            {filteredData.map((item) => (
+              <TreeItem
+                key={item.id}
+                item={item}
+                selectedIds={selectedIds}
+                lastSelectedId={lastSelectedId}
+                onSelect={setSelectedIds}
+                expandedIds={expandedIds}
+                onToggleExpand={handleToggleExpand}
+                getIcon={getIcon}
+                onAction={onAction}
+                onAccessChange={onCheckChange}
+                allItems={tree}
+                showAccessRights={showCheckboxes}
+                itemMap={itemMap}
+                iconMap={iconMap}
+                menuItems={menuItems}
+                getSelectedItems={getSelectedItems}
+                parentId={null}
+              />
+            ))}
+          </div>
+        </DndContext>
       </div>
     </div>
   );

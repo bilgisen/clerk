@@ -1,3 +1,4 @@
+// components/chapters/ChapterTreeItem.tsx
 "use client";
 
 import { FileText, Eye, Pencil, ChevronRight, ChevronDown } from "lucide-react";
