@@ -481,8 +481,8 @@ export function BookInfoForm({
             <button
               type="submit"
               disabled={isSubmitting || loading}
-              className={`px-4 py-2 focus:outline-none focus:ring-2 focus:ring-offset-2 ${
-                (isSubmitting || loading) ? 'opacity-50 cursor-not-allowed' : ''
+              className={`px-4 py-2 ${
+                (isSubmitting || loading) ? 'opacity-50 cursor-not-allowed' : 'bg-primary text-primary-foreground hover:bg-primary/90'
               }`}
             >
               {(isSubmitting || loading) ? 'Saving...' : 'Save Book'}

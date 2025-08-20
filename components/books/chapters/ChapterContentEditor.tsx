@@ -139,6 +139,7 @@ function ChapterContentEditorComponent({
   const { control, formState: { errors } } = useFormContext()
   const error = errors[name]?.message as string | undefined
   const [isMounted, setIsMounted] = useState(false)
+  const [isPasting, setIsPasting] = useState(false)
 
   useEffect(() => {
     setIsMounted(true)
@@ -148,8 +149,14 @@ function ChapterContentEditorComponent({
     return <EditorLoading className={className} />
   }
 
+  const handlePaste = (event: React.ClipboardEvent) => {
+    setIsPasting(true);
+    // Let the default paste handler work
+    setTimeout(() => setIsPasting(false), 100);
+  };
+
   return (
-    <div className={cn("w-full", className)}>
+    <div className={cn("w-full", className)} onPaste={handlePaste}>
       <div className={cn(disabled && 'opacity-50')}>
         <Controller
           name={name}
@@ -160,7 +167,8 @@ function ChapterContentEditorComponent({
               <div className={cn(
                 "min-h-[300px] w-full p-0",
                 disabled && 'cursor-not-allowed bg-muted/50',
-                error && 'border-destructive'
+                error && 'border-destructive',
+                isPasting && 'opacity-75'
               )}>
                 <div className="h-full w-full">
                   <Editor
@@ -168,6 +176,9 @@ function ChapterContentEditorComponent({
                     editorSerializedState={(() => {
                       try {
                         if (!value) return initialValue;
+                        // Skip validation during pasting for better performance
+                        if (isPasting) return value;
+                        
                         const parsed = typeof value === 'string' ? JSON.parse(value) : value;
                         return validateAndNormalizeState(parsed);
                       } catch (e) {
@@ -177,9 +188,14 @@ function ChapterContentEditorComponent({
                     })()}
                     onSerializedChange={(content: SerializedEditorState) => {
                       try {
-                        // Ensure we're passing a valid SerializedEditorState
+                        // Skip validation during pasting for better performance
+                        if (isPasting) {
+                          formOnChange(content);
+                          return;
+                        }
+                        
                         const validatedContent = validateAndNormalizeState(content);
-                        formOnChange(JSON.stringify(validatedContent));
+                        formOnChange(validatedContent);
                         if (externalOnChange) {
                           externalOnChange(validatedContent);
                         }
