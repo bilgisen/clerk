@@ -33,19 +33,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Cross-book update not allowed' }, { status: 400 });
     }
 
-    await db.transaction(async (tx) => {
-      for (const p of body.patches) {
-        await tx
-          .update(chapters)
+    // Update all chapters in parallel without transaction
+    await Promise.all(
+      body.patches.map(p => 
+        db.update(chapters)
           .set({
             order: p.order,
             level: p.level,
             parentChapterId: p.parentChapterId,
             updatedAt: new Date(),
           })
-          .where(eq(chapters.id, p.id));
-      }
-    });
+          .where(eq(chapters.id, p.id))
+      )
+    );
 
     return NextResponse.json({ ok: true });
   } catch (err) {

@@ -130,15 +130,18 @@ export function ChapterTree({
     [reorderMutation]
   );
 
-  // Build a tree structure
+  // Build a tree structure with proper children
   const buildTree = (items: ChapterNode[], parentId: string | null = null): ChapterNode[] => {
     return items
       .filter(item => item.parent_chapter_id === parentId)
       .sort(sortByOrder)
-      .map(item => ({
-        ...item,
-        children: buildTree(items, item.id)
-      }));
+      .map(item => {
+        const children = items.filter(child => child.parent_chapter_id === item.id);
+        return {
+          ...item,
+          children: children.length > 0 ? buildTree(items, item.id) : []
+        };
+      });
   };
 
   // Create a flat map for sorting context
@@ -154,24 +157,19 @@ export function ChapterTree({
   // Build the tree structure
   const tree = useMemo(() => buildTree(items), [items]);
 
-  // Recursive function to render tree items
-  const renderTreeItems = (nodes: ChapterNode[], level: number = 0) => {
-    return nodes.map((node) => (
-      <div key={node.id}>
-        <ChapterTreeItem
-          id={node.id}
-          chapter={node}
-          level={level}
-          onSelect={onSelect}
-          isSelected={selectedId === node.id}
-          disabled={reorderMutation.isPending}
-        />
-        {node.children && node.children.length > 0 && (
-          <div className="ml-4">
-            {renderTreeItems(node.children, level + 1)}
-          </div>
-        )}
-      </div>
+  // Only render root level items, children will be rendered recursively by ChapterTreeItem
+  const renderTreeItems = () => {
+    return tree.map((node) => (
+      <ChapterTreeItem
+        key={node.id}
+        id={node.id}
+        chapter={node}
+        level={0}
+        onSelect={onSelect}
+        isSelected={selectedId === node.id}
+        selectedId={selectedId}
+        disabled={reorderMutation.isPending}
+      />
     ));
   };
 
@@ -184,7 +182,7 @@ export function ChapterTree({
         modifiers={[restrictToVerticalAxis]}
       >
         <SortableContext items={itemsForSorting} strategy={verticalListSortingStrategy}>
-          {renderTreeItems(tree)}
+          {renderTreeItems()}
         </SortableContext>
       </DndContext>
       {reorderMutation.isPending && (
