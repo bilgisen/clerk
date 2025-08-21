@@ -144,8 +144,8 @@ export default async function BookDetailPage({ params, searchParams }: PageProps
           {/* Sidebar */}
           <aside className="lg:w-80 space-y-6">
             <SimpleChapterList 
+              bookSlug={slug}
               bookTitle={book.title}
-              chapters={bookChapters}
             />
           </aside>
         </div>

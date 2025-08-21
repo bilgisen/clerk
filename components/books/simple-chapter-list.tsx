@@ -2,57 +2,69 @@
 'use client';
 
 import React from 'react';
-
-interface Chapter {
-  id: string;
-  title: string;
-  order: number;
-  level?: number;
-  parent_chapter_id?: string | null;
-  parentChapterId?: string | null;
-  children?: Chapter[];
-  [key: string]: any;
-}
+import { useChaptersBySlug } from "@/hooks/api";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useQuery } from "@tanstack/react-query";
+import { Chapter } from "@/types/chapter";
+import { useAuth } from "@clerk/nextjs";
 
 interface SimpleChapterListProps {
+  bookSlug: string;
   bookTitle: string;
-  chapters: Chapter[];
 }
 
-// Helper function to flatten the chapter tree
-function flattenChapters(chapters: Chapter[]): Chapter[] {
-  const result: Chapter[] = [];
+export function SimpleChapterList({ bookSlug, bookTitle }: SimpleChapterListProps) {
+  const { getToken } = useAuth();
   
-  function processChapter(chapter: Chapter, level: number = 0) {
-    const { children, ...rest } = chapter;
-    result.push({
-      ...rest,
-      level
-    });
-    
-    if (children && children.length > 0) {
-      children.forEach(child => processChapter(child, level + 1));
+  const { data: chapters, isLoading, error } = useQuery({
+    queryKey: ['chapters', bookSlug],
+    queryFn: async () => {
+      const token = await getToken();
+      const response = await fetch(`/api/books/by-slug/${bookSlug}/chapters`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      if (!response.ok) {
+        throw new Error('Failed to fetch chapters');
+      }
+      return response.json();
     }
+  });
+
+  if (isLoading) {
+    return (
+      <div className="space-y-6">
+        {[...Array(3)].map((_, i) => (
+          <div key={i} className="space-y-2">
+            <Skeleton className="h-6 w-3/4" />
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-4 w-1/2" />
+          </div>
+        ))}
+      </div>
+    );
   }
-  
-  chapters.forEach(chapter => processChapter(chapter, 0));
-  return result;
-}
 
-export function SimpleChapterList({ bookTitle, chapters }: SimpleChapterListProps) {
-  // Flatten the chapters if they're in a hierarchical structure
-  const flatChapters = React.useMemo(() => {
-    return flattenChapters(chapters);
-  }, [chapters]);
+  if (error) {
+    return <div className="text-destructive">Error loading chapters: {error.message}</div>;
+  }
 
-  // Sort chapters by order
-  const sortedChapters = React.useMemo(() => {
-    return [...flatChapters].sort((a, b) => (a.order || 0) - (b.order || 0));
-  }, [flatChapters]);
-
-  if (sortedChapters.length === 0) {
+  if (!chapters || chapters.length === 0) {
     return <div className="text-muted-foreground">No chapters found for this book.</div>;
   }
+  
+  // Flatten the chapters if they're in a hierarchical structure
+  const sortedChapters = React.useMemo(() => {
+    const flatten = (items: any[]): any[] => {
+      return items.reduce((acc, item) => {
+        const { children, ...rest } = item;
+        return [...acc, rest, ...(children ? flatten(children) : [])];
+      }, []);
+    };
+    
+    return [...flatten(chapters)].sort((a, b) => (a.order || 0) - (b.order || 0));
+  }, [chapters]);
 
   return (
     <div className="space-y-6">
