@@ -42,20 +42,55 @@ export async function GET(
       return NextResponse.json({ error: 'Book not found' }, { status: 404 });
     }
 
+    // First, get all chapters for the book
     const allChapters = await db.query.chapters.findMany({
       where: eq(chapters.bookId, book.id),
       orderBy: [chapters.order],
+      columns: {
+        id: true,
+        bookId: true,
+        title: true,
+        content: true,
+        parentChapterId: true,
+        order: true,
+        level: true,
+        isDraft: true,
+        wordCount: true,
+        readingTime: true,
+        createdAt: true,
+        updatedAt: true,
+        publishedAt: true
+      }
     });
 
-    // Debug log the raw database response
-    console.log('Raw database response:', JSON.stringify(allChapters, null, 2));
-    
-    // Debug log the first chapter to check its structure
-    if (allChapters.length > 0) {
-      console.log('First chapter fields:', Object.keys(allChapters[0]));
+    // Define the chapter type with children
+    interface ChapterWithChildren extends Omit<typeof allChapters[number], 'children'> {
+      children: ChapterWithChildren[];
     }
 
-    return NextResponse.json(allChapters);
+    // Then, build the hierarchical structure
+    const buildChapterTree = (parentId: string | null = null): ChapterWithChildren[] => {
+      return allChapters
+        .filter(chapter => 
+          (parentId === null && !chapter.parentChapterId) || 
+          (chapter.parentChapterId === parentId)
+        )
+        .map(chapter => ({
+          ...chapter,
+          children: buildChapterTree(chapter.id)
+        }));
+    };
+
+    const chapterTree = buildChapterTree();
+
+    // Debug log the chapter tree
+    console.log('Chapter tree:', JSON.stringify(chapterTree, null, 2));
+    
+    // Return both the flat list and the tree structure
+    return NextResponse.json({
+      flat: allChapters,
+      tree: chapterTree
+    });
   } catch (error) {
     console.error('Error fetching chapters:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

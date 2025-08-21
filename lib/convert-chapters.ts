@@ -3,23 +3,33 @@ import { TreeViewItem } from "@/components/tree-view";
 import { Chapter } from "@/types/chapter";
 import { ChapterOrderUpdate } from "@/types/dnd";
 
-interface ChapterWithOrder extends Chapter {
+type ChapterWithOrder = Chapter & {
   originalOrder?: number;
-}
+  children?: ChapterWithOrder[];
+};
+
+type ChapterWithChildren = Chapter & {
+  children: ChapterWithChildren[];
+};
 
 /**
  * Converts flat Chapter[] to nested TreeViewItem[] structure
  * with order-based sorting (root ve çocuklar).
  */
-export function convertChaptersToTree(chapters: any[]): TreeViewItem[] {
+export function convertChaptersToTree(chapters: Chapter[] | ChapterWithChildren[]): TreeViewItem[] {
+  // Handle both flat and hierarchical chapter structures
+  const flatChapters = isChapterWithChildrenArray(chapters) 
+    ? flattenChapterTree(chapters) 
+    : chapters;
+
   // Create lookup maps for O(1) access
   const nodeMap = new Map<string, TreeViewItem>();
   const childrenMap = new Map<string | null, TreeViewItem[]>();
   
   // First pass: create all nodes and build children map
-  chapters.forEach((chapter) => {
-    // Handle both parentChapterId (Drizzle) and parent_chapter_id (API) formats
-    const parentId = chapter.parentChapterId || chapter.parent_chapter_id || null;
+  flatChapters.forEach((chapter) => {
+    // Use the correct property name from the database schema
+    const parentId = chapter.parent_chapter_id || null;
     const normalizedParentId = parentId ? String(parentId) : null;
     
     const node: TreeViewItem = {
@@ -31,6 +41,8 @@ export function convertChaptersToTree(chapters: any[]): TreeViewItem[] {
         order: chapter.order ?? 0,
         level: chapter.level ?? 0,
         parent_chapter_id: normalizedParentId,
+        // Include any additional chapter properties
+        ...(chapter as any).data,
       },
     };
     
@@ -60,6 +72,29 @@ export function convertChaptersToTree(chapters: any[]): TreeViewItem[] {
   
   // Start building from root nodes (parentId = null)
   return buildTree(null);
+}
+
+// Helper function to check if the input is a hierarchical chapter structure
+function isChapterWithChildrenArray(chapters: any[]): chapters is ChapterWithChildren[] {
+  return chapters.some(chapter => Array.isArray((chapter as ChapterWithChildren).children));
+}
+
+// Helper function to flatten a hierarchical chapter structure
+function flattenChapterTree(chapters: ChapterWithChildren[]): Chapter[] {
+  const result: Chapter[] = [];
+  
+  function walk(nodes: ChapterWithChildren[]) {
+    nodes.forEach(node => {
+      const { children, ...rest } = node;
+      result.push(rest);
+      if (children && children.length > 0) {
+        walk(children);
+      }
+    });
+  }
+  
+  walk(chapters);
+  return result;
 }
 
 /** 
