@@ -1,10 +1,10 @@
 "use client";
 
 import { ChapterTreeWrapper } from "@/components/chapters/ChapterTree";
-import { useChapters } from "@/hooks/api/use-chapters";
+import { useChaptersBySlug } from "@/hooks/api";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useQuery } from "@tanstack/react-query";
-import { ChapterNode } from "@/types/dnd";
+import { Chapter } from "@/types/chapter";
 import { useAuth } from "@clerk/nextjs";
 
 interface Book {
@@ -16,6 +16,7 @@ interface Book {
 export default function ChaptersPage({ params }: { params: { slug: string } }) {
   const { getToken } = useAuth();
 
+  // First, fetch the book data
   const { data: book, isLoading: isLoadingBook, error: bookError } = useQuery({
     queryKey: ["book", params.slug],
     queryFn: async () => {
@@ -29,21 +30,24 @@ export default function ChaptersPage({ params }: { params: { slug: string } }) {
     },
   });
 
+  // Then fetch chapters for the book
   const { data: chaptersData, isLoading: isLoadingChapters, error: chaptersError } =
-    useChapters(book?.id || "");
+    useChaptersBySlug(params.slug);
 
-  const chapters: ChapterNode[] =
-    chaptersData?.map((chapter) => ({
-      ...chapter,
-      order: chapter.order ?? 0,
-      level: chapter.level ?? 0,
-      parent_chapter_id: chapter.parent_chapter_id ?? null,
-    })) || [];
+  const chapters = chaptersData?.map((chapter: Chapter) => ({
+    ...chapter,
+    order: chapter.order ?? 0,
+    level: chapter.level ?? 0,
+    parent_chapter_id: chapter.parent_chapter_id ?? null,
+  })) || [];
 
-  const isLoading = isLoadingBook || (book && isLoadingChapters);
+  const isLoading = isLoadingBook || isLoadingChapters;
   const error = bookError || chaptersError;
+  
+  // Don't show loading state if we already have the book data
+  const showLoading = isLoading && !(book && chaptersData);
 
-  if (isLoading) {
+  if (showLoading) {
     return (
       <div className="p-4">
         <Skeleton className="h-8 w-48 mb-4" />
@@ -78,8 +82,13 @@ export default function ChaptersPage({ params }: { params: { slug: string } }) {
 
   return (
     <div className="p-4">
-      <h1 className="text-xl font-semibold mb-4">Chapters for {book.title}</h1>
-      <ChapterTreeWrapper initialChapters={chapters} bookId={book.id} />
+      <h1 className="text-2xl font-bold mb-4">{book?.title || 'Chapters'}</h1>
+      {!isLoadingChapters && chaptersData && (
+        <ChapterTreeWrapper 
+          initialChapters={chapters} 
+          bookId={book?.id || ''} 
+        />
+      )}
     </div>
   );
 }

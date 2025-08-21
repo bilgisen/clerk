@@ -1,11 +1,12 @@
 import { TreeViewItem } from "@/components/tree-view";
-import { ChapterNode as ApiChapterNode } from "@/types/dnd";
+import { Chapter } from "@/types/chapter";
+import { ChapterOrderUpdate } from "@/types/dnd";
 
 /**
- * Converts flat ApiChapterNode[] to nested TreeViewItem[] structure
+ * Converts flat Chapter[] to nested TreeViewItem[] structure
  * with order-based sorting (root ve çocuklar).
  */
-export function convertChaptersToTree(chapters: ApiChapterNode[]): TreeViewItem[] {
+export function convertChaptersToTree(chapters: Chapter[]): TreeViewItem[] {
   const map = new Map<string, TreeViewItem>();
 
   // tüm nodeları hazırla
@@ -51,17 +52,18 @@ export function convertChaptersToTree(chapters: ApiChapterNode[]): TreeViewItem[
 }
 
 /** Ağacı (TreeViewItem[]) düz listeye indirip (id, parentId, order) üretir */
-export function buildOrderPayload(tree: TreeViewItem[]) {
-  const payload: Array<{ id: string; parent_chapter_id: string | null; order: number; level: number }> = [];
+export function buildOrderPayload(tree: TreeViewItem[], bookId: string) {
+  const payload: ChapterOrderUpdate[] = [];
 
   const walk = (items: TreeViewItem[], parentId: string | null, level: number) => {
     items.forEach((it, idx) => {
       payload.push({
         id: it.id,
+        bookId,
         parent_chapter_id: parentId,
         order: idx,
         level,
-      });
+      } as ChapterOrderUpdate);
       if (it.children?.length) walk(it.children, it.id, level + 1);
     });
   };

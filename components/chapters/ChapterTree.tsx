@@ -3,7 +3,7 @@
 import * as React from "react";
 import TreeView, { TreeViewItem } from "@/components/tree-view";
 import { convertChaptersToTree, buildOrderPayload } from "@/lib/convert-chapters";
-import { ChapterNode as ApiChapterNode } from "@/types/dnd";
+import { Chapter } from "@/types/chapter";
 import { Button } from "@/components/ui/button";
 import { Eye, Pencil, Plus, Folder } from "lucide-react";
 import Link from "next/link";
@@ -11,7 +11,7 @@ import { toast } from "sonner";
 import { useUpdateChapterOrder } from "@/hooks/api/use-chapters";
 
 interface ChapterTreeWrapperProps {
-  initialChapters: ApiChapterNode[];
+  initialChapters: Chapter[];
   bookId: string;
 }
 
@@ -21,12 +21,7 @@ export function ChapterTreeWrapper({ initialChapters, bookId }: ChapterTreeWrapp
 
   const persistOrder = async (tree: TreeViewItem[]) => {
     try {
-      const updates = buildOrderPayload(tree).map((u) => ({
-        id: u.id,
-        order: u.order,
-        level: u.level,
-        parent_chapter_id: u.parent_chapter_id,
-      }));
+      const updates = buildOrderPayload(tree, bookId);
       await updateChapterOrder.mutateAsync(updates);
       toast.success("Chapter order updated");
     } catch (err) {

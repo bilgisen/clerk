@@ -14,6 +14,8 @@ export interface ChapterNode {
   book_id: string;
   /** ID of the parent chapter, null for top-level chapters */
   parent_chapter_id: string | null;
+  /** Alias for parent_chapter_id to match database schema */
+  parentChapterId?: string | null;
   /** Display order of the chapter */
   order: number;
   /** Nesting level in the hierarchy (0 for top-level) */
@@ -40,10 +42,12 @@ export interface ChapterNode {
 export interface ChapterOrderUpdate {
   /** Chapter ID */
   id: string;
+  /** Book ID that the chapter belongs to */
+  bookId: string;
   /** New display order */
   order: number;
   /** New nesting level */
   level: number;
-  /** New parent chapter ID, null for top-level */
+  /** ID of the parent chapter, null for top-level */
   parent_chapter_id: string | null;
 }

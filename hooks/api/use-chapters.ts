@@ -57,7 +57,7 @@ const fetchChaptersByBook = async (bookId: string, getToken: () => Promise<strin
  * @param bookSlug The slug of the book
  * @returns Promise with the hierarchical list of chapters
  */
-const fetchChaptersByBookSlug = async (bookSlug: string, getToken: () => Promise<string | null>): Promise<ChapterWithChildren[]> => {
+const fetchChaptersByBookSlug = async (bookSlug: string, getToken: () => Promise<string | null>): Promise<Chapter[]> => {
   const token = await getToken();
   if (!token) {
     throw new Error('Not authenticated');
@@ -71,10 +71,13 @@ const fetchChaptersByBookSlug = async (bookSlug: string, getToken: () => Promise
   });
   
   if (!response.ok) {
-    throw new Error('Failed to fetch chapters by slug');
+    const error = await response.json().catch(() => ({}));
+    const errorMessage = error.message || 'Failed to fetch chapters by slug';
+    throw new Error(errorMessage);
   }
   
-  return response.json();
+  const data = await response.json();
+  return Array.isArray(data) ? data : [];
 };
 
 /**
@@ -221,9 +224,15 @@ const updateChapterOrder = async ({ updates, token }: UpdateChapterOrderParams):
     const formattedUpdates = updates.map(update => ({
       id: update.id,
       order: update.order,
-      parent_chapter_id: update.parent_chapter_id || null,
-      level: update.level || 0,
+      level: update.level,
+      parentChapterId: update.parent_chapter_id || null,
     }));
+
+    // Get the bookId from the first update (all updates should be for the same book)
+    const bookId = updates[0]?.bookId;
+    if (!bookId) {
+      throw new Error('No bookId provided in updates');
+    }
 
     const response = await fetch(`/api/chapters/reorder`, {
       method: 'POST',
@@ -231,8 +240,10 @@ const updateChapterOrder = async ({ updates, token }: UpdateChapterOrderParams):
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json',
       },
-      credentials: 'include',
-      body: JSON.stringify({ chapters: formattedUpdates }),
+      body: JSON.stringify({
+        bookId,
+        patches: formattedUpdates
+      }),
     });
 
     if (!response.ok) {
@@ -261,7 +272,11 @@ export const useChapters = (bookId: string) => {
   
   return useQuery<ChapterNode[], Error>({
     queryKey: ['chapters', bookId],
-    queryFn: () => fetchChaptersByBook(bookId, getToken),
+    queryFn: async () => {
+      const token = await getToken();
+      if (!token) throw new Error('Not authenticated');
+      return fetchChaptersByBook(bookId, getToken);
+    },
     enabled: !!bookId,
     retry: 1,
   });
@@ -271,9 +286,14 @@ export const useChapters = (bookId: string) => {
 export const useChaptersBySlug = (bookSlug: string) => {
   const { getToken } = useAuth();
   
-  return useQuery<ChapterWithChildren[], Error>({
+  return useQuery<Chapter[], Error>({
     queryKey: ['chapters', bookSlug],
-    queryFn: () => fetchChaptersByBookSlug(bookSlug, getToken),
+    queryFn: async () => {
+      const token = await getToken();
+      if (!token) throw new Error('Not authenticated');
+      const chapters = await fetchChaptersByBookSlug(bookSlug, getToken);
+      return chapters;
+    },
     enabled: !!bookSlug,
   });
 };
@@ -284,7 +304,11 @@ export const useChapter = (bookSlug: string, chapterId: string) => {
   
   return useQuery<Chapter, Error>({
     queryKey: ['chapter', bookSlug, chapterId],
-    queryFn: () => fetchChapterBySlug(bookSlug, chapterId, getToken),
+    queryFn: async () => {
+      const token = await getToken();
+      if (!token) throw new Error('Not authenticated');
+      return fetchChapterBySlug(bookSlug, chapterId, getToken);
+    },
     enabled: !!bookSlug && !!chapterId,
   });
 };
