@@ -2,14 +2,16 @@
 'use client';
 
 import React from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
 interface Chapter {
   id: string;
   title: string;
   order: number;
+  level?: number;
   parent_chapter_id?: string | null;
   parentChapterId?: string | null;
+  children?: Chapter[];
+  [key: string]: any;
 }
 
 interface SimpleChapterListProps {
@@ -17,64 +19,63 @@ interface SimpleChapterListProps {
   chapters: Chapter[];
 }
 
+// Helper function to flatten the chapter tree
+function flattenChapters(chapters: Chapter[]): Chapter[] {
+  const result: Chapter[] = [];
+  
+  function processChapter(chapter: Chapter, level: number = 0) {
+    const { children, ...rest } = chapter;
+    result.push({
+      ...rest,
+      level
+    });
+    
+    if (children && children.length > 0) {
+      children.forEach(child => processChapter(child, level + 1));
+    }
+  }
+  
+  chapters.forEach(chapter => processChapter(chapter, 0));
+  return result;
+}
+
 export function SimpleChapterList({ bookTitle, chapters }: SimpleChapterListProps) {
+  // Flatten the chapters if they're in a hierarchical structure
+  const flatChapters = React.useMemo(() => {
+    return flattenChapters(chapters);
+  }, [chapters]);
+
   // Sort chapters by order
-  const sortedChapters = [...chapters].sort((a, b) => (a.order || 0) - (b.order || 0));
+  const sortedChapters = React.useMemo(() => {
+    return [...flatChapters].sort((a, b) => (a.order || 0) - (b.order || 0));
+  }, [flatChapters]);
+
+  if (sortedChapters.length === 0) {
+    return <div className="text-muted-foreground">No chapters found for this book.</div>;
+  }
 
   return (
-    <Card className="w-full max-w-3xl">
-      <CardHeader className="pb-3">
-        <CardTitle className="text-lg">Chapters: {bookTitle}</CardTitle>
-        <div className="text-sm text-muted-foreground">
-          Total: {sortedChapters.length} chapters
+    <div className="space-y-6">
+      {sortedChapters.map((chapter) => (
+        <div key={chapter.id} className="border-b pb-4 last:border-b-0 last:pb-0">
+          <h4 className="font-medium text-lg mb-1">{chapter.title}</h4>
+          <div className="text-sm text-muted-foreground grid grid-cols-3 gap-2">
+            <div>ID: {chapter.id}</div>
+            <div>Order: {chapter.order}</div>
+            <div>Parent: {chapter.parent_chapter_id || chapter.parentChapterId || '-'}</div>
+          </div>
         </div>
-      </CardHeader>
-      <CardContent>
-        <div className="border rounded-md overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50">
-              <tr className="text-left">
-                <th className="p-2 border-b font-medium">Order</th>
-                <th className="p-2 border-b font-medium">Title</th>
-                <th className="p-2 border-b font-medium">Parent ID</th>
-                <th className="p-2 border-b font-medium">ID</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sortedChapters.length > 0 ? (
-                sortedChapters.map((chapter) => (
-                  <tr key={chapter.id} className="border-b hover:bg-muted/10">
-                    <td className="p-2">{chapter.order}</td>
-                    <td className="p-2 font-medium">{chapter.title}</td>
-                    <td className="p-2 text-muted-foreground">
-                      {chapter.parent_chapter_id || chapter.parentChapterId || '-'}
-                    </td>
-                    <td className="p-2 text-muted-foreground text-xs">
-                      {chapter.id}
-                    </td>
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan={4} className="p-4 text-center text-muted-foreground">
-                    No chapters found for this book.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-        
-        {/* Debug information */}
-        <details className="mt-6 border rounded-md overflow-hidden">
-          <summary className="bg-muted/50 p-2 px-3 cursor-pointer text-sm font-medium">
-            Debug Information
-          </summary>
-          <pre className="p-3 text-xs bg-background overflow-auto max-h-60 m-0">
+      ))}
+      
+      {/* Debug information - hidden by default */}
+      <details className="mt-6">
+        <summary className="text-sm text-muted-foreground cursor-pointer">Show debug information</summary>
+        <div className="mt-2 p-3 bg-muted/10 rounded-md">
+          <pre className="text-xs overflow-auto max-h-60">
             {JSON.stringify(sortedChapters, null, 2)}
           </pre>
-        </details>
-      </CardContent>
-    </Card>
+        </div>
+      </details>
+    </div>
   );
 }
