@@ -18,11 +18,21 @@ interface ChapterTreeWrapperProps {
 }
 
 export function ChapterTreeWrapper({ initialChapters, bookId }: ChapterTreeWrapperProps) {
-  const [treeData, setTreeData] = useState<TreeViewItem[]>(() => 
-    convertChaptersToTree(initialChapters)
-  );
+  // Add debug logging for initial chapters
+  React.useEffect(() => {
+    console.log('Initial chapters:', initialChapters);
+    const tree = convertChaptersToTree(initialChapters);
+    console.log('Converted tree:', JSON.stringify(tree, null, 2));
+  }, [initialChapters]);
+
+  const [treeData, setTreeData] = useState<TreeViewItem[]>(() => {
+    const tree = convertChaptersToTree(initialChapters);
+    return tree;
+  });
+  
   const updateChapterOrder = useUpdateChapterOrder(bookId);
   const [isUpdating, setIsUpdating] = useState(false);
+  const [expandedIds, setExpandedIds] = React.useState<Set<string>>(new Set());
 
   // Handle tree changes and persist order
   const handleTreeChange = useCallback((newTree: TreeViewItem[]) => {
@@ -68,8 +78,26 @@ export function ChapterTreeWrapper({ initialChapters, bookId }: ChapterTreeWrapp
     }
   }, [bookId, initialChapters, treeData, updateChapterOrder]);
 
+  // Auto-expand all nodes initially
+  React.useEffect(() => {
+    const allIds = new Set<string>();
+    const collectIds = (items: TreeViewItem[]) => {
+      items.forEach(item => {
+        allIds.add(item.id);
+        if (item.children?.length) {
+          collectIds(item.children);
+        }
+      });
+    };
+    collectIds(treeData);
+    setExpandedIds(allIds);
+  }, [treeData]);
+
   return (
     <div className="space-y-2 relative">
+      <div className="text-sm text-muted-foreground mb-2">
+        {treeData.length} chapters loaded • {expandedIds.size} expanded nodes
+      </div>
       {isUpdating && (
         <div className="absolute inset-0 bg-background/80 flex items-center justify-center z-10">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -89,57 +117,43 @@ export function ChapterTreeWrapper({ initialChapters, bookId }: ChapterTreeWrapp
             </Link>
           </Button>
         </div>
-        <TreeView
-          data={treeData}
-          title=""
-          iconMap={{ chapter: <Folder className="h-4 w-4 text-primary/80" /> }}
-          onMoveItem={handleMoveItem}
-          menuItems={[
-            {
-              id: "view",
-              label: "View",
-              icon: <Eye className="h-4 w-4" />,
-              action: (items) => {
-                if (items.length) {
-                  window.location.href = `/dashboard/books/${bookId}/chapters/${items[0].id}`;
-                }
+        <div className="border rounded-md p-2 bg-background/50">
+          <TreeView
+            data={treeData}
+            onTreeChange={handleTreeChange}
+            onMoveItem={handleMoveItem}
+            getIcon={(item: TreeViewItem, depth: number) => (
+              <Folder className="h-4 w-4 text-primary/80" />
+            )}
+            className="min-h-[300px]"
+            menuItems={[
+              {
+                id: "view",
+                label: "View",
+                icon: <Eye className="h-4 w-4" />,
+                action: (items: TreeViewItem[]) => {
+                  if (items.length) {
+                    window.location.href = `/dashboard/books/${bookId}/chapters/${items[0].id}`;
+                  }
+                },
               },
-            },
-            {
-              id: "edit",
-              label: "Edit",
-              icon: <Pencil className="h-4 w-4" />,
-              action: (items) => {
-                if (items.length) {
-                  window.location.href = `/dashboard/books/${bookId}/chapters/${items[0].id}/edit`;
-                }
+              {
+                id: "edit",
+                label: "Edit",
+                icon: <Pencil className="h-4 w-4" />,
+                action: (items: TreeViewItem[]) => {
+                  if (items.length) {
+                    window.location.href = `/dashboard/books/${bookId}/chapters/${items[0].id}/edit`;
+                  }
+                },
               },
-            },
-          ]}
-          onAction={(action, items) => {
-            // Handle actions if needed
-            console.log("Action:", action, items);
-          }}
-          onTreeChange={async (newTree) => {
-            // Update local state
-            handleTreeChange(newTree);
-            
-            // Persist changes to server
-            try {
-              setIsUpdating(true);
-              const updates = buildOrderPayload(newTree, bookId);
-              await updateChapterOrder.mutateAsync(updates);
-              toast.success("Chapter order updated");
-            } catch (error) {
-              console.error("Error updating chapter order:", error);
-              toast.error("Failed to update chapter order");
-              // Revert to previous state on error
-              setTreeData(convertChaptersToTree(initialChapters));
-            } finally {
-              setIsUpdating(false);
-            }
-          }}
-        />
+            ]}
+            onAction={(action: string, items: TreeViewItem[]) => {
+              // Handle actions if needed
+              console.log("Action:", action, items);
+            }}
+          />
+        </div>
       </div>
     </div>
   );

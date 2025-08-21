@@ -14,7 +14,7 @@ interface ChapterWithOrder extends Chapter {
 export function convertChaptersToTree(chapters: Chapter[]): TreeViewItem[] {
   // Create lookup maps for O(1) access
   const nodeMap = new Map<string, TreeViewItem>();
-  const childrenMap = new Map<string, TreeViewItem[]>();
+  const childrenMap = new Map<string | null, TreeViewItem[]>();
   
   // First pass: create all nodes and build children map
   chapters.forEach((chapter) => {
@@ -32,37 +32,29 @@ export function convertChaptersToTree(chapters: Chapter[]): TreeViewItem[] {
     
     nodeMap.set(chapter.id, node);
     
-    // Initialize children array for this node if it doesn't exist
-    if (!childrenMap.has(chapter.id)) {
-      childrenMap.set(chapter.id, []);
+    // Handle parent-child relationships
+    const parentId = chapter.parent_chapter_id ?? null;
+    if (!childrenMap.has(parentId)) {
+      childrenMap.set(parentId, []);
     }
-    
-    // Add this node to its parent's children
-    const parentId = chapter.parent_chapter_id;
-    if (parentId) {
-      if (!childrenMap.has(parentId)) {
-        childrenMap.set(parentId, []);
-      }
-      childrenMap.get(parentId)!.push(node);
-    }
+    childrenMap.get(parentId)!.push(node);
   });
   
   // Second pass: build the tree structure
   const buildTree = (parentId: string | null): TreeViewItem[] => {
-    const rootNodes = parentId 
-      ? childrenMap.get(parentId) ?? [] 
-      : Array.from(nodeMap.values()).filter(node => !node.data?.parent_chapter_id);
+    const nodes = childrenMap.get(parentId) || [];
     
     // Sort nodes by their order
-    rootNodes.sort((a, b) => (a.data?.order ?? 0) - (b.data?.order ?? 0));
+    nodes.sort((a, b) => (a.data?.order ?? 0) - (b.data?.order ?? 0));
     
     // Build the tree recursively
-    return rootNodes.map(node => ({
+    return nodes.map(node => ({
       ...node,
       children: buildTree(node.id)
     }));
   };
   
+  // Start building from root nodes (parentId = null)
   return buildTree(null);
 }
 
