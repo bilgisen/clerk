@@ -27,7 +27,16 @@ export function ChapterTreeWrapper({ initialChapters, bookId }: ChapterTreeWrapp
   // Handle tree changes and persist order
   const handleTreeChange = useCallback((newTree: TreeViewItem[]) => {
     setTreeData(newTree);
-  }, []);
+    
+    // Auto-save the new order when tree changes
+    const updates = buildOrderPayload(newTree, bookId);
+    updateChapterOrder.mutate(updates, {
+      onError: (error) => {
+        console.error("Error updating chapter order:", error);
+        toast.error("Failed to update chapter order");
+      }
+    });
+  }, [bookId, updateChapterOrder]);
 
   // Handle item movement
   const handleMoveItem = useCallback(async (
@@ -38,16 +47,19 @@ export function ChapterTreeWrapper({ initialChapters, bookId }: ChapterTreeWrapp
     try {
       setIsUpdating(true);
       
-      // Prepare the updates for the server
-      const updates = buildOrderPayload(treeData, bookId);
+      // The actual tree update is handled by the TreeView component
+      // We don't need to do anything here as handleTreeChange will be called
+      // with the updated tree structure
       
-      // Send the updates to the server
-      await updateChapterOrder.mutateAsync(updates);
+      // Show loading state for better UX
+      toast.loading("Updating chapter order...");
       
-      toast.success("Chapter order updated successfully");
+      // The actual save happens in handleTreeChange
+      // which is called automatically by the TreeView component
+      
     } catch (error) {
-      console.error("Error updating chapter order:", error);
-      toast.error("Failed to update chapter order");
+      console.error("Error moving chapter:", error);
+      toast.error("Failed to move chapter");
       
       // Revert to the previous state on error
       setTreeData(convertChaptersToTree(initialChapters));

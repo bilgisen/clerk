@@ -76,17 +76,16 @@ export function buildOrderPayload(tree: TreeViewItem[], bookId: string): Chapter
 
   const walk = (items: TreeViewItem[], parentId: string | null, level: number) => {
     items.forEach((item) => {
-      // Use the order from data if it exists, otherwise use the counter
-      const order = item.data?.order ?? orderCounter;
-      orderCounter += 1000; // Increment by 1000 for the next item
-      
+      // Each item gets the current order counter value
       payload.push({
         id: item.id,
         bookId,
         parent_chapter_id: parentId,
-        order,
+        order: orderCounter,
         level,
       });
+      
+      orderCounter += 1000; // Increment for the next item
       
       // Recursively process children if they exist
       if (item.children?.length) {
