@@ -12,6 +12,7 @@ import type { ChapterNode } from "@/types/dnd";
  * @returns A promise that resolves to an array of ChapterNode objects with nested children
  */
 export async function getChaptersByBook(bookId: string): Promise<ChapterNode[]> {
+  console.log(`[DEBUG] getChaptersByBook called with bookId: ${bookId}`);
   if (!bookId) {
     console.error('No bookId provided to getChaptersByBook');
     return [];
@@ -19,6 +20,7 @@ export async function getChaptersByBook(bookId: string): Promise<ChapterNode[]> 
 
   const session = await auth();
   const userId = session?.userId;
+  console.log(`[DEBUG] Session user ID: ${userId || 'none'}`);
 
   if (!userId) {
     console.error('No user ID in session');
@@ -27,6 +29,7 @@ export async function getChaptersByBook(bookId: string): Promise<ChapterNode[]> 
 
   try {
     // First, verify the book belongs to the user
+    console.log(`[DEBUG] Verifying book ownership - Book ID: ${bookId}, User ID: ${userId}`);
     const book = await db.query.books.findFirst({
       where: (books, { and, eq }) => and(
         eq(books.id, bookId), 
@@ -36,9 +39,11 @@ export async function getChaptersByBook(bookId: string): Promise<ChapterNode[]> 
     });
 
     if (!book) {
+      console.error(`[ERROR] Book not found or permission denied - Book ID: ${bookId}, User ID: ${userId}`);
       throw new Error("Book not found or you don't have permission to view it");
     }
 
+    console.log(`[DEBUG] Fetching chapters for book ID: ${bookId}`);
     // Fetch all chapters for the book with their parent chapter relation
     const dbChapters = await db.query.chapters.findMany({
       where: (chapters, { eq }) => eq(chapters.bookId, bookId),
@@ -47,6 +52,18 @@ export async function getChaptersByBook(bookId: string): Promise<ChapterNode[]> 
       },
       orderBy: (chapters, { asc }) => [asc(chapters.order)],
     });
+    
+    console.log(`[DEBUG] Found ${dbChapters.length} chapters in database`);
+    if (dbChapters.length > 0) {
+      console.log('[DEBUG] First chapter sample:', {
+        id: dbChapters[0].id,
+        title: dbChapters[0].title,
+        order: dbChapters[0].order,
+        parentChapterId: dbChapters[0].parentChapterId,
+        hasParentChapter: !!dbChapters[0].parentChapter,
+        parentChapter: dbChapters[0].parentChapter
+      });
+    }
 
     // Build the chapter hierarchy
     const chapterMap = new Map<string, ChapterNode>();

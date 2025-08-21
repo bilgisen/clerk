@@ -8,7 +8,8 @@ interface Chapter {
   id: string;
   title: string;
   order: number;
-  parent_chapter_id: string | null;
+  parent_chapter_id?: string | null;
+  parentChapterId?: string | null;
 }
 
 interface SimpleChapterListProps {
@@ -17,41 +18,62 @@ interface SimpleChapterListProps {
 }
 
 export function SimpleChapterList({ bookTitle, chapters }: SimpleChapterListProps) {
-  const sortedChapters = [...chapters].sort((a, b) => a.order - b.order);
+  // Sort chapters by order
+  const sortedChapters = [...chapters].sort((a, b) => (a.order || 0) - (b.order || 0));
 
   return (
-    <Card className="w-full max-w-md">
-      <CardHeader>
-        <CardTitle>Chapters: {bookTitle}</CardTitle>
+    <Card className="w-full max-w-3xl">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-lg">Chapters: {bookTitle}</CardTitle>
+        <div className="text-sm text-muted-foreground">
+          Total: {sortedChapters.length} chapters
+        </div>
       </CardHeader>
       <CardContent>
-        <div className="space-y-2">
-          {sortedChapters.map((chapter) => (
-            <div 
-              key={chapter.id}
-              className="p-3 border rounded-md bg-muted/10"
-              style={{ 
-                marginLeft: chapter.parent_chapter_id ? '1.5rem' : '0',
-                borderLeft: chapter.parent_chapter_id ? '2px solid #64748b' : 'none'
-              }}
-            >
-              <div className="font-medium">{chapter.title}</div>
-              <div className="text-sm text-muted-foreground">
-                ID: {chapter.id}
-              </div>
-              <div className="text-xs text-muted-foreground">
-                Order: {chapter.order} | Parent: {chapter.parent_chapter_id || 'None'}
-              </div>
-            </div>
-          ))}
+        <div className="border rounded-md overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/50">
+              <tr className="text-left">
+                <th className="p-2 border-b font-medium">Order</th>
+                <th className="p-2 border-b font-medium">Title</th>
+                <th className="p-2 border-b font-medium">Parent ID</th>
+                <th className="p-2 border-b font-medium">ID</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sortedChapters.length > 0 ? (
+                sortedChapters.map((chapter) => (
+                  <tr key={chapter.id} className="border-b hover:bg-muted/10">
+                    <td className="p-2">{chapter.order}</td>
+                    <td className="p-2 font-medium">{chapter.title}</td>
+                    <td className="p-2 text-muted-foreground">
+                      {chapter.parent_chapter_id || chapter.parentChapterId || '-'}
+                    </td>
+                    <td className="p-2 text-muted-foreground text-xs">
+                      {chapter.id}
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={4} className="p-4 text-center text-muted-foreground">
+                    No chapters found for this book.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
         
-        <div className="mt-4 p-3 bg-muted/20 rounded-md">
-          <h4 className="text-sm font-medium mb-2">Raw Data:</h4>
-          <pre className="text-xs bg-background p-2 rounded overflow-auto max-h-40">
+        {/* Debug information */}
+        <details className="mt-6 border rounded-md overflow-hidden">
+          <summary className="bg-muted/50 p-2 px-3 cursor-pointer text-sm font-medium">
+            Debug Information
+          </summary>
+          <pre className="p-3 text-xs bg-background overflow-auto max-h-60 m-0">
             {JSON.stringify(sortedChapters, null, 2)}
           </pre>
-        </div>
+        </details>
       </CardContent>
     </Card>
   );

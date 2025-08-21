@@ -49,21 +49,34 @@ export default async function BookDetailPage({ params, searchParams }: PageProps
 
   try {
     console.log(`[DEBUG] Fetching book with slug: ${slug}`);
-    // Fetch book data and its chapters
-    const [book, chapters] = await Promise.all([
-      getBookBySlug(slug),
-      getChaptersByBook(slug) // We'll pass the book ID after fetching
-    ]);
-    
+    // First, get the book by slug
+    console.log(`[DEBUG] Fetching book with slug: ${slug}`);
+    const book = await getBookBySlug(slug);
     console.log(`[DEBUG] Book fetch result:`, book ? 'Found' : 'Not found');
     if (!book) {
-      console.log(`[ERROR] Book not found with slug: ${slug}`);
+      console.error(`[ERROR] Book not found with slug: ${slug}`);
       notFound();
     }
     
-    // Now that we have the book, fetch its chapters with the correct book ID
+    console.log(`[DEBUG] Book found - ID: ${book.id}, Title: "${book.title}"`);
+    
+    // Now fetch the chapters for this book
+    console.log(`[DEBUG] Fetching chapters for book ID: ${book.id}`);
     const bookChapters = await getChaptersByBook(book.id);
     console.log(`[DEBUG] Fetched ${bookChapters.length} chapters for book ${book.id}`);
+    
+    // Log the first few chapters for debugging
+    if (bookChapters.length > 0) {
+      console.log('[DEBUG] First 3 chapters sample:', bookChapters.slice(0, 3).map(ch => ({
+        id: ch.id,
+        title: ch.title,
+        order: ch.order,
+        parentChapterId: ch.parentChapterId,
+        hasChildren: ch.children && ch.children.length > 0
+      })));
+    } else {
+      console.log('[DEBUG] No chapters found for this book');
+    }
     
     // Show error message if any
     if (error) {
