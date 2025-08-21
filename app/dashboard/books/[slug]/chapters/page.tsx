@@ -146,10 +146,7 @@ export default async function BookDetailPage({ params, searchParams }: PageProps
             <div className="border rounded-lg overflow-hidden">
               <ChapterTreeArborist 
                 bookSlug={slug}
-                onSelectChapter={(chapter) => {
-                  // Handle chapter selection if needed
-                  console.log('Selected chapter:', chapter);
-                }}
+                onSelectChapter={undefined} // Remove the inline function
               />
             </div>
           </aside>

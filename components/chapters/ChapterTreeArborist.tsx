@@ -193,7 +193,11 @@ export function ChapterTreeArborist({
         ref={dragHandle}
         style={style} 
         className={`flex items-center px-2 py-1 hover:bg-gray-100 rounded ${node.data.id === selectedChapterId ? 'bg-blue-50' : ''}`}
-        onClick={() => onSelectChapter?.(node.data)}
+        onClick={() => {
+          if (onSelectChapter) {
+            onSelectChapter(node.data);
+          }
+        }}
       >
         <GripVertical className="w-4 h-4 mr-2 text-gray-400 cursor-move" />
         <span className="truncate">{node.data.title}</span>
