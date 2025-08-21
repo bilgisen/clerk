@@ -60,10 +60,10 @@ export default async function BookDetailPage({ params, searchParams }: PageProps
     
     console.log(`[DEBUG] Book found - ID: ${book.id}, Title: "${book.title}"`);
     
-    // Now fetch the chapters for this book
-    console.log(`[DEBUG] Fetching chapters for book ID: ${book.id}`);
-    const bookChapters = await getChaptersByBook(book.id);
-    console.log(`[DEBUG] Fetched ${bookChapters.length} chapters for book ${book.id}`);
+    // Now fetch the chapters for this book using the slug
+    console.log(`[DEBUG] Fetching chapters for book slug: ${slug}`);
+    const bookChapters = await getChaptersByBook(slug);
+    console.log(`[DEBUG] Fetched ${bookChapters.length} chapters for book ${slug}`);
     
     // Log the first few chapters for debugging
     if (bookChapters.length > 0) {
