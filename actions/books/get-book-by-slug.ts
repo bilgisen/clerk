@@ -40,17 +40,12 @@ export async function getBookBySlug(slug: string): Promise<Book | null> {
       return null;
     }
 
-    console.log(`[DEBUG] Querying database for book with slug: ${slug} and user ID: ${user.id}`);
-    // Now query the book using the database user ID
+    console.log(`[DEBUG] Querying database for book with slug: ${slug}`);
+    // Find the book by slug without user ID check to allow viewing
     const [book] = await db
       .select()
       .from(books)
-      .where(
-        and(
-          eq(books.slug, slug),
-          eq(books.userId, user.id)
-        )
-      )
+      .where(eq(books.slug, slug))
       .limit(1);
     
     console.log(`[DEBUG] Database query result:`, book ? 'Book found' : 'No book found');
