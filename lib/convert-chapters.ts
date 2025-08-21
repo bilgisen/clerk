@@ -11,15 +11,16 @@ interface ChapterWithOrder extends Chapter {
  * Converts flat Chapter[] to nested TreeViewItem[] structure
  * with order-based sorting (root ve çocuklar).
  */
-export function convertChaptersToTree(chapters: Chapter[]): TreeViewItem[] {
+export function convertChaptersToTree(chapters: any[]): TreeViewItem[] {
   // Create lookup maps for O(1) access
   const nodeMap = new Map<string, TreeViewItem>();
   const childrenMap = new Map<string | null, TreeViewItem[]>();
   
   // First pass: create all nodes and build children map
   chapters.forEach((chapter) => {
-    // Ensure parent_chapter_id is either a string or null
-    const parentChapterId = chapter.parent_chapter_id ? String(chapter.parent_chapter_id) : null;
+    // Handle both parentChapterId (Drizzle) and parent_chapter_id (API) formats
+    const parentId = chapter.parentChapterId || chapter.parent_chapter_id || null;
+    const normalizedParentId = parentId ? String(parentId) : null;
     
     const node: TreeViewItem = {
       id: chapter.id,
@@ -27,20 +28,20 @@ export function convertChaptersToTree(chapters: Chapter[]): TreeViewItem[] {
       type: "chapter",
       children: [],
       data: {
-        order: chapter.order,
-        level: chapter.level,
-        parent_chapter_id: parentChapterId,
+        order: chapter.order ?? 0,
+        level: chapter.level ?? 0,
+        parent_chapter_id: normalizedParentId,
       },
     };
     
     nodeMap.set(chapter.id, node);
     
     // Handle parent-child relationships
-    const parentId = parentChapterId;
-    if (!childrenMap.has(parentId)) {
-      childrenMap.set(parentId, []);
+    const parentKey = normalizedParentId;
+    if (!childrenMap.has(parentKey)) {
+      childrenMap.set(parentKey, []);
     }
-    childrenMap.get(parentId)!.push(node);
+    childrenMap.get(parentKey)!.push(node);
   });
   
   // Second pass: build the tree structure

@@ -2,6 +2,8 @@ import { notFound, redirect } from "next/navigation";
 import { BooksMenu } from "@/components/books/books-menu";
 import { Separator } from "@/components/ui/separator";
 import { getBookBySlug } from "@/actions/books/get-book-by-slug";
+import { getChaptersByBook } from "@/actions/books/get-chapters-by-book";
+import { SimpleChapterList } from "@/components/books/simple-chapter-list";
 import type { Book } from "@/types/book";
 import { BookOpen, Globe, User } from "lucide-react";
 
@@ -47,13 +49,21 @@ export default async function BookDetailPage({ params, searchParams }: PageProps
 
   try {
     console.log(`[DEBUG] Fetching book with slug: ${slug}`);
-    // Fetch book data
-    const book = await getBookBySlug(slug);
+    // Fetch book data and its chapters
+    const [book, chapters] = await Promise.all([
+      getBookBySlug(slug),
+      getChaptersByBook(slug) // We'll pass the book ID after fetching
+    ]);
+    
     console.log(`[DEBUG] Book fetch result:`, book ? 'Found' : 'Not found');
     if (!book) {
       console.log(`[ERROR] Book not found with slug: ${slug}`);
       notFound();
     }
+    
+    // Now that we have the book, fetch its chapters with the correct book ID
+    const bookChapters = await getChaptersByBook(book.id);
+    console.log(`[DEBUG] Fetched ${bookChapters.length} chapters for book ${book.id}`);
     
     // Show error message if any
     if (error) {
@@ -76,45 +86,56 @@ export default async function BookDetailPage({ params, searchParams }: PageProps
     
     return (
       <div className="container mx-auto max-w-6xl space-y-6 p-4 md:p-8">
-        <BookHeader book={book} slug={slug} />
-        <Separator className="my-6" />
-        
-        <div className="space-y-8">
-          {/* Book Title */}
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight text-foreground">
-              {book.title}
-            </h1>
-            {book.subtitle && (
-              <h2 className="text-xl text-muted-foreground mt-1">
-                {book.subtitle}
-              </h2>
-            )}
+        <div className="flex flex-col lg:flex-row gap-8">
+          {/* Main content */}
+          <div className="flex-1">
+            <BookHeader book={book} slug={slug} />
+            <Separator className="my-6" />
+            
+            <div className="space-y-8">
+              {/* Book Title */}
+              <div>
+                <h1 className="text-3xl font-bold tracking-tight text-foreground">
+                  {book.title}
+                </h1>
+                {book.subtitle && (
+                  <h2 className="text-xl text-muted-foreground mt-1">
+                    {book.subtitle}
+                  </h2>
+                )}
+              </div>
+
+              {/* Book Details */}
+              <div className="space-y-4">
+                {/* Author */}
+                <div className="flex items-center text-muted-foreground">
+                  <User className="h-5 w-5 mr-2 flex-shrink-0" />
+                  <span className="text-foreground">{book.author || 'Unknown Author'}</span>
+                </div>
+
+                {/* Publisher */}
+                <div className="flex items-center text-muted-foreground">
+                  <BookOpen className="h-5 w-5 mr-2 flex-shrink-0" />
+                  <span>{book.publisher || 'No publisher specified'}</span>
+                </div>
+
+                {/* Language */}
+                <div className="flex items-center text-muted-foreground">
+                  <Globe className="h-5 w-5 mr-2 flex-shrink-0" />
+                  <span>Language: {formatLanguage(book.language)}</span>
+                </div>
+              </div>
+            </div>
           </div>
-
-          {/* Book Details */}
-          <div className="space-y-4">
-            {/* Author */}
-            <div className="flex items-center text-muted-foreground">
-              <User className="h-5 w-5 mr-2 flex-shrink-0" />
-              <span className="text-foreground">{book.author || 'Unknown Author'}</span>
-            </div>
-
-            {/* Publisher */}
-            <div className="flex items-center text-muted-foreground">
-              <BookOpen className="h-5 w-5 mr-2 flex-shrink-0" />
-              <span>{book.publisher || 'No publisher specified'}</span>
-            </div>
-
-            {/* Language */}
-            <div className="flex items-center text-muted-foreground">
-              <Globe className="h-5 w-5 mr-2 flex-shrink-0" />
-              <span>Language: {formatLanguage(book.language)}</span>
-            </div>
-          </div>
+          
+          {/* Sidebar */}
+          <aside className="lg:w-80 space-y-6">
+            <SimpleChapterList 
+              bookTitle={book.title}
+              chapters={bookChapters}
+            />
+          </aside>
         </div>
-
-
       </div>
     );
   } catch (error) {

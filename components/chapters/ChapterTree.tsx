@@ -20,20 +20,45 @@ interface ChapterTreeWrapperProps {
 export function ChapterTreeWrapper({ initialChapters, bookId }: ChapterTreeWrapperProps) {
   // Add debug logging for initial chapters
   React.useEffect(() => {
-    console.log('Initial chapters:', initialChapters);
+    console.log('Raw initial chapters:', JSON.stringify(initialChapters, null, 2));
+    
+    // Log the structure of the first chapter
+    if (initialChapters.length > 0) {
+      console.log('First chapter structure:', {
+        id: initialChapters[0].id,
+        title: initialChapters[0].title,
+        parentChapterId: (initialChapters[0] as any).parentChapterId,
+        parent_chapter_id: (initialChapters[0] as any).parent_chapter_id,
+        allKeys: Object.keys(initialChapters[0])
+      });
+    }
+    
     const tree = convertChaptersToTree(initialChapters);
-    console.log('Converted tree:', JSON.stringify(tree, null, 2));
+    console.log('Converted tree structure:', {
+      tree,
+      hasChildren: tree.some(node => node.children && node.children.length > 0)
+    });
     
     // Log parent-child relationships
     const parentMap = new Map<string, string[]>();
     initialChapters.forEach(chapter => {
-      const parentId = chapter.parent_chapter_id ? String(chapter.parent_chapter_id) : 'root';
-      if (!parentMap.has(parentId)) {
-        parentMap.set(parentId, []);
+      // Try both possible field names for parent ID
+      const parentId = (chapter as any).parentChapterId || 
+                      (chapter as any).parent_chapter_id || 
+                      'root';
+      const normalizedParentId = parentId === 'root' ? 'root' : String(parentId);
+      
+      if (!parentMap.has(normalizedParentId)) {
+        parentMap.set(normalizedParentId, []);
       }
-      parentMap.get(parentId)!.push(chapter.id);
+      parentMap.get(normalizedParentId)!.push(chapter.id);
     });
-    console.log('Parent-child relationships:', Object.fromEntries(parentMap));
+    
+    console.log('Parent-child relationships:', {
+      entries: Object.fromEntries(parentMap),
+      hasRelationships: Array.from(parentMap.entries())
+        .some(([parentId, children]) => parentId !== 'root' && children.length > 0)
+    });
   }, [initialChapters]);
 
   const [treeData, setTreeData] = useState<TreeViewItem[]>(() => {

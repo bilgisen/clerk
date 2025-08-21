@@ -47,6 +47,14 @@ export async function GET(
       orderBy: [chapters.order],
     });
 
+    // Debug log the raw database response
+    console.log('Raw database response:', JSON.stringify(allChapters, null, 2));
+    
+    // Debug log the first chapter to check its structure
+    if (allChapters.length > 0) {
+      console.log('First chapter fields:', Object.keys(allChapters[0]));
+    }
+
     return NextResponse.json(allChapters);
   } catch (error) {
     console.error('Error fetching chapters:', error);
