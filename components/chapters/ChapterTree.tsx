@@ -23,6 +23,17 @@ export function ChapterTreeWrapper({ initialChapters, bookId }: ChapterTreeWrapp
     console.log('Initial chapters:', initialChapters);
     const tree = convertChaptersToTree(initialChapters);
     console.log('Converted tree:', JSON.stringify(tree, null, 2));
+    
+    // Log parent-child relationships
+    const parentMap = new Map<string, string[]>();
+    initialChapters.forEach(chapter => {
+      const parentId = chapter.parent_chapter_id ? String(chapter.parent_chapter_id) : 'root';
+      if (!parentMap.has(parentId)) {
+        parentMap.set(parentId, []);
+      }
+      parentMap.get(parentId)!.push(chapter.id);
+    });
+    console.log('Parent-child relationships:', Object.fromEntries(parentMap));
   }, [initialChapters]);
 
   const [treeData, setTreeData] = useState<TreeViewItem[]>(() => {

@@ -18,6 +18,9 @@ export function convertChaptersToTree(chapters: Chapter[]): TreeViewItem[] {
   
   // First pass: create all nodes and build children map
   chapters.forEach((chapter) => {
+    // Ensure parent_chapter_id is either a string or null
+    const parentChapterId = chapter.parent_chapter_id ? String(chapter.parent_chapter_id) : null;
+    
     const node: TreeViewItem = {
       id: chapter.id,
       name: chapter.title,
@@ -26,14 +29,14 @@ export function convertChaptersToTree(chapters: Chapter[]): TreeViewItem[] {
       data: {
         order: chapter.order,
         level: chapter.level,
-        parent_chapter_id: chapter.parent_chapter_id ?? null,
+        parent_chapter_id: parentChapterId,
       },
     };
     
     nodeMap.set(chapter.id, node);
     
     // Handle parent-child relationships
-    const parentId = chapter.parent_chapter_id ?? null;
+    const parentId = parentChapterId;
     if (!childrenMap.has(parentId)) {
       childrenMap.set(parentId, []);
     }
