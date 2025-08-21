@@ -1,11 +1,9 @@
 // components/books/simple-chapter-list.tsx
 'use client';
 
-import React from 'react';
-import { useChaptersBySlug } from "@/hooks/api";
+import React, { useMemo } from 'react';
 import { Skeleton } from "@/components/ui/skeleton";
 import { useQuery } from "@tanstack/react-query";
-import { Chapter } from "@/types/chapter";
 import { useAuth } from "@clerk/nextjs";
 
 interface SimpleChapterListProps {
@@ -16,28 +14,55 @@ interface SimpleChapterListProps {
 export function SimpleChapterList({ bookSlug, bookTitle }: SimpleChapterListProps) {
   const { getToken } = useAuth();
   
-  const { data: chapters, isLoading, error } = useQuery({
+  const { data: chapters = [], isLoading, error } = useQuery({
     queryKey: ['chapters', bookSlug],
     queryFn: async () => {
-      const token = await getToken();
-      const response = await fetch(`/api/books/by-slug/${bookSlug}/chapters`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
+      try {
+        const token = await getToken();
+        const response = await fetch(`/api/books/by-slug/${bookSlug}/chapters`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          cache: 'no-store'
+        });
+        
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.message || 'Failed to fetch chapters');
         }
-      });
-      if (!response.ok) {
-        throw new Error('Failed to fetch chapters');
+        
+        return await response.json();
+      } catch (err) {
+        console.error('Error fetching chapters:', err);
+        throw err;
       }
-      return response.json();
     }
   });
 
+  const sortedChapters = useMemo(() => {
+    if (!Array.isArray(chapters)) return [];
+    
+    const flatten = (items: any[]): any[] => {
+      return items.reduce((acc, item) => {
+        const { children, ...rest } = item;
+        return [
+          ...acc, 
+          { ...rest },
+          ...(Array.isArray(children) ? flatten(children) : [])
+        ];
+      }, []);
+    };
+    
+    return flatten(chapters).sort((a, b) => (a.order || 0) - (b.order || 0));
+  }, [chapters]);
+
   if (isLoading) {
     return (
-      <div className="space-y-6">
-        {[...Array(3)].map((_, i) => (
-          <div key={i} className="space-y-2">
-            <Skeleton className="h-6 w-3/4" />
+      <div className="space-y-4">
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="space-y-2 p-2 border rounded">
+            <Skeleton className="h-5 w-3/4" />
             <Skeleton className="h-4 w-full" />
             <Skeleton className="h-4 w-1/2" />
           </div>
@@ -47,47 +72,43 @@ export function SimpleChapterList({ bookSlug, bookTitle }: SimpleChapterListProp
   }
 
   if (error) {
-    return <div className="text-destructive">Error loading chapters: {error.message}</div>;
+    return (
+      <div className="p-4 border border-destructive rounded bg-destructive/10 text-destructive">
+        Error loading chapters: {error instanceof Error ? error.message : 'Unknown error'}
+      </div>
+    );
   }
 
-  if (!chapters || chapters.length === 0) {
-    return <div className="text-muted-foreground">No chapters found for this book.</div>;
+  if (!sortedChapters.length) {
+    return <div className="text-muted-foreground p-2">No chapters found.</div>;
   }
-  
-  // Flatten the chapters if they're in a hierarchical structure
-  const sortedChapters = React.useMemo(() => {
-    const flatten = (items: any[]): any[] => {
-      return items.reduce((acc, item) => {
-        const { children, ...rest } = item;
-        return [...acc, rest, ...(children ? flatten(children) : [])];
-      }, []);
-    };
-    
-    return [...flatten(chapters)].sort((a, b) => (a.order || 0) - (b.order || 0));
-  }, [chapters]);
 
   return (
-    <div className="space-y-6">
-      {sortedChapters.map((chapter) => (
-        <div key={chapter.id} className="border-b pb-4 last:border-b-0 last:pb-0">
-          <h4 className="font-medium text-lg mb-1">{chapter.title}</h4>
-          <div className="text-sm text-muted-foreground grid grid-cols-3 gap-2">
-            <div>ID: {chapter.id}</div>
-            <div>Order: {chapter.order}</div>
-            <div>Parent: {chapter.parent_chapter_id || chapter.parentChapterId || '-'}</div>
+    <div className="space-y-4">
+      <h3 className="text-lg font-semibold">Chapters</h3>
+      <div className="space-y-3">
+        {sortedChapters.map((chapter) => (
+          <div key={chapter.id} className="p-3 border rounded hover:bg-muted/10">
+            <h4 className="font-medium">{chapter.title}</h4>
+            <div className="text-sm text-muted-foreground mt-1 grid grid-cols-3 gap-2">
+              <div className="truncate" title={chapter.id}>ID: {chapter.id}</div>
+              <div>Order: {chapter.order}</div>
+              <div className="truncate" title={chapter.parent_chapter_id || chapter.parentChapterId || ''}>
+                Parent: {chapter.parent_chapter_id || chapter.parentChapterId || '-'}
+              </div>
+            </div>
           </div>
-        </div>
-      ))}
+        ))}
+      </div>
       
-      {/* Debug information - hidden by default */}
-      <details className="mt-6">
-        <summary className="text-sm text-muted-foreground cursor-pointer">Show debug information</summary>
-        <div className="mt-2 p-3 bg-muted/10 rounded-md">
-          <pre className="text-xs overflow-auto max-h-60">
+      {process.env.NODE_ENV === 'development' && (
+        <details className="mt-4 text-sm">
+          <summary className="cursor-pointer text-muted-foreground">Debug Info</summary>
+          <pre className="mt-2 p-2 bg-muted/10 rounded text-xs overflow-auto max-h-60">
             {JSON.stringify(sortedChapters, null, 2)}
           </pre>
-        </div>
-      </details>
+        </details>
+      )}
     </div>
   );
 }
