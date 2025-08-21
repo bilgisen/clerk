@@ -1,95 +1,163 @@
-// app/dashboard/books/[slug]/chapters/page.tsx
-"use client";
+import { notFound, redirect } from "next/navigation";
+import { BooksMenu } from "@/components/books/books-menu";
+import { Separator } from "@/components/ui/separator";
+import { getBookBySlug } from "@/actions/books/get-book-by-slug";
+import { getChaptersByBook } from "@/actions/books/get-chapters-by-book";
+import { ChapterTreeArborist } from "@/components/chapters/ChapterTreeArborist";
+import type { Book } from "@/types/book";
+import { BookOpen, Globe, User } from "lucide-react";
 
-import { ChapterTreeWrapper } from "@/components/chapters/ChapterTree";
-import { useChaptersBySlug } from "@/hooks/api";
-import { Skeleton } from "@/components/ui/skeleton";
-import { useQuery } from "@tanstack/react-query";
-import { Chapter } from "@/types/chapter";
-import { useAuth } from "@clerk/nextjs";
-
-interface Book {
-  id: string;
-  title: string;
-  slug: string;
+interface PageProps {
+  params: { slug: string };
+  searchParams?: { [key: string]: string | string[] | undefined };
 }
 
-export default function ChaptersPage({ params }: { params: { slug: string } }) {
-  const { getToken } = useAuth();
-
-  // First, fetch the book data
-  const { data: book, isLoading: isLoadingBook, error: bookError } = useQuery({
-    queryKey: ["book", params.slug],
-    queryFn: async () => {
-      const response = await fetch(`/api/books/by-slug/${params.slug}`, {
-        headers: {
-          'Authorization': `Bearer ${await getToken()}`,
-        },
-      });
-      if (!response.ok) throw new Error("Failed to fetch book");
-      return (await response.json()) as Book;
-    },
-  });
-
-  // Then fetch chapters for the book
-  const { data: chaptersData, isLoading: isLoadingChapters, error: chaptersError } =
-    useChaptersBySlug(params.slug);
-
-  const chapters = chaptersData?.map((chapter: Chapter) => ({
-    ...chapter,
-    order: chapter.order ?? 0,
-    level: chapter.level ?? 0,
-    parent_chapter_id: chapter.parent_chapter_id ?? null,
-  })) || [];
-
-  const isLoading = isLoadingBook || isLoadingChapters;
-  const error = bookError || chaptersError;
-  
-  // Don't show loading state if we already have the book data
-  const showLoading = isLoading && !(book && chaptersData);
-
-  if (showLoading) {
-    return (
-      <div className="p-4">
-        <Skeleton className="h-8 w-48 mb-4" />
-        <div className="space-y-2">
-          {[...Array(3)].map((_, i) => (
-            <Skeleton key={i} className="h-12 w-full" />
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="p-4">
-        <h1 className="text-xl font-semibold mb-4">Chapters</h1>
-        <div className="text-red-500">
-          Error loading {bookError ? "book" : "chapters"}: {error.message}
-        </div>
-      </div>
-    );
-  }
-
-  if (!book) {
-    return (
-      <div className="p-4">
-        <h1 className="text-xl font-semibold mb-4">Chapters</h1>
-        <div>Book not found</div>
-      </div>
-    );
-  }
-
+// Separate component for the book header section
+function BookHeader({ book, slug }: { book: Book; slug: string }) {
   return (
-    <div className="p-4">
-      <h1 className="text-2xl font-bold mb-4">{book?.title || 'Chapters'}</h1>
-      {!isLoadingChapters && chaptersData && (
-        <ChapterTreeWrapper 
-          initialChapters={chapters} 
-          bookId={book?.id || ''} 
-        />
-      )}
+    <div className="flex flex-col space-y-2 sm:flex-row sm:items-center sm:justify-between sm:space-y-0">
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight md:text-3xl">
+          {book.title}
+        </h1>
+        {book.author && (
+          <p className="text-muted-foreground">{book.author}</p>
+        )}
+      </div>
+      <div className="flex-shrink-0">
+        <BooksMenu slug={slug} />
+      </div>
     </div>
   );
+}
+
+/**
+ * Book detail page component that displays a single book and its chapters
+ * @param params - The route parameters containing the book slug
+ */
+export default async function BookDetailPage({ params, searchParams }: PageProps) {
+  const { slug } = params;
+  
+  // Validate slug before proceeding
+  if (!slug || typeof slug !== 'string') {
+    redirect('/dashboard/books');
+    return null;
+  }
+  
+  // Handle potential error from searchParams
+  const error = searchParams?.error as string | undefined;
+
+  try {
+    console.log(`[DEBUG] Fetching book with slug: ${slug}`);
+    // First, get the book by slug
+    console.log(`[DEBUG] Fetching book with slug: ${slug}`);
+    const book = await getBookBySlug(slug);
+    console.log(`[DEBUG] Book fetch result:`, book ? 'Found' : 'Not found');
+    if (!book) {
+      console.error(`[ERROR] Book not found with slug: ${slug}`);
+      notFound();
+    }
+    
+    console.log(`[DEBUG] Book found - ID: ${book.id}, Title: "${book.title}"`);
+    
+    // Now fetch the chapters for this book
+    console.log(`[DEBUG] Fetching chapters for book ID: ${book.id}`);
+    const bookChapters = await getChaptersByBook(book.id);
+    console.log(`[DEBUG] Fetched ${bookChapters.length} chapters for book ${book.id}`);
+    
+    // Log the first few chapters for debugging
+    if (bookChapters.length > 0) {
+      console.log('[DEBUG] First 3 chapters sample:', bookChapters.slice(0, 3).map(ch => ({
+        id: ch.id,
+        title: ch.title,
+        order: ch.order,
+        parentChapterId: ch.parentChapterId,
+        hasChildren: ch.children && ch.children.length > 0
+      })));
+    } else {
+      console.log('[DEBUG] No chapters found for this book');
+    }
+    
+    // Show error message if any
+    if (error) {
+      console.error('Error from search params:', error);
+      // You can show this error to the user if needed
+    }
+    
+    // Format publication year if available
+    const publishYear = book.publishYear 
+      ? new Date(book.publishYear).getFullYear()
+      : null;
+
+    // Format language for display
+    const formatLanguage = (lang: string | null | undefined) => {
+      if (!lang) return 'Not specified';
+      return lang === 'tr' ? 'Türkçe' :
+             lang === 'en' ? 'English' :
+             lang.toUpperCase();
+    };
+    
+    return (
+      <div className="container mx-auto max-w-6xl space-y-6 p-4 md:p-8">
+        <div className="flex flex-col lg:flex-row gap-8">
+          {/* Main content */}
+          <div className="flex-1">
+            <BookHeader book={book} slug={slug} />
+            <Separator className="my-6" />
+            
+            <div className="space-y-8">
+              {/* Book Title */}
+              <div>
+                <h1 className="text-3xl font-bold tracking-tight text-foreground">
+                  {book.title}
+                </h1>
+                {book.subtitle && (
+                  <h2 className="text-xl text-muted-foreground mt-1">
+                    {book.subtitle}
+                  </h2>
+                )}
+              </div>
+
+              {/* Book Details */}
+              <div className="space-y-4">
+                {/* Author */}
+                <div className="flex items-center text-muted-foreground">
+                  <User className="h-5 w-5 mr-2 flex-shrink-0" />
+                  <span className="text-foreground">{book.author || 'Unknown Author'}</span>
+                </div>
+
+                {/* Publisher */}
+                <div className="flex items-center text-muted-foreground">
+                  <BookOpen className="h-5 w-5 mr-2 flex-shrink-0" />
+                  <span>{book.publisher || 'No publisher specified'}</span>
+                </div>
+
+                {/* Language */}
+                <div className="flex items-center text-muted-foreground">
+                  <Globe className="h-5 w-5 mr-2 flex-shrink-0" />
+                  <span>Language: {formatLanguage(book.language)}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          {/* Sidebar */}
+          <aside className="lg:w-96 space-y-6">
+            <div className="border rounded-lg overflow-hidden">
+              <ChapterTreeArborist 
+                bookSlug={slug}
+                onSelectChapter={(chapter) => {
+                  // Handle chapter selection if needed
+                  console.log('Selected chapter:', chapter);
+                }}
+              />
+            </div>
+          </aside>
+        </div>
+      </div>
+    );
+  } catch (error) {
+    console.error('Error loading book:', error);
+    notFound();
+  }
 }
