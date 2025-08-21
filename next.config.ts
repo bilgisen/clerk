@@ -19,7 +19,14 @@ const nextConfig: NextConfig = {
   env: {
     NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
     NEXT_PUBLIC_CLERK_FRONTEND_API: clerkConfig.domain,
-    CLERK_SECRET_KEY: process.env.CLERK_SECRET_KEY
+    CLERK_SECRET_KEY: process.env.CLERK_SECRET_KEY,
+    NEXT_PUBLIC_CLERK_SIGN_IN_URL: '/sign-in',
+    NEXT_PUBLIC_CLERK_SIGN_UP_URL: '/sign-up',
+    NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL: '/dashboard',
+    NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL: '/dashboard',
+    NEXT_PUBLIC_CLERK_SIGN_IN_FORCE_REDIRECT_URL: '/dashboard',
+    NEXT_PUBLIC_CLERK_SIGN_UP_FORCE_REDIRECT_URL: '/dashboard',
+    CLERK_WEBHOOK_SECRET: process.env.CLERK_WEBHOOK_SECRET
   },
   images: {
     remotePatterns: [
@@ -29,17 +36,23 @@ const nextConfig: NextConfig = {
       },
       {
         protocol: 'https',
-        hostname: 'jdj14ctwppwprnqu.public.blob.vercel-storage.com',
-      },
-      {
-        protocol: 'https',
-        hostname: 'image.eventmice.com',
+        hostname: 'storage.bookshall.com',
       },
       {
         protocol: 'https',
         hostname: 'images.unsplash.com',
       },
+      {
+        protocol: 'https',
+        hostname: 'img.clerk.com',
+      },
+      {
+        protocol: 'https',
+        hostname: '*.clerk.accounts.dev',
+      },
     ],
+    // Allow unoptimized images for Cloudflare R2
+    unoptimized: true,
   },
 };
 

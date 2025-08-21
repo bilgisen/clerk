@@ -1,9 +1,12 @@
 import { Webhook } from "svix";
 import { headers } from "next/headers";
 import type { WebhookEvent } from "@clerk/nextjs/server";
+import type { UserJSON } from "@clerk/types";
 import { db } from "@/db";
 import { users } from "@/db/schema";
 import { eq } from "drizzle-orm";
+import { creditService } from "@/lib/services/credits/credit-service";
+import { v4 as uuidv4 } from "uuid";
 
 export async function POST(req: Request) {
   // Clerk webhook header’larını al
@@ -68,16 +71,40 @@ export async function POST(req: Request) {
         if (existingUser.length > 0) {
           await db.update(users).set(userData).where(eq(users.clerkId, id));
         } else {
+          // Create the user first
           await db.insert(users).values({
             ...userData,
             role: "MEMBER",
             isActive: true,
             permissions: ["read:books"],
             subscriptionStatus: "TRIAL",
-            credits: 20,
             metadata: {},
             createdAt: new Date(),
           });
+
+          // Award signup bonus using the credit service
+          if (eventType === "user.created") {
+            try {
+              // Get the webhook event ID from the headers
+              const headerPayload = await headers();
+              const webhookId = headerPayload.get("svix-id") || `clerk-${Date.now()}`;
+              
+              await creditService.addCredits({
+                userId: id,
+                amount: 20,
+                reason: "signup_bonus",
+                idempotencyKey: `clerk:signup:${id}:${webhookId}`,
+                source: "clerk",
+                metadata: {
+                  clerkEventId: webhookId,
+                  eventType: "user.created"
+                }
+              });
+            } catch (error) {
+              console.error("Failed to award signup bonus:", error);
+              // Don't fail the entire request, just log the error
+            }
+          }
         }
         break;
       }

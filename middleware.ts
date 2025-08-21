@@ -8,6 +8,7 @@ const isPublicRoute = createRouteMatcher([
   "/",
   "/sign-in(.*)",
   "/sign-up(.*)",
+  "/sso-callback(.*)",
   "/api/auth/token",
   "/api/webhooks(.*)",
 ]);
@@ -30,13 +31,15 @@ function applyCsp(req: Request) {
   // Define CSP header
   const cspHeader = `
     default-src 'self';
-    script-src 'self' 'strict-dynamic' 'nonce-${nonce}' https: http: ${
+    script-src 'self' 'strict-dynamic' 'nonce-${nonce}' 'unsafe-inline' https: http: ${
       process.env.NODE_ENV === 'production' ? '' : `'unsafe-eval'`
     };
-    connect-src 'self' https://clerk.editor.bookshall.com https://*.clerk.accounts.dev;
-    img-src 'self' https://img.clerk.com data:;
+    connect-src 'self' https://clerk.editor.bookshall.com https://*.clerk.accounts.dev https://storage.bookshall.com;
+    img-src 'self' https: http: data: blob:;
+    media-src 'self' https: http: data: blob:;
     worker-src 'self' blob:;
-    style-src 'self' 'unsafe-inline';
+    style-src 'self' 'unsafe-inline' https: http:;
+    font-src 'self' https: http: data:;
     frame-src 'self' https://clerk.editor.bookshall.com https://*.clerk.accounts.dev https://challenges.cloudflare.com;
     form-action 'self' https://clerk.editor.bookshall.com;
   `.replace(/\s{2,}/g, ' ').trim();

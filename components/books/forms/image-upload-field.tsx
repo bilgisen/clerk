@@ -1,9 +1,7 @@
 // components/forms/image-upload-field.tsx
 "use client";
 
-import { useTransition } from "react";
 import { toast } from "sonner";
-import { uploadImage } from "@/actions/upload-image";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import Image from "next/image";
@@ -16,33 +14,36 @@ export function ImageUploadField({
   value?: string;
   onChange: (url: string) => void;
 }) {
-  const [uploading, startUpload] = useTransition();
+  const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
 
   const handleChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // Set uploading state
+    setUploading(true);
+    setProgress(0);
+    
+    // Validate file type
     if (!file.type.startsWith("image/")) {
-      toast.error("Only image files allowed");
+      toast.error("Only image files are allowed");
+      setUploading(false);
       return;
     }
 
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error("Max file size is 5MB");
+    // Validate file size (5MB max)
+    const maxSize = 5 * 1024 * 1024; // 5MB
+    if (file.size > maxSize) {
+      toast.error("Maksimum dosya boyutu 5MB'dır");
+      setUploading(false);
       return;
     }
 
     const formData = new FormData();
     formData.append("file", file);
 
-    // Create a properly typed form data object
-    const typedFormData = formData as FormData & {
-      get: (name: 'file') => File | null;
-    };
-
-    setProgress(0);
-
+    // Set up progress tracking
     const interval = setInterval(() => {
       setProgress((prev) => {
         if (prev >= 90) {
@@ -53,21 +54,30 @@ export function ImageUploadField({
       });
     }, 200);
 
-    startUpload(async () => {
-      try {
-        const { url } = await uploadImage(typedFormData);
-        clearInterval(interval);
-        setProgress(100);
-        onChange(url);
-        toast.success("Image uploaded");
-      } catch (error) {
-        console.error("Upload failed:", error);
-        clearInterval(interval);
-        toast.error("Upload failed");
-      } finally {
-        setProgress(0);
+    try {
+      const response = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData,
+      });
+      
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.error || 'Dosya yüklenirken bir hata oluştu');
       }
-    });
+      
+      clearInterval(interval);
+      setProgress(100);
+      onChange(data.url);
+      toast.success("Resim başarıyla yüklendi");
+    } catch (error) {
+      console.error("Upload failed:", error);
+      toast.error(error instanceof Error ? error.message : 'Dosya yüklenirken bir hata oluştu');
+    } finally {
+      clearInterval(interval);
+      setUploading(false);
+      setProgress(0);
+    }
   };
 
   const [dragActive, setDragActive] = useState(false);

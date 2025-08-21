@@ -3,27 +3,10 @@
 import { uploadImageAssets } from "@/lib/upload/r2";
 
 /**
- * Handles file upload from a form
- * @param formData - Form data containing the file to upload
- * @returns Object containing the public URL of the uploaded file
- * @throws Error if the upload fails or no file is provided
- */
-/**
- * Handles file upload from a form
- * @param formData - Form data containing the file to upload
- * @returns Promise that resolves to an object containing the public URL of the uploaded file
- * @throws {Error} If the upload fails or no file is provided
- */
-/**
  * Type for the expected form data structure
  * Extends FormData with specific typing for the file field
  */
 type UploadImageFormData = FormData & {
-  /**
-   * Gets the file from the form data
-   * @param name The field name (must be 'file')
-   * @returns The File object or null if not found
-   */
   get(name: 'file'): File | null;
 };
 
@@ -31,12 +14,6 @@ type UploadImageFormData = FormData & {
  * Handles file upload from a form
  * @param formData - Form data containing the file to upload
  * @returns Promise that resolves to an object containing the public URL of the uploaded file
- * @throws {Error} If the upload fails or no file is provided
- */
-/**
- * Handles file upload from a form
- * @param {UploadImageFormData} formData - Form data containing the file to upload
- * @returns {Promise<{ url: string }>} The public URL of the uploaded file
  * @throws {Error} If the upload fails or no file is provided
  */
 export async function uploadImage(formData: UploadImageFormData): Promise<{ url: string }> {

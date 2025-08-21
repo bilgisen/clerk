@@ -1,0 +1,84 @@
+import { useCallback, useState } from "react";
+import { useAuth, useUser } from "@clerk/nextjs";
+import { polarService } from "@/lib/services/polar/polar-service";
+
+type CheckoutParams = {
+  priceId: string;
+  successUrl?: string;
+  cancelUrl?: string;
+  metadata?: Record<string, any>;
+};
+
+export function usePolar() {
+  const { userId } = useAuth();
+  const { user } = useUser();
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+
+  const redirectToCheckout = useCallback(
+    async (params: CheckoutParams) => {
+      if (!userId) {
+        throw new Error("User must be authenticated");
+      }
+
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        const { url } = await polarService.createCheckoutSession({
+          priceId: params.priceId,
+          successUrl: params.successUrl || `${window.location.origin}/success?session_id={CHECKOUT_SESSION_ID}`,
+          cancelUrl: params.cancelUrl || window.location.href,
+          customerEmail: user?.emailAddresses?.[0]?.emailAddress,
+          metadata: {
+            clerkUserId: userId,
+            ...params.metadata,
+          },
+        });
+
+        // Redirect to Polar checkout
+        window.location.href = url;
+      } catch (err) {
+        console.error("Error redirecting to checkout:", err);
+        setError(err instanceof Error ? err : new Error("Failed to redirect to checkout"));
+        throw err;
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [userId, user]
+  );
+
+  const redirectToCustomerPortal = useCallback(async (returnUrl: string = window.location.href) => {
+    if (!userId) {
+      throw new Error("User must be authenticated");
+    }
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      // In a real app, you would first get the customer ID from your database
+      // For now, we'll use the Clerk user ID as the customer ID
+      const customerId = `clerk_${userId}`;
+      
+      const { url } = await polarService.createPortalSession(customerId, returnUrl);
+      
+      // Redirect to customer portal
+      window.location.href = url;
+    } catch (err) {
+      console.error("Error redirecting to customer portal:", err);
+      setError(err instanceof Error ? err : new Error("Failed to redirect to customer portal"));
+      throw err;
+    } finally {
+      setIsLoading(false);
+    }
+  }, [userId]);
+
+  return {
+    redirectToCheckout,
+    redirectToCustomerPortal,
+    isLoading,
+    error,
+  };
+}
