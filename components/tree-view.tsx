@@ -1,3 +1,4 @@
+// components/tree-view.tsx
 "use client";
 
 import * as React from "react";
@@ -49,12 +50,20 @@ import {
 } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
 
+export interface TreeViewItemData {
+  order?: number;
+  level?: number;
+  parent_chapter_id?: string | null;
+  [key: string]: any;
+}
+
 export interface TreeViewItem {
   id: string;
   name: string;
   type: string;
   children?: TreeViewItem[];
   checked?: boolean;
+  data?: TreeViewItemData;
 }
 
 export interface TreeViewIconMap {
@@ -349,8 +358,8 @@ function TreeItem({
       ];
       items.slice(start, end + 1).forEach((el) => {
         const id = el.getAttribute("data-id");
-        const parentFolderClosed = el.closest('[data-folder-closed="true"]');
         const isClosedFolder = el.getAttribute("data-folder-closed") === "true";
+        const parentFolderClosed = el.closest('[data-folder-closed="true"]');
         if (id && (isClosedFolder || !parentFolderClosed)) {
           newSelection.add(id);
         }
@@ -431,6 +440,22 @@ function TreeItem({
   const selectedCount =
     (item.children && !isOpen && getSelectedChildrenCount(item)) || null;
 
+  const dragOverlayClass = cn(
+    "flex items-center h-8 px-2 rounded-md transition-colors z-50",
+    isSelected 
+      ? "bg-primary/20 dark:bg-primary/30 text-foreground" 
+      : "bg-background dark:bg-gray-800",
+    "shadow-lg border border-primary/30"
+  );
+
+  const itemClass = cn(
+    "flex items-center h-8 px-2 rounded-md transition-colors group select-none cursor-pointer",
+    isSelected 
+      ? "bg-primary/10 dark:bg-primary/20 text-foreground" 
+      : "text-foreground hover:bg-accent/50 dark:hover:bg-accent/20",
+    isOver && !isDragging && "ring-2 ring-primary/50 dark:ring-primary/40 bg-yellow-100 dark:bg-yellow-900/30"
+  );
+
   return (
     <ContextMenu>
       <ContextMenuTrigger>
@@ -443,12 +468,8 @@ function TreeItem({
             data-id={item.id}
             data-depth={depth}
             data-folder-closed={item.children && !isOpen}
-            className={cn(
-              "select-none cursor-pointer px-1",
-              isSelected ? `bg-orange-100 ${selectionStyle}` : "text-foreground",
-              isOver && "ring-2 ring-primary/40"
-            )}
-            style={{ paddingLeft: `${depth * 20}px`, ...style }}
+            className={itemClass}
+            style={{ paddingLeft: `${depth * 12 + 8}px`, ...style }}
             onClick={handleClick}
           >
             <div className="flex items-center h-8">
@@ -936,35 +957,66 @@ export default function TreeView({
 
     const activeId = String(active.id);
     const overId = String(over.id);
+
     if (activeId === overId) return;
 
     const overEntry = visibleFlat.find((v) => v.item.id === overId);
     const activeEntry = visibleFlat.find((v) => v.item.id === activeId);
+
     if (!overEntry || !activeEntry) return;
 
     const overItem = overEntry.item;
+    let newParentId: string | null;
+    let newIndex: number;
 
-    let nextParentId: string | null;
-    let nextIndex: number;
+    // Check if we're dropping on a folder with children
+    const isDroppingOnFolder = overItem.children && overItem.children.length > 0;
+    const isOverExpanded = expandedIds.has(overId);
 
-    // ✅ Klasör üstüne bırakınca içine at (reparent)
-    if (overItem.children && overItem.children.length >= 0) {
-      nextParentId = overItem.id;
-      nextIndex = overItem.children?.length ?? 0; // klasörün sonuna
-      // istersen hep başa koy: nextIndex = 0;
-      setExpandedIds((prev) => new Set([...prev, overItem.id]));
+    if (isDroppingOnFolder && isOverExpanded) {
+      // Dropping inside an expanded folder - make it the first child
+      newParentId = overItem.id;
+      newIndex = 0;
+    } else if (isDroppingOnFolder && !isOverExpanded) {
+      // Dropping on a collapsed folder - make it the first child and expand
+      newParentId = overItem.id;
+      newIndex = 0;
+      setExpandedIds(prev => new Set([...prev, overId]));
     } else {
-      // ✅ Yoksa hedefin ebeveyninde, hedeften HEMEN SONRA sırala
-      nextParentId = parentMap.get(overId) ?? null;
-      nextIndex = overEntry.indexWithinParent + 1;
+      // Dropping between items
+      newParentId = parentMap.get(overId) ?? null;
+      // If dropping below, increment the index by 1
+      newIndex = overEntry.indexWithinParent + (over.data.current?.droppablePosition === 'bottom' ? 1 : 0);
     }
 
-    const newTree = moveInTree(tree, activeId, nextParentId, nextIndex);
-    setTree(newTree);
-    onTreeChange?.(newTree);
+    // Prevent making an item a child of itself or its descendants
+    const isInvalidMove = (id: string, targetId: string): boolean => {
+      if (id === targetId) return true;
+      const item = itemMap.get(id);
+      if (!item?.children) return false;
+      return item.children.some(child => isInvalidMove(child.id, targetId));
+    };
 
-    const movedItem = itemMap.get(activeId);
-    if (movedItem) onMoveItem?.(movedItem, nextParentId, nextIndex);
+    if (isInvalidMove(activeId, newParentId || '')) {
+      return; // Skip invalid move
+    }
+
+    try {
+      // Update the tree structure
+      const newTree = moveInTree([...tree], activeId, newParentId, newIndex);
+      setTree(newTree);
+
+      // Notify parent components of the change
+      onTreeChange?.(newTree);
+
+      // If there's a move handler, call it with the updated position
+      const movedItem = itemMap.get(activeId);
+      if (movedItem && onMoveItem) {
+        onMoveItem(movedItem, newParentId, newIndex);
+      }
+    } catch (error) {
+      console.error('Error moving item:', error);
+    }
   };
 
   return (

@@ -1,3 +1,4 @@
+// app/dashboard/books/[slug]/chapters/page.tsx
 "use client";
 
 import { ChapterTreeWrapper } from "@/components/chapters/ChapterTree";
