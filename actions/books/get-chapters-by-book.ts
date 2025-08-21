@@ -27,7 +27,7 @@ export async function getChaptersByBook(bookId: string): Promise<ChapterNode[]> 
   try {
     // Fetch chapters from the API endpoint which handles authentication and permissions
     const response = await fetch(
-      `${process.env.NEXT_PUBLIC_APP_URL || ''}/api/books/by-slug/${bookId}/chapters`,
+      `/api/books/${bookId}/chapters`,
       {
         headers: {
           'Authorization': `Bearer ${token}`,
