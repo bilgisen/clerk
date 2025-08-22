@@ -1,9 +1,12 @@
 // app/api/books/by-slug/[slug]/chapters/route.ts
 import { NextResponse } from 'next/server';
-import { auth, currentUser } from '@clerk/nextjs/server';
+import { currentUser } from '@clerk/nextjs/server';
 import { db } from '@/db';
-import { books, chapters, users } from '@/db/schema';
-import { eq, and, desc } from 'drizzle-orm';
+import { books, chapters, users, type NewChapter } from '@/db/schema';
+import { eq, and, desc, type SQL, type SQLWrapper } from 'drizzle-orm';
+import type { PgTableWithColumns } from 'drizzle-orm/pg-core';
+
+type WhereClause = (qb: any, helpers: { eq: typeof eq }) => SQLWrapper;
 
 /**
  * GET /api/books/by-slug/[slug]/chapters
@@ -32,10 +35,13 @@ export async function GET(
     }
 
     const book = await db.query.books.findFirst({
-      where: (books, { and, eq }) => and(
-        eq(books.slug, slug),
-        eq(books.userId, dbUser.id)
-      ),
+      where: ((booksTable, { eq }) => {
+        const conditions: SQL[] = [
+          eq(booksTable.slug, slug as string),
+          eq(booksTable.userId, dbUser.id)
+        ];
+        return and(...conditions);
+      }) as WhereClause,
     });
 
     if (!book) {
@@ -64,18 +70,18 @@ export async function GET(
     });
 
     // Define the chapter type with children
-    interface ChapterWithChildren extends Omit<typeof allChapters[number], 'children'> {
+    type ChapterWithChildren = Omit<typeof allChapters[number], 'children'> & {
       children: ChapterWithChildren[];
-    }
+    };
 
     // Then, build the hierarchical structure
     const buildChapterTree = (parentId: string | null = null): ChapterWithChildren[] => {
       return allChapters
-        .filter(chapter => 
+        .filter((chapter: typeof chapters.$inferSelect) => 
           (parentId === null && !chapter.parentChapterId) || 
           (chapter.parentChapterId === parentId)
         )
-        .map(chapter => ({
+        .map((chapter: typeof chapters.$inferSelect) => ({
           ...chapter,
           children: buildChapterTree(chapter.id)
         }));
@@ -131,10 +137,13 @@ export async function POST(
     }
 
     const book = await db.query.books.findFirst({
-      where: (books, { and, eq }) => and(
-        eq(books.slug, slug),
-        eq(books.userId, dbUser.id)
-      ),
+      where: ((booksTable, { eq }) => {
+        const conditions: SQL[] = [
+          eq(booksTable.slug, slug as string),
+          eq(booksTable.userId, dbUser.id)
+        ];
+        return and(...conditions);
+      }) as WhereClause,
     });
 
     if (!book) {
@@ -151,7 +160,7 @@ export async function POST(
     const newOrder = order !== undefined ? order : (lastChapter?.order || 0) + 1;
     const newLevel = level !== undefined ? level : (parentChapterId ? 1 : 0);
 
-    const [newChapter] = await db.insert(chapters).values({
+    const newChapterData: Omit<NewChapter, 'id' | 'createdAt' | 'updatedAt'> = {
       bookId: book.id,
       title,
       content: content || '',
@@ -160,9 +169,17 @@ export async function POST(
       level: newLevel,
       isDraft: isDraft !== undefined ? isDraft : true,
       wordCount: content ? content.split(/\s+/).length : 0,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    }).returning();
+      readingTime: 0, // Default value, can be calculated if needed
+      publishedAt: isDraft !== false ? null : new Date(),
+    };
+
+    const [newChapter] = await db.insert(chapters)
+      .values({
+        ...newChapterData,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .returning();
 
     return NextResponse.json(newChapter, { status: 201 });
   } catch (error) {

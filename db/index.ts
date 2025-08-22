@@ -1,13 +1,16 @@
-import { drizzle } from 'drizzle-orm/postgres-js';
-import postgres from 'postgres';
-import * as schema from './schema';
-
-// Use the DATABASE_URL from environment variables
-const connectionString = process.env.DATABASE_URL!;
-
-// Disable prepared statements in development for better performance with connection pooling
-const client = postgres(connectionString, { prepare: false });
-
-export const db = drizzle(client, { schema });
+// This is a client-safe re-export file
+// Server-side database operations should use @/lib/db/server instead
 
 export * from './schema';
+
+// Client-side safe exports
+export const db = new Proxy(
+  {},
+  {
+    get() {
+      throw new Error(
+        'Direct database access is not allowed from the client. Use API routes instead.'
+      );
+    },
+  }
+) as any;

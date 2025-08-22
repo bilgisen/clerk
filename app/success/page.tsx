@@ -1,104 +1,73 @@
-import { auth } from "@clerk/nextjs";
-import { redirect } from "next/navigation";
+'use client';
+
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { CheckCircle2 } from "lucide-react";
+import { CheckCircle2, Loader2 } from "lucide-react";
 import Link from "next/link";
+import { verifyAndUpdateCredits } from './actions';
 
-export default async function SuccessPage({
-  searchParams,
-}: {
-  searchParams: { [key: string]: string | string[] | undefined };
-}) {
-  const { userId } = auth();
-  
-  // If user is not authenticated, redirect to sign-in
-  if (!userId) {
-    redirect("/sign-in?redirect_url=/success");
-  }
+export default function SuccessPage() {
+  const searchParams = useSearchParams();
+  const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
+  const [error, setError] = useState<string | null>(null);
+  const [checkoutId, setCheckoutId] = useState<string | null>(null);
 
-  // Get the checkout ID from the URL
-  const checkoutId = searchParams.checkout_id || searchParams.checkoutId;
-  
-  // If no checkout ID is provided, show a generic success message
-  if (!checkoutId) {
+  useEffect(() => {
+    const processCheckout = async () => {
+      const checkoutId = searchParams.get('checkout_id') || searchParams.get('checkoutId');
+      setCheckoutId(checkoutId);
+
+      if (!checkoutId) {
+        setStatus('success');
+        return;
+      }
+
+      try {
+        const result = await verifyAndUpdateCredits(checkoutId);
+        if (result.success) {
+          setStatus('success');
+        } else {
+          setError(result.error || 'An unknown error occurred');
+          setStatus('error');
+        }
+      } catch (err) {
+        console.error('Error processing checkout:', err);
+        setError('Failed to process your payment. Please try again or contact support.');
+        setStatus('error');
+      }
+    };
+
+    processCheckout();
+  }, [searchParams]);
+
+  if (status === 'loading') {
     return (
       <div className="container max-w-2xl py-12">
         <Card>
           <CardHeader className="text-center">
             <div className="flex justify-center mb-4">
-              <CheckCircle2 className="h-12 w-12 text-green-500" />
+              <Loader2 className="h-12 w-12 text-primary animate-spin" />
             </div>
-            <CardTitle>Success!</CardTitle>
+            <CardTitle>Processing Your Order</CardTitle>
             <CardDescription>
-              Your purchase was successful. Thank you for your order!
+              Please wait while we verify your payment...
             </CardDescription>
           </CardHeader>
-          <CardContent className="text-center">
-            <p className="text-muted-foreground">
-              Your credits have been added to your account.
-            </p>
-          </CardContent>
-          <CardFooter className="flex justify-center">
-            <Button asChild>
-              <Link href="/dashboard">Go to Dashboard</Link>
-            </Button>
-          </CardFooter>
         </Card>
       </div>
     );
   }
 
-  // Here you would typically verify the checkout with Polar API
-  // and update the user's account accordingly
-  try {
-    // This is where you would verify the checkout with Polar
-    // const response = await verifyPolarCheckout(checkoutId.toString(), userId);
-    
-    // For now, we'll just show a success message
+  if (status === 'error') {
     return (
       <div className="container max-w-2xl py-12">
         <Card>
           <CardHeader className="text-center">
-            <div className="flex justify-center mb-4">
-              <CheckCircle2 className="h-12 w-12 text-green-500" />
-            </div>
-            <CardTitle>Payment Successful!</CardTitle>
+            <CardTitle className="text-destructive">Error Processing Your Order</CardTitle>
             <CardDescription>
-              Thank you for your purchase. Your subscription is now active.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="text-center space-y-4">
-            <p className="text-muted-foreground">
-              Your credits have been added to your account and are ready to use.
-            </p>
-            <div className="bg-muted p-4 rounded-md text-sm text-left">
-              <p className="font-medium">Order Details:</p>
-              <p>Order ID: {checkoutId}</p>
-              <p>Date: {new Date().toLocaleDateString()}</p>
-            </div>
-          </CardContent>
-          <CardFooter className="flex justify-center gap-4">
-            <Button asChild variant="outline">
-              <Link href="/pricing">View Plans</Link>
-            </Button>
-            <Button asChild>
-              <Link href="/dashboard">Go to Dashboard</Link>
-            </Button>
-          </CardFooter>
-        </Card>
-      </div>
-    );
-  } catch (error) {
-    console.error("Error processing checkout:", error);
-    // Redirect to error page or show error message
-    return (
-      <div className="container max-w-2xl py-12">
-        <Card>
-          <CardHeader className="text-center">
-            <CardTitle>Error Processing Your Order</CardTitle>
-            <CardDescription>
-              We encountered an issue while processing your payment.
+              {error || 'We encountered an issue while processing your payment.'}
             </CardDescription>
           </CardHeader>
           <CardContent className="text-center">
@@ -118,4 +87,47 @@ export default async function SuccessPage({
       </div>
     );
   }
+
+  // Success state
+  return (
+    <div className="container max-w-2xl py-12">
+      <Card>
+        <CardHeader className="text-center">
+          <div className="flex justify-center mb-4">
+            <CheckCircle2 className="h-12 w-12 text-green-500" />
+          </div>
+          <CardTitle>Payment Successful!</CardTitle>
+          <CardDescription>
+            {checkoutId 
+              ? 'Thank you for your purchase. Your subscription is now active.'
+              : 'Your purchase was successful. Thank you for your order!'}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="text-center space-y-4">
+          <p className="text-muted-foreground">
+            {checkoutId 
+              ? 'Your credits have been added to your account and are ready to use.'
+              : 'Your credits have been added to your account.'}
+          </p>
+          {checkoutId && (
+            <div className="bg-muted p-4 rounded-md text-sm text-left">
+              <p className="font-medium">Order Details:</p>
+              <p>Order ID: {checkoutId}</p>
+              <p>Date: {new Date().toLocaleDateString()}</p>
+            </div>
+          )}
+        </CardContent>
+        <CardFooter className="flex justify-center gap-4">
+          {checkoutId && (
+            <Button asChild variant="outline">
+              <Link href="/pricing">View Plans</Link>
+            </Button>
+          )}
+          <Button asChild>
+            <Link href="/dashboard">Go to Dashboard</Link>
+          </Button>
+        </CardFooter>
+      </Card>
+    </div>
+  );
 }

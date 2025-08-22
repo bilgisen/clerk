@@ -38,6 +38,28 @@ const nextConfig: NextConfig = {
     ];
   },
   
+  // Webpack configuration to handle Node.js core modules
+  webpack: (config, { isServer }) => {
+    // Only apply these changes for client-side bundles
+    if (!isServer) {
+      // Set fallbacks for Node.js core modules
+      config.resolve.fallback = {
+        ...config.resolve.fallback,
+        net: false,
+        tls: false,
+        crypto: false,
+        stream: false,
+        fs: false,
+        dns: false,
+        http2: false,
+        child_process: false,
+        dgram: false,
+        zlib: false,
+      };
+    }
+    return config;
+  },
+
   // Clerk configuration
   env: {
     NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
