@@ -2,22 +2,17 @@ import 'server-only';
 
 import { NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
-import { db } from '@/db';
+import { db } from '@/lib/db/server';
 import { books, users } from '@/db/schema';
 import { eq } from 'drizzle-orm';
-import type { InferSelectModel } from 'drizzle-orm';
+import type { InferSelectModel, InferInsertModel } from 'drizzle-orm';
 import { creditService } from '@/lib/services/credits/credit-service';
 
 // Force this route to be server-side only
 export const dynamic = 'force-dynamic';
 
 type User = InferSelectModel<typeof users>;
-
-// Simple type for Drizzle's where function
-type WhereFn = (table: any, op: any) => any;
-
-// Simple type for Drizzle's orderBy function
-type OrderByFn = (table: any, op: any) => any[];
+type NewBook = InferInsertModel<typeof books>;
 
 /**
  * GET /api/books
@@ -119,7 +114,7 @@ export async function POST(request: Request) {
       .trim();
 
     // Start a transaction
-    const [newBook] = await db.transaction(async (tx: typeof db) => {
+    const [newBook] = await db.transaction(async (tx) => {
       // Deduct credits first
       const creditResult = await creditService.spendCredits({
         userId: user.id,

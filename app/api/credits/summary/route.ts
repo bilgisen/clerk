@@ -3,7 +3,7 @@ import 'server-only';
 import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { creditService } from "@/lib/services/credits/credit-service";
-import { db } from "@/db";
+import { db } from "@/lib/db/server";
 import { users } from "@/db/schema";
 import { eq } from "drizzle-orm";
 
