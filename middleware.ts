@@ -11,6 +11,7 @@ const isPublicRoute = createRouteMatcher([
   "/sso-callback(.*)",
   "/api/auth/token",
   "/api/webhooks(.*)",
+  "/api/upload",
 ]);
 
 // API routes that require authentication
@@ -34,11 +35,13 @@ function applyCsp(req: Request) {
     script-src 'self' 'strict-dynamic' 'nonce-${nonce}' 'unsafe-inline' https: http: ${
       process.env.NODE_ENV === 'production' ? '' : `'unsafe-eval'`
     };
+    script-src-elem 'self' 'unsafe-inline' https: http:;
     connect-src 'self' https://clerk.editor.bookshall.com https://*.clerk.accounts.dev https://storage.bookshall.com;
     img-src 'self' https: http: data: blob:;
     media-src 'self' https: http: data: blob:;
     worker-src 'self' blob:;
     style-src 'self' 'unsafe-inline' https: http:;
+    style-src-elem 'self' 'unsafe-inline' https: http:;
     font-src 'self' https: http: data:;
     frame-src 'self' https://clerk.editor.bookshall.com https://*.clerk.accounts.dev https://challenges.cloudflare.com;
     form-action 'self' https://clerk.editor.bookshall.com;

@@ -21,6 +21,12 @@ export const env = createEnv({
     POLAR_ACCESS_TOKEN: z.string().min(1).optional(),
     POLAR_WEBHOOK_SECRET: z.string().min(1).optional(),
     
+    // R2 Storage
+    R2_UPLOAD_IMAGE_ACCESS_KEY_ID: z.string().min(1),
+    R2_UPLOAD_IMAGE_SECRET_ACCESS_KEY: z.string().min(1),
+    R2_UPLOAD_IMAGE_BUCKET_NAME: z.string().min(1),
+    CLOUDFLARE_ACCOUNT_ID: z.string().min(1),
+    
     // Other environment variables
     NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   },
@@ -48,6 +54,12 @@ export const env = createEnv({
     // Server
     DATABASE_URL: process.env.DATABASE_URL,
     CLERK_SECRET_KEY: process.env.CLERK_SECRET_KEY,
+    
+    // R2 Storage
+    R2_UPLOAD_IMAGE_ACCESS_KEY_ID: process.env.R2_UPLOAD_IMAGE_ACCESS_KEY_ID,
+    R2_UPLOAD_IMAGE_SECRET_ACCESS_KEY: process.env.R2_UPLOAD_IMAGE_SECRET_ACCESS_KEY,
+    R2_UPLOAD_IMAGE_BUCKET_NAME: process.env.R2_UPLOAD_IMAGE_BUCKET_NAME,
+    CLOUDFLARE_ACCOUNT_ID: process.env.CLOUDFLARE_ACCOUNT_ID,
     POLAR_ACCESS_TOKEN: process.env.POLAR_ACCESS_TOKEN,
     POLAR_WEBHOOK_SECRET: process.env.POLAR_WEBHOOK_SECRET,
     NODE_ENV: process.env.NODE_ENV,
