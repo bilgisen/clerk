@@ -1,5 +1,6 @@
 import { pgEnum, pgTable, text, timestamp, uuid, integer, boolean, jsonb, AnyPgColumn } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
+import { creditLedger, activity } from './schema/credits';
 
 // Enums
 export const userRoleEnum = pgEnum('user_role', ['ADMIN', 'MEMBER', 'AUTHOR', 'PUBLISHER', 'ULTIMATE']);
@@ -241,6 +242,22 @@ export const chaptersRelations = relations(chapters, ({ one, many }) => ({
   }),
 }));
 
+// Credit Ledger Relations
+export const creditLedgerRelations = relations(creditLedger, ({ one }) => ({
+  user: one(users, {
+    fields: [creditLedger.userId],
+    references: [users.id],
+  }),
+}));
+
+// Activity Relations
+export const activityRelations = relations(activity, ({ one }) => ({
+  user: one(users, {
+    fields: [activity.userId],
+    references: [users.id],
+  }),
+}));
+
 export const mediaRelations = relations(media, ({ one }) => ({
   user: one(users, {
     fields: [media.userId],
@@ -265,3 +282,7 @@ export type Chapter = typeof chapters.$inferSelect;
 export type NewChapter = typeof chapters.$inferInsert;
 export type Media = typeof media.$inferSelect;
 export type NewMedia = typeof media.$inferInsert;
+
+export { creditLedger, activity } from './schema/credits';
+export type { CreditLedger, NewCreditLedger } from './schema/credits';
+export type { Activity, NewActivity } from './schema/credits';

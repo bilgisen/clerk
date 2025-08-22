@@ -3,7 +3,7 @@ import { users } from "../schema";
 
 export const creditLedger = pgTable("credit_ledger", {
   id: uuid("id").defaultRandom().primaryKey(),
-  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   amount: integer("amount").notNull(), // +credit, -spend
   reason: text("reason").notNull(),    // signup_bonus | book_create | publish_epub | publish_pdf | publish_audio | subscription | purchase | admin_adjust
   ref: text("ref"),                    // bookId/orderId/subscriptionId etc.
@@ -19,7 +19,7 @@ export const creditLedger = pgTable("credit_ledger", {
 
 export const activity = pgTable("activity", {
   id: uuid("id").defaultRandom().primaryKey(),
-  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   type: text("type").notNull(), // book_created | published | purchased | subscription_credited | etc.
   title: text("title"),
   delta: integer("delta").notNull(), // +/-
