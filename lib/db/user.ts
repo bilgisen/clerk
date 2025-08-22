@@ -1,5 +1,5 @@
 // lib/db/user.ts
-import { db } from "@/db";
+import { db } from "@/db/server";   // <-- artık gerçek server db client
 import { users } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { creditService } from "@/lib/services/credits/credit-service";

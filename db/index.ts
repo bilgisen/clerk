@@ -1,3 +1,4 @@
+// db/index.ts
 // This is a client-safe re-export file
 // Server-side database operations should use @/lib/db/server instead
 

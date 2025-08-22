@@ -195,21 +195,16 @@ export class CreditService {
           source,
           idempotencyKey,
           expiresAt,
-          metadata,
+          metadata: metadata ? JSON.stringify(metadata) : null,
         });
 
         // Record activity
         await tx.insert(activity).values({
           userId,
           type: 'credit_added',
-          title: reason,
+          title: `${reason} (${source})`,
           delta: amount,
           ref: 'system',
-          metadata: JSON.stringify({
-            reason,
-            source,
-            ...metadata,
-          }),
         });
       });
 
