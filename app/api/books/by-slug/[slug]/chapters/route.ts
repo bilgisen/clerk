@@ -51,14 +51,9 @@ export async function GET(
         genre: true,
         language: true,
         isbn: true,
-        wordCount: true,
-        readingTime: true,
-        isPublic: true,
-        price: true,
-        currency: true,
-        isFeatured: true,
-        metadata: true,
-        deletedAt: true
+        viewCount: true,
+        isPublished: true,
+        isFeatured: true
       }
     });
 
@@ -83,7 +78,6 @@ export async function GET(
         readingTime: true,
         createdAt: true,
         updatedAt: true,
-        publishedAt: true,
         excerpt: true
       }
     });
@@ -175,15 +169,16 @@ export async function POST(
     }
 
     const newChapter = await db.insert(chapters).values({
+      bookId: book.id,
       title,
-      content: content || '',
-      book_id: book.id,
-      parent_chapter_id: parentChapterId || null,
+      content: content || '{}',
+      parentChapterId: parentChapterId || null,
       order: order ?? 0,
       level: level,
-      is_draft: true,
-      word_count: 0,
-      user_id: dbUser.id
+      isDraft: true,
+      wordCount: 0,
+      createdAt: new Date(),
+      updatedAt: new Date()
     }).returning();
 
     return NextResponse.json(newChapter[0]);
