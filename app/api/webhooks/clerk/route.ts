@@ -56,16 +56,17 @@ export async function POST(req: Request) {
     switch (currentEventType) {
       case "user.created": {
         const data: any = evt.data;
-        const { id, email_addresses, first_name, last_name, image_url } = data;
-        const email = email_addresses?.[0]?.email_address;
+        const { id, email_addresses, first_name, last_name, image_url, primary_email_address_id } = data;
         
-        logWebhook(currentEventType, { userId: id, email }, 'Processing user.created event');
+        // Find the primary email address
+        const primaryEmail = email_addresses?.find((email: any) => email.id === primary_email_address_id)?.email_address;
+        const email = primaryEmail || email_addresses?.[0]?.email_address;
+        
+        logWebhook(currentEventType, { clerkUserId: id, email }, 'Processing user.created event');
 
         if (!id || typeof id !== "string") {
           throw new Error("Valid Clerk user ID is required");
         }
-
-        // Signup bonus is now handled in the user creation flow
 
         // Create or update user within a transaction
         await db.transaction(async (tx: typeof db) => {
@@ -124,14 +125,14 @@ export async function POST(req: Request) {
               try {
                 const result = await creditService.addCredits({
                   userId,
-                  amount: 100,
+                  amount: 1000, // Increased from 100 to 1000 for better testing
                   reason: "signup_bonus",
                   idempotencyKey,
-                  source: "clerk",
                   metadata: {
                     clerkEventId: webhookId,
                     clerkUserId: id,
-                    eventType: "user.created"
+                    eventType: "user.created",
+                    source: "clerk_webhook"
                   }
                 });
                 
@@ -144,15 +145,21 @@ export async function POST(req: Request) {
                 logWebhook(currentEventType, { 
                   userId, 
                   idempotencyKey, 
-                  error: error instanceof Error ? error.message : String(error),
-                  stack: error instanceof Error ? error.stack : undefined 
+                  error: error instanceof Error ? {
+                    message: error.message,
+                    name: error.name,
+                    stack: error.stack
+                  } : String(error)
                 }, 'Error adding credits', 'error');
                 throw error; // Re-throw to trigger the outer catch
               }
               
               logWebhook(currentEventType, { userId, idempotencyKey }, 'Successfully awarded signup bonus');
             } catch (error) {
-              logWebhook(currentEventType, { userId, error: error instanceof Error ? error.message : String(error) }, 'Failed to award signup bonus', 'error');
+              logWebhook(currentEventType, { 
+                userId, 
+                error: error instanceof Error ? error.message : String(error) 
+              }, 'Failed to award signup bonus', 'error');
               // Don't fail the transaction if bonus fails
             }
           }
@@ -160,7 +167,16 @@ export async function POST(req: Request) {
           // Transaction will automatically commit if no errors are thrown
         });
         
-        return new Response('User processed successfully', { status: 200 });
+        return new Response(JSON.stringify({ 
+          success: true, 
+          message: 'User processed successfully',
+          userId: id
+        }), { 
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        });
       }
       case "user.updated": {
         const data: any = evt.data;
