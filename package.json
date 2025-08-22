@@ -95,6 +95,7 @@
     "react-hook-form": "^7.62.0",
     "react-hotkeys-hook": "^5.1.0",
     "react-syntax-highlighter": "^15.6.1",
+    "server-only": "^0.0.1",
     "slugify": "^1.6.6",
     "sonner": "^2.0.7",
     "svix": "^1.70.0",

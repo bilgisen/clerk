@@ -1,3 +1,5 @@
+import 'server-only';
+
 import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { creditService } from "@/lib/services/credits/credit-service";
@@ -5,7 +7,9 @@ import { db } from "@/db";
 import { users } from "@/db/schema";
 import { eq } from "drizzle-orm";
 
-export const runtime = "edge"; // Optimize for read-only operations
+// Force this route to be server-side only
+// Remove the edge runtime as it might cause issues with database connections
+export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
   try {

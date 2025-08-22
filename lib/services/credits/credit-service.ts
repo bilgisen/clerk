@@ -1,3 +1,5 @@
+import 'server-only';
+
 import { eq, and, isNull, gt, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db/server";
 import { creditLedger, activity } from "@/db/schema/credits";

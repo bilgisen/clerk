@@ -1,3 +1,5 @@
+import 'server-only';
+
 import { NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import { db } from '@/db';
@@ -5,6 +7,9 @@ import { books, users } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 import type { InferSelectModel } from 'drizzle-orm';
 import { creditService } from '@/lib/services/credits/credit-service';
+
+// Force this route to be server-side only
+export const dynamic = 'force-dynamic';
 
 type User = InferSelectModel<typeof users>;
 
