@@ -3,6 +3,17 @@ import 'server-only';
 import { eq, and, isNull, gt, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db/server";
 import { creditLedger, activity } from "@/db/schema/credits";
+import { users } from "@/db/schema";
+
+type CreditTransaction = {
+  userId: string;
+  amount: number;
+  reason: string;
+  source?: string;
+  metadata?: Record<string, any>;
+  idempotencyKey?: string;
+  expiresAt?: Date;
+};
 
 // Type for the transaction
 type Transaction = Parameters<typeof db.transaction>[0];
@@ -62,7 +73,7 @@ export class CreditService {
    */
   async getBalance(userId: string): Promise<number> {
     try {
-      const result = await db
+      const [result] = await db
         .select({ 
           balance: sql<number>`COALESCE(SUM(${creditLedger.amount}), 0)` 
         })
@@ -77,11 +88,9 @@ export class CreditService {
           )
         );
       
-      const balance = result?.[0]?.balance ?? 0;
-      console.log(`[CreditService] Balance for user ${userId}:`, balance);
-      return balance;
+      return result?.balance ?? 0;
     } catch (error) {
-      console.error(`[CreditService] Error getting balance for user ${userId}:`, error);
+      console.error('Error getting balance:', error);
       return 0;
     }
   }
@@ -153,59 +162,63 @@ export class CreditService {
    * @param options Options for adding credits
    * @returns The result of the operation
    */
-  async addCredits(options: {
-    userId: string;
-    amount: number;
-    reason: string;
-    ref?: string;
-    expiresAt?: Date | null;
-    source?: 'app' | 'polar' | 'clerk';
-    idempotencyKey: string;
-    metadata?: any;
-  }) {
-    if (options.amount <= 0) {
-      throw new Error("Amount must be positive");
+  async addCredits({
+    userId,
+    amount,
+    reason,
+    source = 'system',
+    metadata = {},
+    idempotencyKey = crypto.randomUUID(),
+    expiresAt,
+  }: Omit<CreditTransaction, 'idempotencyKey'> & { idempotencyKey?: string }) {
+    if (amount <= 0) {
+      throw new Error('Amount must be greater than 0');
     }
 
-    return await db.transaction(async (tx) => {
-      // Check for idempotency
-      const exists = await tx.query.creditLedger.findFirst({
-        where: (ledger, { eq }) => 
-          eq(ledger.userId, options.userId) && 
-          eq(ledger.idempotencyKey, options.idempotencyKey)
-      });
-
-      if (exists) {
-        return { 
-          ok: true, 
-          balance: await this.getBalance(options.userId) 
-        };
-      }
-
-      // Add credits
-      await tx.insert(creditLedger).values({
-        userId: options.userId,
-        amount: options.amount,
-        reason: options.reason,
-        ref: options.ref,
-        metadata: options.metadata ?? {},
-        expiresAt: options.expiresAt ?? null,
-        idempotencyKey: options.idempotencyKey,
-        source: options.source ?? "app",
-      });
-
-      // Record activity
-      await tx.insert(activity).values({
-        userId: options.userId,
-        type: "credit",
-        title: options.reason,
-        delta: options.amount,
-        ref: options.ref,
-      });
-
-      const newBalance = await this.getBalance(options.userId);
-      return { ok: true, balance: newBalance };
+    // Check for existing transaction with same idempotency key
+    const existing = await db.query.creditLedger.findFirst({
+      where: (ledger, { eq }) => eq(ledger.idempotencyKey, idempotencyKey),
     });
+
+    if (existing) {
+      console.log('Skipping duplicate transaction with idempotency key:', idempotencyKey);
+      return { success: true, balance: await this.getBalance(userId) };
+    }
+
+    try {
+      await db.transaction(async (tx) => {
+        // Add to credit ledger
+        await tx.insert(creditLedger).values({
+          userId,
+          amount,
+          reason,
+          source,
+          idempotencyKey,
+          expiresAt,
+          metadata,
+        });
+
+        // Record activity
+        await tx.insert(activity).values({
+          userId,
+          type: 'credit_added',
+          title: reason,
+          delta: amount,
+          ref: 'system',
+          metadata: JSON.stringify({
+            reason,
+            source,
+            ...metadata,
+          }),
+        });
+      });
+
+      const balance = await this.getBalance(userId);
+      return { success: true, balance };
+    } catch (error) {
+      console.error('Error adding credits:', error);
+      throw error;
+    }
   }
 
   /**
