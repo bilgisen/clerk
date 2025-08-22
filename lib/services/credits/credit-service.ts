@@ -61,22 +61,29 @@ export class CreditService {
    * @returns The current credit balance
    */
   async getBalance(userId: string): Promise<number> {
-    const [row] = await db
-      .select({ 
-        balance: sql<number>`COALESCE(SUM(${creditLedger.amount}), 0)` 
-      })
-      .from(creditLedger)
-      .where(
-        and(
-          eq(creditLedger.userId, userId),
-          or(
-            isNull(creditLedger.expiresAt),
-            gt(creditLedger.expiresAt, new Date())
+    try {
+      const result = await db
+        .select({ 
+          balance: sql<number>`COALESCE(SUM(${creditLedger.amount}), 0)` 
+        })
+        .from(creditLedger)
+        .where(
+          and(
+            eq(creditLedger.userId, userId),
+            or(
+              isNull(creditLedger.expiresAt),
+              gt(creditLedger.expiresAt, new Date())
+            )
           )
-        )
-      );
-    
-    return row?.balance ?? 0;
+        );
+      
+      const balance = result?.[0]?.balance ?? 0;
+      console.log(`[CreditService] Balance for user ${userId}:`, balance);
+      return balance;
+    } catch (error) {
+      console.error(`[CreditService] Error getting balance for user ${userId}:`, error);
+      return 0;
+    }
   }
 
   /**

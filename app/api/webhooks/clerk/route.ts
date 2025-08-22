@@ -4,9 +4,21 @@ import type { WebhookEvent } from "@clerk/nextjs/server";
 import type { UserJSON } from "@clerk/types";
 import { db } from "@/db";
 import { users } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { creditService } from "@/lib/services/credits/credit-service";
 import { v4 as uuidv4 } from "uuid";
+
+// Helper function to log webhook events for debugging
+const logWebhook = (eventType: string, data: any, message: string, level: 'info' | 'error' = 'info') => {
+  const timestamp = new Date().toISOString();
+  const logMessage = `[${timestamp}] [${level.toUpperCase()}] [${eventType}] ${message}\nData: ${JSON.stringify(data, null, 2)}`;
+  
+  if (level === 'error') {
+    console.error(logMessage);
+  } else {
+    console.log(logMessage);
+  }
+};
 
 export async function POST(req: Request) {
   // Clerk webhook header’larını al
@@ -36,14 +48,18 @@ export async function POST(req: Request) {
     return new Response("Invalid signature", { status: 400 });
   }
 
-  const eventType = evt.type;
-
+  const currentEventType = evt.type;
+  
   try {
-    switch (eventType) {
+    logWebhook(currentEventType, { ...evt.data, eventId: svix_id }, 'Processing webhook event');
+    
+    switch (currentEventType) {
       case "user.created": {
         const data: any = evt.data;
         const { id, email_addresses, first_name, last_name, image_url } = data;
         const email = email_addresses?.[0]?.email_address;
+        
+        logWebhook(currentEventType, { userId: id, email }, 'Processing user.created event');
 
         if (!id || typeof id !== "string") {
           throw new Error("Valid Clerk user ID is required");
@@ -51,60 +67,100 @@ export async function POST(req: Request) {
 
         // Signup bonus is now handled in the user creation flow
 
-        // Create or update user
-        const userData = {
-          clerkId: id,
-          email,
-          firstName: first_name || "",
-          lastName: last_name || "",
-          imageUrl: image_url || "",
-          updatedAt: new Date(),
-        };
+        // Create or update user within a transaction
+        await db.transaction(async (tx: typeof db) => {
+          const userData = {
+            clerkId: id,
+            email,
+            firstName: first_name || "",
+            lastName: last_name || "",
+            imageUrl: image_url || "",
+            updatedAt: new Date(),
+          };
 
-        const existingUser = await db
-          .select()
-          .from(users)
-          .where(eq(users.clerkId, id))
-          .limit(1);
+          // Check if user exists
+          const existingUser = await tx
+            .select()
+            .from(users)
+            .where(and(
+              eq(users.clerkId, id),
+              eq(users.isActive, true)
+            ))
+            .limit(1);
 
-        if (existingUser.length > 0) {
-          await db.update(users).set(userData).where(eq(users.clerkId, id));
-        } else {
-          const newUser = await db.insert(users).values({
-            ...userData,
-            role: "MEMBER",
-            isActive: true,
-            permissions: ["read:books"],
-            subscriptionStatus: "TRIAL",
-            metadata: {},
-            createdAt: new Date(),
-          }).returning();
+          let userId: string;
           
-          // Award signup bonus for new users
-          try {
-            // Get the webhook event ID from the headers
-            const webhookHeaders = await headers();
-            const webhookId = webhookHeaders.get("svix-id") || `clerk-${uuidv4()}`;
+          if (existingUser.length > 0) {
+            await tx.update(users)
+              .set(userData)
+              .where(eq(users.clerkId, id));
+            userId = existingUser[0].id;
+            logWebhook(currentEventType, { userId, clerkId: id }, 'Updated existing user');
+          } else {
+            const [newUser] = await tx.insert(users).values({
+              ...userData,
+              role: "MEMBER",
+              isActive: true,
+              permissions: ["read:books"],
+              subscriptionStatus: "TRIAL",
+              metadata: {},
+              createdAt: new Date(),
+            }).returning();
             
-            // Add initial credits
-            await creditService.addCredits({
-              userId: newUser[0].id,
-              amount: 100,
-              reason: "signup_bonus",
-              idempotencyKey: `clerk:signup:${id}:${webhookId}`,
-              source: "clerk",
-              metadata: {
-                clerkEventId: webhookId,
-                clerkUserId: id,
-                eventType: "user.created"
+            if (!newUser || !newUser.id) {
+              throw new Error('Failed to create new user');
+            }
+            
+            userId = newUser.id;
+            logWebhook(currentEventType, { userId, clerkId: id }, 'Created new user');
+          
+            // Award signup bonus for new users
+            try {
+              const webhookId = svix_id || `clerk-${uuidv4()}`;
+              const idempotencyKey = `clerk:signup:${id}:${webhookId}`;
+              
+              logWebhook(currentEventType, { userId, idempotencyKey }, 'Awarding signup bonus');
+              
+              try {
+                const result = await creditService.addCredits({
+                  userId,
+                  amount: 100,
+                  reason: "signup_bonus",
+                  idempotencyKey,
+                  source: "clerk",
+                  metadata: {
+                    clerkEventId: webhookId,
+                    clerkUserId: id,
+                    eventType: "user.created"
+                  }
+                });
+                
+                logWebhook(currentEventType, { 
+                  userId, 
+                  idempotencyKey, 
+                  result 
+                }, 'Successfully added credits');
+              } catch (error) {
+                logWebhook(currentEventType, { 
+                  userId, 
+                  idempotencyKey, 
+                  error: error instanceof Error ? error.message : String(error),
+                  stack: error instanceof Error ? error.stack : undefined 
+                }, 'Error adding credits', 'error');
+                throw error; // Re-throw to trigger the outer catch
               }
-            });
-          } catch (error) {
-            console.error('Failed to award signup bonus:', error);
-            // Don't fail the webhook if bonus fails
+              
+              logWebhook(currentEventType, { userId, idempotencyKey }, 'Successfully awarded signup bonus');
+            } catch (error) {
+              logWebhook(currentEventType, { userId, error: error instanceof Error ? error.message : String(error) }, 'Failed to award signup bonus', 'error');
+              // Don't fail the transaction if bonus fails
+            }
           }
-        }
-        break;
+          
+          // Transaction will automatically commit if no errors are thrown
+        });
+        
+        return new Response('User processed successfully', { status: 200 });
       }
       case "user.updated": {
         const data: any = evt.data;
@@ -191,12 +247,13 @@ export async function POST(req: Request) {
       }
 
       default:
-        console.log(`Unhandled event type: ${eventType}`);
+        console.log(`Unhandled event type: ${currentEventType}`);
     }
 
     return new Response("Webhook processed", { status: 200 });
   } catch (err) {
-    console.error("Error handling webhook:", err);
-    return new Response("Error processing webhook", { status: 500 });
+    const error = err instanceof Error ? err : new Error(String(err));
+    logWebhook(currentEventType || 'unknown', { error: error.message, stack: error.stack }, 'Error processing webhook', 'error');
+    return new Response(`Error processing webhook: ${error.message}`, { status: 500 });
   }
 }
