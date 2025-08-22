@@ -2,11 +2,8 @@
 import { NextResponse } from 'next/server';
 import { currentUser } from '@clerk/nextjs/server';
 import { db } from '@/lib/db/server';
-import { books, chapters, users, type NewChapter } from '@/db/schema';
-import { eq, and, desc, type SQL, type SQLWrapper } from 'drizzle-orm';
-import type { PgTableWithColumns } from 'drizzle-orm/pg-core';
-
-type WhereClause = (qb: any, helpers: { eq: typeof eq }) => SQLWrapper;
+import { books, chapters, users } from '@/db/schema';
+import { eq, and } from 'drizzle-orm';
 
 /**
  * GET /api/books/by-slug/[slug]/chapters
@@ -35,13 +32,35 @@ export async function GET(
     }
 
     const book = await db.query.books.findFirst({
-      where: ((booksTable, { eq }) => {
-        const conditions: SQL[] = [
+      where: (booksTable, { eq, and: andFn }) => {
+        return andFn(
           eq(booksTable.slug, slug as string),
           eq(booksTable.userId, dbUser.id)
-        ];
-        return and(...conditions);
-      }) as WhereClause,
+        );
+      },
+      columns: {
+        id: true,
+        title: true,
+        slug: true,
+        description: true,
+        coverImageUrl: true,
+        status: true,
+        publishedAt: true,
+        createdAt: true,
+        updatedAt: true,
+        userId: true,
+        genre: true,
+        language: true,
+        isbn: true,
+        wordCount: true,
+        readingTime: true,
+        isPublic: true,
+        price: true,
+        currency: true,
+        isFeatured: true,
+        metadata: true,
+        deletedAt: true
+      }
     });
 
     if (!book) {
@@ -65,29 +84,36 @@ export async function GET(
         readingTime: true,
         createdAt: true,
         updatedAt: true,
-        publishedAt: true
+        publishedAt: true,
+        excerpt: true
       }
     });
 
     // Define the chapter type with children
-    type ChapterWithChildren = Omit<typeof allChapters[number], 'children'> & {
+    type ChapterWithChildren = typeof allChapters[number] & {
       children: ChapterWithChildren[];
+    };
+
+    // Create a type-safe filter function
+    const filterChapters = (chaptersList: typeof allChapters, parentId: string | null) => {
+      return chaptersList.filter(chapter => 
+        (parentId === null && !chapter.parentChapterId) || 
+        (chapter.parentChapterId === parentId)
+      );
     };
 
     // Then, build the hierarchical structure
     const buildChapterTree = (parentId: string | null = null): ChapterWithChildren[] => {
-      return allChapters
-        .filter((chapter: typeof chapters.$inferSelect) => 
-          (parentId === null && !chapter.parentChapterId) || 
-          (chapter.parentChapterId === parentId)
-        )
-        .map((chapter: typeof chapters.$inferSelect) => ({
-          ...chapter,
-          children: buildChapterTree(chapter.id)
-        }));
+      const filteredChapters = filterChapters(allChapters, parentId)
+        .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+      
+      return filteredChapters.map(chapter => ({
+        ...chapter,
+        children: buildChapterTree(chapter.id).sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+      }));
     };
 
-    const chapterTree = buildChapterTree();
+    const chapterTree = buildChapterTree().sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 
     // Debug log the chapter tree
     console.log('Chapter tree:', JSON.stringify(chapterTree, null, 2));
@@ -119,13 +145,6 @@ export async function POST(
       return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
     }
 
-    const body = await request.json();
-    const { title, content, parentChapterId, order, level, isDraft } = body;
-
-    if (!title || typeof title !== 'string') {
-      return NextResponse.json({ error: 'Title is required and must be a string' }, { status: 400 });
-    }
-
     const [dbUser] = await db
       .select({ id: users.id })
       .from(users)
@@ -137,51 +156,38 @@ export async function POST(
     }
 
     const book = await db.query.books.findFirst({
-      where: ((booksTable, { eq }) => {
-        const conditions: SQL[] = [
+      where: (booksTable, { eq, and: andFn }) => {
+        return andFn(
           eq(booksTable.slug, slug as string),
           eq(booksTable.userId, dbUser.id)
-        ];
-        return and(...conditions);
-      }) as WhereClause,
+        );
+      }
     });
 
     if (!book) {
       return NextResponse.json({ error: 'Book not found' }, { status: 404 });
     }
 
-    const [lastChapter] = await db
-      .select()
-      .from(chapters)
-      .where(eq(chapters.bookId, book.id))
-      .orderBy(desc(chapters.order))
-      .limit(1);
+    const body = await request.json();
+    const { title, content, parentChapterId, order, level = 0 } = body;
 
-    const newOrder = order !== undefined ? order : (lastChapter?.order || 0) + 1;
-    const newLevel = level !== undefined ? level : (parentChapterId ? 1 : 0);
+    if (!title) {
+      return NextResponse.json({ error: 'Title is required' }, { status: 400 });
+    }
 
-    const newChapterData: Omit<NewChapter, 'id' | 'createdAt' | 'updatedAt'> = {
+    const newChapter = await db.insert(chapters).values({
       bookId: book.id,
       title,
       content: content || '',
       parentChapterId: parentChapterId || null,
-      order: newOrder,
-      level: newLevel,
-      isDraft: isDraft !== undefined ? isDraft : true,
-      wordCount: content ? content.split(/\s+/).length : 0,
-      readingTime: 0, // Default value, can be calculated if needed
-      publishedAt: isDraft !== false ? null : new Date(),
-    };
+      order: order ?? 0,
+      level: level,
+      isDraft: true,
+      wordCount: 0,
+      user_id: dbUser.id
+    }).returning();
 
-    const [newChapter] = await db.insert(chapters)
-      .values({
-        ...newChapterData,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .returning();
-
-    return NextResponse.json(newChapter, { status: 201 });
+    return NextResponse.json(newChapter[0]);
   } catch (error) {
     console.error('Error creating chapter:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

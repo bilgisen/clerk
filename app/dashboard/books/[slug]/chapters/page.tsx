@@ -15,7 +15,7 @@ interface PageProps {
 // Separate component for the book header section
 function BookHeader({ book, slug }: { book: Book; slug: string }) {
   return (
-    <div className="flex flex-col space-y-2 sm:flex-row sm:items-center sm:justify-between sm:space-y-0">
+    <div className="flex flex-col space-y-2 sm:flex-row sm:items-center sm:justify-between sm:space-y-0 p-8">
       <div>
         <h1 className="text-2xl font-bold tracking-tight md:text-3xl">
           {book.title}

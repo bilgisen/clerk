@@ -30,15 +30,27 @@ export async function uploadImage(formData: UploadImageFormData): Promise<{ url:
       throw new Error("Only image files are allowed");
     }
 
+    // Get file extension from the original filename
+    const fileExtension = file.name.split('.').pop()?.toLowerCase() || '';
+    const allowedExtensions = ['jpg', 'jpeg', 'png', 'webp', 'gif'];
+    
+    if (!allowedExtensions.includes(fileExtension)) {
+      throw new Error(`Unsupported file type. Allowed types: ${allowedExtensions.join(', ')}`);
+    }
+    
     // Convert file to buffer
     const buffer = Buffer.from(await file.arrayBuffer());
     
     // Generate a unique key with timestamp and sanitized filename
-    const sanitizedFilename = file.name.replace(/[^a-zA-Z0-9.-]/g, "_");
-    const key = `${Date.now()}-${sanitizedFilename}`;
+    const sanitizedFilename = file.name
+      .toLowerCase()
+      .replace(/[^a-z0-9.-]/g, "_")
+      .replace(/\.(jpg|jpeg|png|webp|gif)$/i, '');
+      
+    const key = `uploads/${Date.now()}-${sanitizedFilename}.${fileExtension}`;
     
     // Upload to R2 and get the public URL
-    const url = await uploadImageAssets(buffer, key);
+    const url = await uploadImageAssets(buffer, key, file.type);
     
     return { url };
   } catch (error) {
