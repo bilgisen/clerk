@@ -31,9 +31,6 @@ export const users = pgTable('users', {
   subscriptionEndDate: timestamp('subscription_end_date'),
   polarCustomerId: text('polar_customer_id').unique(),
 
-  // Credits System
-  credits: integer('credits').default(0).notNull(),
-
   // Metadata
   metadata: jsonb('metadata').default({}),
   createdAt: timestamp('created_at').defaultNow().notNull(),

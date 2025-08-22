@@ -1,3 +1,4 @@
+// app/api/credits/consume/route.ts
 import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { creditService } from "@/lib/services/credits/credit-service";

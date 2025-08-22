@@ -1,3 +1,4 @@
+// lib/services/credits/credit-service.ts
 import 'server-only';
 
 import { eq, and, isNull, gt, or, sql } from "drizzle-orm";
@@ -25,45 +26,62 @@ export class CreditService {
    * @returns The result of the operation
    */
   async awardSignupBonus(userId: string) {
-    const SIGNUP_BONUS_AMOUNT = 100; // Adjust the bonus amount as needed
-    const idempotencyKey = `signup_bonus_${userId}`;
+    const SIGNUP_BONUS_AMOUNT = 1000; // 1000 credits as signup bonus
+    const idempotencyKey = `signup_bonus_${Date.now()}_${userId}`;
 
-    // Check if bonus was already awarded
-    const existing = await db.query.creditLedger.findFirst({
-      where: (ledger, { and, eq }) => 
-        and(
-          eq(ledger.userId, userId),
-          eq(ledger.reason, 'signup_bonus'),
-          eq(ledger.idempotencyKey, idempotencyKey)
-        )
-    });
+    try {
+      // Check if bonus was already awarded using idempotency key
+      const existing = await db.query.creditLedger.findFirst({
+        where: (ledger, { and, eq }) => 
+          and(
+            eq(ledger.userId, userId),
+            eq(ledger.reason, 'signup_bonus')
+          )
+      });
 
-    if (existing) {
-      return { success: false, message: 'Signup bonus already awarded' };
-    }
+      if (existing) {
+        console.log(`Signup bonus already awarded to user ${userId}`);
+        return { 
+          success: false, 
+          message: 'Signup bonus already awarded',
+          amount: 0
+        };
+      }
 
-    await db.transaction(async (tx) => {
-      // Add credit to ledger
-      await tx.insert(creditLedger).values({
-        userId,
+      await db.transaction(async (tx) => {
+        // Add credit to ledger
+        await tx.insert(creditLedger).values({
+          userId,
+          amount: SIGNUP_BONUS_AMOUNT,
+          reason: 'signup_bonus',
+          idempotencyKey,
+          source: 'clerk',
+          metadata: { 
+            type: 'signup_bonus',
+            awardedAt: new Date().toISOString()
+          }
+        });
+
+        // Record activity
+        await tx.insert(activity).values({
+          userId,
+          type: 'signup_bonus',
+          title: 'Hoş geldin bonusu',
+          delta: SIGNUP_BONUS_AMOUNT,
+          ref: 'system'
+        });
+      });
+
+      console.log(`Awarded ${SIGNUP_BONUS_AMOUNT} credits to user ${userId}`);
+      return { 
+        success: true, 
         amount: SIGNUP_BONUS_AMOUNT,
-        reason: 'signup_bonus',
-        idempotencyKey,
-        source: 'clerk',
-        metadata: { type: 'signup_bonus' }
-      });
-
-      // Record activity
-      await tx.insert(activity).values({
-        userId,
-        type: 'signup_bonus',
-        title: 'Hoş geldin bonusu',
-        delta: SIGNUP_BONUS_AMOUNT,
-        ref: 'system',
-      });
-    });
-
-    return { success: true, amount: SIGNUP_BONUS_AMOUNT };
+        message: 'Signup bonus awarded successfully'
+      };
+    } catch (error) {
+      console.error('Error awarding signup bonus:', error);
+      throw new Error(`Failed to award signup bonus: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
   }
 
   /**

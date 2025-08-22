@@ -4,6 +4,7 @@ export const runtime = 'nodejs';
 import { Webhook } from 'svix';
 import type { WebhookEvent } from '@clerk/nextjs/server';
 import { createOrGetUser } from "@/lib/db/user";
+import { creditService } from "@/lib/services/credits/credit-service";
 
 const logWebhook = (
   eventType: string,
@@ -53,8 +54,16 @@ export async function POST(req: Request) {
     switch (currentEventType) {
       case 'user.created': {
         const data = evt.data as any;
-        const { id: clerkUserId, email_addresses = [], first_name, last_name, image_url, primary_email_address_id } = data;
+        const { 
+          id: clerkUserId, 
+          email_addresses = [], 
+          first_name, 
+          last_name, 
+          image_url, 
+          primary_email_address_id 
+        } = data;
 
+        // Extract primary email or fallback to first available
         let email: string | null = null;
         if (Array.isArray(email_addresses) && email_addresses.length > 0) {
           email =
@@ -63,22 +72,40 @@ export async function POST(req: Request) {
             null;
         }
 
-        if (!email) {
-          email = `${clerkUserId}@no-email.local`;
-          logWebhook(currentEventType, { clerkUserId }, 'No email provided, using fallback', 'warn');
-        }
+        logWebhook(currentEventType, { clerkUserId, email }, 'Processing user creation');
 
         if (!clerkUserId || typeof clerkUserId !== 'string') {
           throw new Error('Valid Clerk user ID is required');
         }
 
+        // Create or get the user
         const result = await createOrGetUser({
-          clerkUserId,
-          email,
+          clerkId: clerkUserId,
+          email: email || `${clerkUserId}@no-email.local`,
+          name: first_name && last_name ? `${first_name} ${last_name}` : first_name || last_name,
           firstName: first_name,
           lastName: last_name,
           imageUrl: image_url,
         });
+
+        // Only award signup bonus for new users
+        if (result.isNew) {
+          try {
+            await creditService.awardSignupBonus(result.userId);
+            logWebhook(
+              currentEventType,
+              { userId: result.userId, clerkUserId },
+              'Awarded signup bonus to new user'
+            );
+          } catch (error) {
+            logWebhook(
+              currentEventType,
+              { userId: result.userId, clerkUserId, error: error instanceof Error ? error.message : 'Unknown error' },
+              'Failed to award signup bonus',
+              'error'
+            );
+          }
+        }
 
         logWebhook(
           currentEventType,

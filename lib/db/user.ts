@@ -1,83 +1,79 @@
-// lib/db/user.ts
-import { db } from "@/db/server";   // <-- artık gerçek server db client
+import { db } from "@/lib/db/server";
 import { users } from "@/db/schema";
 import { eq } from "drizzle-orm";
-import { creditService } from "@/lib/services/credits/credit-service";
 
 type CreateUserInput = {
-  clerkUserId: string;
+  clerkId: string;
   email: string;
+  name?: string | null;
   firstName?: string;
   lastName?: string;
   imageUrl?: string;
 };
 
 export async function createOrGetUser({
-  clerkUserId,
+  clerkId,
   email,
+  name,
   firstName = "",
   lastName = "",
   imageUrl = "",
 }: CreateUserInput) {
-  // Check if user already exists
-  const [existingUser] = await db
-    .select()
-    .from(users)
-    .where(eq(users.clerkId, clerkUserId))
-    .limit(1);
+  // 1. Check by clerkId first (most important)
+  const existingUser = await db.query.users.findFirst({
+    where: eq(users.clerkId, clerkId),
+  });
 
   if (existingUser) {
     return { 
-      success: true, 
-      userId: existingUser.id, 
-      isNew: false 
+      user: existingUser, 
+      isNew: false,
+      userId: existingUser.id,
+      success: true
     };
   }
 
-  // Create new user
+  // 2. Check for email duplicates (just for logging)
+  if (email) {
+    const emailDuplicate = await db.query.users.findFirst({
+      where: eq(users.email, email),
+    });
+
+    if (emailDuplicate) {
+      console.warn(
+        `[User Merge Needed] Email ${email} already exists with userId=${emailDuplicate.id} but different clerkId: ${clerkId}`
+      );
+      // In production, you might want to merge these accounts or handle this case
+    }
+  }
+
+  // 3. Create new user
   const [newUser] = await db
     .insert(users)
     .values({
-      clerkId: clerkUserId,
-      email,
-      firstName,
-      lastName,
-      imageUrl,
+      clerkId,
+      email: email || `${clerkId}@temporary-email.com`,
+      firstName: name ? name.split(' ')[0] : firstName || '',
+      lastName: name ? name.split(' ').slice(1).join(' ') : lastName || '',
+      imageUrl: imageUrl || '',
       role: 'MEMBER',
       isActive: true,
       permissions: ['read:books'],
       subscriptionStatus: 'TRIAL',
-      credits: 0,
       metadata: {},
       createdAt: new Date(),
-      updatedAt: new Date()
+      updatedAt: new Date(),
     })
-    .returning({ id: users.id });
+    .returning();
 
   if (!newUser?.id) {
     throw new Error('Failed to create user');
   }
 
-  // Award signup bonus
-  try {
-    await creditService.addCredits({
-      userId: newUser.id,
-      amount: 1000,
-      reason: 'signup_bonus',
-      idempotencyKey: `signup-bonus-${newUser.id}-${Date.now()}`,
-      metadata: {
-        source: 'clerk_webhook_signup',
-        clerkUserId
-      }
-    });
-  } catch (error) {
-    console.error('Failed to award signup bonus:', error);
-    // Don't fail the user creation if bonus fails
-  }
-
   return { 
-    success: true, 
-    userId: newUser.id, 
-    isNew: true 
+    user: newUser, 
+    isNew: true,
+    userId: newUser.id,
+    success: true
   };
 }
