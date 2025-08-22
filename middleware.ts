@@ -6,6 +6,7 @@ import { headers } from 'next/headers';
 // Public routes (no auth needed)
 const isPublicRoute = createRouteMatcher([
   "/",
+  "/pricing",
   "/sign-in(.*)",
   "/sign-up(.*)",
   "/sso-callback(.*)",

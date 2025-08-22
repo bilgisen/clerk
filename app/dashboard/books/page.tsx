@@ -4,59 +4,47 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@clerk/nextjs';
 import BooksPage from './books-client';
-import { useBooks } from '@/hooks/api/use-books';
 import { Book } from '@/types/book';
 
-// Helper function to map database book to our Book type
-const mapToBook = (dbBook: any): Book => ({
-  ...dbBook,
-  // Ensure all required fields are present with proper types
-  id: dbBook.id,
-  userId: dbBook.userId,
-  title: dbBook.title,
-  slug: dbBook.slug,
-  author: dbBook.author,
-  subtitle: dbBook.subtitle || null,
-  description: dbBook.description || null,
-  publisher: dbBook.publisher || null,
-  publisherWebsite: dbBook.publisherWebsite || null,
-  publishYear: dbBook.publishYear || null,
-  isbn: dbBook.isbn || null,
-  language: dbBook.language || 'en',
-  genre: dbBook.genre || 'OTHER',
-  series: dbBook.series || null,
-  seriesIndex: dbBook.seriesIndex || null,
-  tags: dbBook.tags || [],
-  coverImageUrl: dbBook.coverImageUrl || null,
-  isPublished: dbBook.isPublished || false,
-  isFeatured: dbBook.isFeatured || false,
-  viewCount: dbBook.viewCount || 0,
-  // Handle timestamps with fallbacks
-  createdAt: dbBook.createdAt || dbBook.created_at || new Date().toISOString(),
-  updatedAt: dbBook.updatedAt || dbBook.updated_at || new Date().toISOString(),
-  publishedAt: dbBook.publishedAt || null,
-  // Snake case aliases for backward compatibility
-  created_at: dbBook.created_at || dbBook.createdAt || new Date().toISOString(),
-  updated_at: dbBook.updated_at || dbBook.updatedAt || new Date().toISOString(),
-  // Optional fields
-  contributor: dbBook.contributor || null,
-  translator: dbBook.translator || null,
-  epubUrl: dbBook.epubUrl || null
-});
-
+// This is a client component that wraps the actual books page
 export default function BooksPageWrapper() {
   const router = useRouter();
   const { isLoaded, userId } = useAuth();
-  const { data: books = [], isLoading, error } = useBooks();
   const [isClient, setIsClient] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [books, setBooks] = useState<Book[]>([]);
+  const [error, setError] = useState<string | null>(null);
+
+  // Fetch books from the API
+  const fetchBooks = async () => {
+    if (!userId) return;
+    
+    try {
+      setIsLoading(true);
+      const response = await fetch('/api/books');
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to fetch books');
+      }
+      
+      const data = await response.json();
+      setBooks(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error('Error fetching books:', err);
+      setError(err instanceof Error ? err.message : 'An unknown error occurred');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   useEffect(() => {
     setIsClient(true);
-  }, []);
-
-  useEffect(() => {
+    
     if (isLoaded && !userId) {
       router.push('/sign-in');
+    } else if (userId) {
+      fetchBooks();
     }
   }, [isLoaded, userId, router]);
 
@@ -71,7 +59,7 @@ export default function BooksPageWrapper() {
   if (error) {
     return (
       <div className="p-8 text-red-500">
-        Error loading books: {error.message}
+        Error loading books: {error}
       </div>
     );
   }
@@ -79,12 +67,36 @@ export default function BooksPageWrapper() {
   console.log('Raw books data from API:', books);
   console.log('Raw books data from API (before mapping):', JSON.stringify(books, null, 2));
   
-  const mappedBooks = books.map(book => {
-    console.log('Mapping book:', book);
-    const mapped = mapToBook(book);
-    console.log('Mapped book:', mapped);
-    return mapped;
-  });
+  const mappedBooks = books.map(book => ({
+    ...book,
+    // Ensure all required fields are present with proper types
+    id: book.id,
+    userId: book.userId,
+    title: book.title || 'Untitled',
+    slug: book.slug || '',
+    author: book.author || 'Unknown',
+    subtitle: book.subtitle || null,
+    description: book.description || null,
+    publisher: book.publisher || null,
+    publisherWebsite: book.publisherWebsite || null,
+    publishYear: book.publishYear || null,
+    isbn: book.isbn || null,
+    language: book.language || 'en',
+    genre: book.genre || 'OTHER',
+    series: book.series || null,
+    seriesIndex: book.seriesIndex || null,
+    tags: Array.isArray(book.tags) ? book.tags : [],
+    coverImageUrl: book.coverImageUrl || null,
+    isPublished: Boolean(book.isPublished),
+    isFeatured: Boolean(book.isFeatured),
+    viewCount: Number(book.viewCount) || 0,
+    createdAt: book.createdAt || new Date().toISOString(),
+    updatedAt: book.updatedAt || new Date().toISOString(),
+    publishedAt: book.publishedAt || null,
+    contributor: book.contributor || null,
+    translator: book.translator || null,
+    epubUrl: book.epubUrl || null
+  }));
   
   console.log('Mapped books array:', mappedBooks);
   
