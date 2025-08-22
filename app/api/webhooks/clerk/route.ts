@@ -1,7 +1,8 @@
+// app/api/webhooks/clerk/route.ts
 import { Webhook } from 'svix';
 import { headers } from 'next/headers';
 import type { WebhookEvent } from '@clerk/nextjs/server';
-import { createOrGetUser } from '@/lib/actions/user-actions';
+import { createOrGetUser } from "@/lib/db/user";
 
 // Helper function to log webhook events for debugging
 const logWebhook = (eventType: string, data: any, message: string, level: 'info' | 'error' | 'warn' = 'info') => {
