@@ -65,11 +65,23 @@ export function ChapterTreeArborist({
     if (!data?.tree) return [];
     
     const transformChapters = (chapters: Chapter[]): any[] => {
-      return chapters.map(chapter => ({
-        ...chapter,
-        children: chapter.children ? transformChapters(chapter.children) : [],
-        isLeaf: !chapter.children || chapter.children.length === 0
-      }));
+      return chapters.map(chapter => {
+        // Ensure children is always an array and properly transformed
+        const children = Array.isArray(chapter.children) 
+          ? transformChapters(chapter.children) 
+          : [];
+          
+        // Create a new object without the original children to avoid type conflicts
+        const { children: _, ...chapterWithoutChildren } = chapter;
+        return {
+          ...chapterWithoutChildren,
+          id: chapter.id,
+          name: chapter.title, // react-arborist looks for 'name' by default
+          children,
+          isOpen: true, // Make sure nodes are expanded by default
+          isLeaf: children.length === 0
+        };
+      });
     };
     
     return transformChapters(data.tree);
@@ -249,7 +261,7 @@ export function ChapterTreeArborist({
       <div className="flex-1 overflow-auto">
         <Tree
           data={treeData}
-          openByDefault={false}
+          openByDefault={true}
           width="100%"
           height={600}
           indent={24}
@@ -257,6 +269,7 @@ export function ChapterTreeArborist({
           paddingTop={8}
           paddingBottom={8}
           onMove={handleMove}
+          initialOpenState={undefined}
         >
           {ChapterNode}
         </Tree>
