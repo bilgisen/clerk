@@ -11,14 +11,20 @@ import type { PgTransaction } from 'drizzle-orm/pg-core';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 
 // Helper function to log webhook events for debugging
-const logWebhook = (eventType: string, data: any, message: string, level: 'info' | 'error' = 'info') => {
+const logWebhook = (eventType: string, data: any, message: string, level: 'info' | 'error' | 'warn' = 'info') => {
   const timestamp = new Date().toISOString();
   const logMessage = `[${timestamp}] [${level.toUpperCase()}] [${eventType}] ${message}\nData: ${JSON.stringify(data, null, 2)}`;
   
-  if (level === 'error') {
-    console.error(logMessage);
-  } else {
-    console.log(logMessage);
+  switch (level) {
+    case 'error':
+      console.error(logMessage);
+      break;
+    case 'warn':
+      console.warn(logMessage);
+      break;
+    case 'info':
+    default:
+      console.log(logMessage);
   }
 };
 
@@ -67,12 +73,19 @@ export async function POST(req: Request) {
           primary_email_address_id 
         } = data;
         
-        // Find the primary email address
-        const primaryEmail = email_addresses.find((email: any) => email.id === primary_email_address_id)?.email_address;
-        const email = primaryEmail || (email_addresses[0]?.email_address);
+        // Handle email address (might be empty in some cases like test events)
+        let email: string | null = null;
         
+        if (Array.isArray(email_addresses) && email_addresses.length > 0) {
+          // Try to find the primary email, fallback to first email
+          email = email_addresses.find((e: any) => e.id === primary_email_address_id)?.email_address || 
+                  email_addresses[0]?.email_address || null;
+        }
+        
+        // If no email found, generate a fallback email using clerk user ID
         if (!email) {
-          throw new Error("No email address found for user");
+          email = `${clerkUserId}@no-email.local`;
+          logWebhook(currentEventType, { clerkUserId }, 'No email provided, using fallback', 'warn');
         }
         
         logWebhook(currentEventType, { clerkUserId, email }, 'Processing user.created event');
