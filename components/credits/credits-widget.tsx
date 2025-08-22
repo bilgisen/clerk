@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { RefreshCw, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
+import { useAuth } from "@clerk/nextjs";
 
 // Types for the API response
 type CreditSummary = {
@@ -54,10 +55,17 @@ const formatActivityTitle = (activity: any) => {
 };
 
 export function CreditsWidget() {
+  const { getToken } = useAuth();
+  
   const { data, isLoading, error, refetch } = useQuery<CreditSummary>({
     queryKey: ['credits-summary'],
     queryFn: async () => {
-      const response = await fetch('/api/credits/summary');
+      const token = await getToken();
+      const response = await fetch('/api/credits/summary', {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
       if (!response.ok) {
         throw new Error('Failed to fetch credits');
       }

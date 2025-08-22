@@ -48,10 +48,27 @@ export default function BooksPageWrapper() {
     }
   }, [isLoaded, userId, router]);
 
-  if (!isClient || !isLoaded) {
+  if (!isClient || !isLoaded || isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary" />
+      <div className="space-y-6 p-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="h-8 w-48 bg-muted rounded animate-pulse mb-2" />
+            <div className="h-4 w-64 bg-muted rounded animate-pulse" />
+          </div>
+          <div className="h-10 w-32 bg-muted rounded animate-pulse" />
+        </div>
+        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {[1, 2, 3, 4, 5, 6].map((i) => (
+            <div key={i} className="space-y-3">
+              <div className="aspect-[3/4] w-full bg-muted rounded-lg animate-pulse" />
+              <div className="space-y-2">
+                <div className="h-5 w-3/4 bg-muted rounded animate-pulse" />
+                <div className="h-4 w-1/2 bg-muted rounded animate-pulse" />
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     );
   }

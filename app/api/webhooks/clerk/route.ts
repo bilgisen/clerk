@@ -89,28 +89,48 @@ export async function POST(req: Request) {
               const headerPayload = await headers();
               const webhookId = headerPayload.get("svix-id") || `clerk-${Date.now()}`;
               
-              // Get the newly created user from the database to ensure we have the correct ID
-              const [newUser] = await db.select()
-                .from(users)
-                .where(eq(users.clerkId, id))
-                .limit(1);
+              // Add a small delay to ensure the user is fully created in the database
+              await new Promise(resolve => setTimeout(resolve, 1000));
               
-              if (!newUser) {
-                throw new Error("Failed to find newly created user");
+              // Get the newly created user from the database to ensure we have the correct ID
+              let retries = 3;
+              let newUser;
+              
+              while (retries > 0) {
+                [newUser] = await db.select()
+                  .from(users)
+                  .where(eq(users.clerkId, id))
+                  .limit(1);
+                
+                if (newUser) break;
+                
+                retries--;
+                if (retries > 0) {
+                  await new Promise(resolve => setTimeout(resolve, 1000));
+                }
               }
               
+              if (!newUser) {
+                console.error("Failed to find newly created user after retries");
+                return;
+              }
+              
+              // Add initial credits
               await creditService.addCredits({
-                userId: newUser.id, // Use the database user ID, not the Clerk ID
+                userId: newUser.id,
                 amount: 100,
                 reason: "signup_bonus",
                 idempotencyKey: `clerk:signup:${id}:${webhookId}`,
                 source: "clerk",
                 metadata: {
                   clerkEventId: webhookId,
-                  clerkUserId: id, // Store Clerk user ID in metadata for reference
+                  clerkUserId: id,
                   eventType: "user.created"
                 }
               });
+              
+              console.log(`Successfully awarded signup bonus to user ${newUser.id}`);
+              
             } catch (error) {
               console.error("Failed to award signup bonus:", error);
               // Don't fail the entire request, just log the error

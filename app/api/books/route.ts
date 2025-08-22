@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import { db } from '@/db';
 import { books, users } from '@/db/schema';
+import { eq } from 'drizzle-orm';
 import type { InferSelectModel } from 'drizzle-orm';
 import { creditService } from '@/lib/services/credits/credit-service';
 
@@ -19,69 +20,44 @@ type OrderByFn = (table: any, op: any) => any[];
  */
 export async function GET(): Promise<NextResponse> {
   try {
-    console.log('GET /api/books - Starting request');
-    
     // Get the current user session
-    console.log('Getting auth session...');
-    const session = await auth();
-    const userId = session?.userId;
-    console.log('Session user ID:', userId);
+    const { userId } = await auth();
     
     if (!userId) {
-      console.error('No user ID found in session');
       return NextResponse.json(
         { error: 'Unauthorized' }, 
         { status: 401 }
       );
     }
 
-    try {
-      // First, get the user's database ID using their Clerk ID
-      console.log('Looking up user in database with clerkId:', userId);
-      const user = await db.query.users.findFirst({
-        where: ((table: any, { eq }: any) => eq(table.clerkId, userId)) as WhereFn
-      }) as User | undefined;
-      console.log('Database user found:', user ? `Yes (ID: ${user.id})` : 'No');
+    // Get the user's database ID using their Clerk ID
+    const [user] = await db
+      .select()
+      .from(users)
+      .where(eq(users.clerkId, userId))
+      .limit(1);
 
-      if (!user) {
-        console.error('User not found in database');
-        return NextResponse.json(
-          { error: 'User not found' }, 
-          { status: 404 }
-        );
-      }
-
-      // Fetch all books for the current user using their database ID
-      console.log('Fetching books for user ID:', user.id);
-      const userBooks = await db.query.books.findMany({
-        where: ((table: any, { eq }: any) => eq(table.userId, user.id)) as WhereFn,
-        orderBy: ((table: any, { desc: descFn }: any) => [descFn(table.createdAt)]) as OrderByFn
-      });
-      console.log('Books found:', userBooks.length);
-      
-      // Log sample of books if any
-      if (userBooks.length > 0) {
-        console.log('Sample book:', {
-          id: userBooks[0].id,
-          title: userBooks[0].title,
-          userId: userBooks[0].userId
-        });
-      }
-
-      return NextResponse.json(userBooks);
-    } catch (dbError) {
-      console.error('Database error:', dbError);
-      throw dbError;
+    if (!user) {
+      return NextResponse.json(
+        { error: 'User not found' }, 
+        { status: 404 }
+      );
     }
+
+    // Fetch all books for the current user using their database ID
+    const userBooks = await db
+      .select()
+      .from(books)
+      .where(eq(books.userId, user.id))
+      .orderBy(books.createdAt);
+
+    return NextResponse.json(userBooks);
   } catch (error) {
-    console.error('Error in GET /api/books:', {
-      error: error instanceof Error ? error.message : 'Unknown error',
-      stack: error instanceof Error ? error.stack : undefined
-    });
+    console.error('Error in GET /api/books:', error);
     return NextResponse.json(
       { 
         error: 'Internal server error',
-        message: error instanceof Error ? error.message : 'Unknown error'
+        message: error instanceof Error ? error.message : 'An unexpected error occurred'
       }, 
       { status: 500 }
     );
@@ -95,10 +71,9 @@ export async function GET(): Promise<NextResponse> {
 export async function POST(request: Request) {
   try {
     // Get the current user session
-    const session = await auth();
-    const clerkUserId = session.userId;
+    const { userId } = await auth();
     
-    if (!clerkUserId) {
+    if (!userId) {
       return NextResponse.json(
         { error: 'Unauthorized' }, 
         { status: 401 }
@@ -106,9 +81,11 @@ export async function POST(request: Request) {
     }
     
     // Get the user's database ID using their Clerk ID
-    const user = await db.query.users.findFirst({
-      where: ((table: any, { eq: eqFn }: any) => eqFn(table.clerkId, clerkUserId)) as WhereFn
-    }) as User | undefined;
+    const [user] = await db
+      .select()
+      .from(users)
+      .where(eq(users.clerkId, userId))
+      .limit(1);
 
     if (!user) {
       return NextResponse.json(
@@ -128,41 +105,62 @@ export async function POST(request: Request) {
       );
     }
 
-    // Deduct 40 credits for creating a new book
-    const creditResult = await creditService.spendCredits({
-      userId: user.id,
-      amount: 40,
-      reason: 'book_creation',
-      idempotencyKey: `create-book:${user.id}:${Date.now()}`,
-      ref: undefined,
-      metadata: {
-        action: 'book_creation',
-        bookTitle: title
+    // Generate a slug from the title
+    const slug = title
+      .toLowerCase()
+      .replace(/[^\w\s-]/g, '') // Remove special characters
+      .replace(/\s+/g, '-')     // Replace spaces with hyphens
+      .replace(/-+/g, '-')      // Replace multiple hyphens with single
+      .trim();
+
+    // Start a transaction
+    const [newBook] = await db.transaction(async (tx: typeof db) => {
+      // Deduct credits first
+      const creditResult = await creditService.spendCredits({
+        userId: user.id,
+        amount: 40,
+        reason: 'book_creation',
+        idempotencyKey: `create-book:${user.id}:${Date.now()}`,
+        ref: undefined,
+        metadata: {
+          action: 'book_creation',
+          bookTitle: title
+        }
+      });
+
+      if (!creditResult.ok) {
+        throw new Error('Failed to deduct credits for book creation');
       }
+
+      // Create the book
+      const [book] = await tx
+        .insert(books)
+        .values({
+          title,
+          author,
+          description: description || null,
+          coverImageUrl: coverImageUrl || null,
+          userId: user.id,
+          slug,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        })
+        .returning();
+
+      return [{
+        ...book,
+        remainingCredits: creditResult.balance
+      }];
     });
 
-    if (!creditResult.ok) {
-      throw new Error('Failed to deduct credits for book creation');
-    }
-
-    // Create a new book
-    const [newBook] = await db.insert(books).values({
-      title,
-      author,
-      description: description || null,
-      coverImageUrl: coverImageUrl || null,
-      userId: user.id,
-      slug: title.toLowerCase().replace(/\s+/g, '-'), // Simple slug generation
-    }).returning();
-
-    return NextResponse.json({
-      ...newBook,
-      remainingCredits: creditResult.balance
-    }, { status: 201 });
+    return NextResponse.json(newBook, { status: 201 });
   } catch (error) {
     console.error('Error creating book:', error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { 
+        error: 'Internal server error',
+        message: error instanceof Error ? error.message : 'Failed to create book'
+      },
       { status: 500 }
     );
   }

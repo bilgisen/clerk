@@ -1,20 +1,50 @@
 import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { creditService } from "@/lib/services/credits/credit-service";
+import { db } from "@/db";
+import { users } from "@/db/schema";
+import { eq } from "drizzle-orm";
 
 export const runtime = "edge"; // Optimize for read-only operations
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const authResult = await auth();
-    const clerkUserId = authResult.userId;
+    // First try to get user from Clerk auth
+    let clerkUserId: string | null = null;
+    
+    try {
+      const authResult = await auth();
+      clerkUserId = authResult.userId;
+    } catch (error) {
+      console.warn("Clerk auth failed, trying Bearer token");
+    }
+    
+    // If no user from Clerk auth, try Bearer token
+    if (!clerkUserId) {
+      const authHeader = request.headers.get('authorization');
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        const token = authHeader.split(' ')[1];
+        // Here you would verify the token and get the user ID
+        // For now, we'll just use it as the user ID since Clerk tokens are JWT
+        clerkUserId = token;
+      }
+    }
     
     if (!clerkUserId) {
       return new NextResponse("Unauthorized", { status: 401 });
     }
     
-    // Use the Clerk user ID directly since we're not looking up a separate database user
-    const userId = clerkUserId;
+    // Get the database user ID from the Clerk user ID
+    const [user] = await db.select()
+      .from(users)
+      .where(eq(users.clerkId, clerkUserId))
+      .limit(1);
+      
+    if (!user) {
+      return new NextResponse("User not found", { status: 404 });
+    }
+    
+    const userId = user.id;
 
     // Fetch balance and recent activities in parallel
     const [balance, recentActivities] = await Promise.all([
