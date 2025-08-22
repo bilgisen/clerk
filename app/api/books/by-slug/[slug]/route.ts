@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
-import { db } from '@/db';
+import { db } from '@/lib/db/server';
 import { books, users } from '@/db/schema';
 import { eq, and } from 'drizzle-orm';
 

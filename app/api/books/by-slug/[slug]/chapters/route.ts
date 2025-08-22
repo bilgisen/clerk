@@ -1,7 +1,7 @@
 // app/api/books/by-slug/[slug]/chapters/route.ts
 import { NextResponse } from 'next/server';
 import { currentUser } from '@clerk/nextjs/server';
-import { db } from '@/db';
+import { db } from '@/lib/db/server';
 import { books, chapters, users, type NewChapter } from '@/db/schema';
 import { eq, and, desc, type SQL, type SQLWrapper } from 'drizzle-orm';
 import type { PgTableWithColumns } from 'drizzle-orm/pg-core';

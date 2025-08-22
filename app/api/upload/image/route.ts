@@ -43,8 +43,8 @@ export async function POST(request: Request) {
       })
     );
 
-    // Construct the public URL
-    const url = `https://${process.env.R2_UPLOAD_IMAGE_BUCKET_NAME}.r2.cloudflarestorage.com/${key}`;
+    // Construct the public URL using the correct domain
+    const url = `https://storage.bookshall.com/${key}`;
 
     return NextResponse.json({
       success: true,

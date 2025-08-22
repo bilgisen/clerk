@@ -60,8 +60,9 @@ const nextConfig: NextConfig = {
     return config;
   },
 
-  // Clerk configuration
+  // Environment variables
   env: {
+    // Clerk configuration
     NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
     NEXT_PUBLIC_CLERK_FRONTEND_API: clerkConfig.domain,
     CLERK_SECRET_KEY: process.env.CLERK_SECRET_KEY,
@@ -71,7 +72,15 @@ const nextConfig: NextConfig = {
     NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL: '/dashboard',
     NEXT_PUBLIC_CLERK_SIGN_IN_FORCE_REDIRECT_URL: '/dashboard',
     NEXT_PUBLIC_CLERK_SIGN_UP_FORCE_REDIRECT_URL: '/dashboard',
-    CLERK_WEBHOOK_SECRET: process.env.CLERK_WEBHOOK_SECRET
+    CLERK_WEBHOOK_SECRET: process.env.CLERK_WEBHOOK_SECRET,
+    
+    // R2 Configuration
+    CLOUDFLARE_ACCOUNT_ID: process.env.CLOUDFLARE_ACCOUNT_ID,
+    R2_UPLOAD_IMAGE_ACCESS_KEY_ID: process.env.R2_UPLOAD_IMAGE_ACCESS_KEY_ID,
+    R2_UPLOAD_IMAGE_SECRET_ACCESS_KEY: process.env.R2_UPLOAD_IMAGE_SECRET_ACCESS_KEY,
+    R2_UPLOAD_IMAGE_BUCKET_NAME: process.env.R2_UPLOAD_IMAGE_BUCKET_NAME,
+    NEXT_PUBLIC_IMAGE_BASE_URL: process.env.NEXT_PUBLIC_IMAGE_BASE_URL,
+    NEXT_PUBLIC_MEDIA_BASE_URL: process.env.NEXT_PUBLIC_MEDIA_BASE_URL
   },
   images: {
     remotePatterns: [
