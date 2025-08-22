@@ -44,7 +44,6 @@ export async function GET(
         slug: true,
         description: true,
         coverImageUrl: true,
-        status: true,
         publishedAt: true,
         createdAt: true,
         updatedAt: true,
@@ -176,14 +175,14 @@ export async function POST(
     }
 
     const newChapter = await db.insert(chapters).values({
-      bookId: book.id,
       title,
       content: content || '',
-      parentChapterId: parentChapterId || null,
+      book_id: book.id,
+      parent_chapter_id: parentChapterId || null,
       order: order ?? 0,
       level: level,
-      isDraft: true,
-      wordCount: 0,
+      is_draft: true,
+      word_count: 0,
       user_id: dbUser.id
     }).returning();
 
