@@ -40,7 +40,28 @@ export async function POST(req: Request) {
 
   try {
     switch (eventType) {
-      case "user.created":
+      case "user.created": {
+        const data: any = evt.data;
+        const { id, email_addresses, first_name, last_name, image_url } = data;
+        const email = email_addresses?.[0]?.email_address;
+
+        if (!id || typeof id !== "string") {
+          throw new Error("Valid Clerk user ID is required");
+        }
+
+        // Award signup bonus
+        try {
+          await creditService.awardSignupBonus(id);
+          console.log(`Awarded signup bonus to user ${id}`);
+        } catch (error) {
+          console.error('Failed to award signup bonus:', error);
+          // Don't fail the webhook if bonus fails
+        }
+
+        // Continue with user creation/update
+        await this.upsertUser(id, email, first_name, last_name, image_url);
+        break;
+      }
       case "user.updated": {
         const data: any = evt.data;
         const { id, email_addresses, first_name, last_name, image_url } = data;

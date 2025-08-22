@@ -9,6 +9,53 @@ type Transaction = Parameters<typeof db.transaction>[0];
 
 export class CreditService {
   /**
+   * Award signup bonus to a new user
+   * @param userId The ID of the user
+   * @returns The result of the operation
+   */
+  async awardSignupBonus(userId: string) {
+    const SIGNUP_BONUS_AMOUNT = 100; // Adjust the bonus amount as needed
+    const idempotencyKey = `signup_bonus_${userId}`;
+
+    // Check if bonus was already awarded
+    const existing = await db.query.creditLedger.findFirst({
+      where: (ledger, { and, eq }) => 
+        and(
+          eq(ledger.userId, userId),
+          eq(ledger.reason, 'signup_bonus'),
+          eq(ledger.idempotencyKey, idempotencyKey)
+        )
+    });
+
+    if (existing) {
+      return { success: false, message: 'Signup bonus already awarded' };
+    }
+
+    await db.transaction(async (tx) => {
+      // Add credit to ledger
+      await tx.insert(creditLedger).values({
+        userId,
+        amount: SIGNUP_BONUS_AMOUNT,
+        reason: 'signup_bonus',
+        idempotencyKey,
+        source: 'clerk',
+        metadata: { type: 'signup_bonus' }
+      });
+
+      // Record activity
+      await tx.insert(activity).values({
+        userId,
+        type: 'signup_bonus',
+        title: 'Hoş geldin bonusu',
+        delta: SIGNUP_BONUS_AMOUNT,
+        ref: 'system',
+      });
+    });
+
+    return { success: true, amount: SIGNUP_BONUS_AMOUNT };
+  }
+
+  /**
    * Get the current balance of a user
    * @param userId The ID of the user
    * @returns The current credit balance
