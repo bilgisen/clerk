@@ -89,14 +89,25 @@ export async function POST(req: Request) {
               const headerPayload = await headers();
               const webhookId = headerPayload.get("svix-id") || `clerk-${Date.now()}`;
               
+              // Get the newly created user from the database to ensure we have the correct ID
+              const [newUser] = await db.select()
+                .from(users)
+                .where(eq(users.clerkId, id))
+                .limit(1);
+              
+              if (!newUser) {
+                throw new Error("Failed to find newly created user");
+              }
+              
               await creditService.addCredits({
-                userId: id,
-                amount: 20,
+                userId: newUser.id, // Use the database user ID, not the Clerk ID
+                amount: 100,
                 reason: "signup_bonus",
                 idempotencyKey: `clerk:signup:${id}:${webhookId}`,
                 source: "clerk",
                 metadata: {
                   clerkEventId: webhookId,
+                  clerkUserId: id, // Store Clerk user ID in metadata for reference
                   eventType: "user.created"
                 }
               });

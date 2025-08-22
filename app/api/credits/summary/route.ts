@@ -6,11 +6,15 @@ export const runtime = "edge"; // Optimize for read-only operations
 
 export async function GET() {
   try {
-    const { userId } = auth();
+    const authResult = await auth();
+    const clerkUserId = authResult.userId;
     
-    if (!userId) {
+    if (!clerkUserId) {
       return new NextResponse("Unauthorized", { status: 401 });
     }
+    
+    // Use the Clerk user ID directly since we're not looking up a separate database user
+    const userId = clerkUserId;
 
     // Fetch balance and recent activities in parallel
     const [balance, recentActivities] = await Promise.all([
@@ -22,14 +26,16 @@ export async function GET() {
       success: true,
       data: {
         balance,
-        recentActivities: recentActivities.map(activity => ({
-          id: activity.id,
-          type: activity.type,
-          title: activity.title,
-          delta: activity.delta,
-          ref: activity.ref,
-          createdAt: activity.createdAt.toISOString(),
-        })),
+        recentActivities: recentActivities
+          .filter(activity => activity.createdAt !== null)
+          .map(activity => ({
+            id: activity.id,
+            type: activity.type,
+            title: activity.title,
+            delta: activity.delta,
+            ref: activity.ref,
+            createdAt: activity.createdAt?.toISOString() ?? new Date().toISOString(),
+          })),
       },
     });
   } catch (error) {

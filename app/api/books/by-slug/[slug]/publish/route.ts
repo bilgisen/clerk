@@ -1,6 +1,10 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import { Octokit } from '@octokit/rest';
+import { creditService } from '@/lib/services/credits/credit-service';
+import { db } from '@/db';
+import { users } from '@/db/schema';
+import { eq } from 'drizzle-orm';
 
 export async function POST(
   request: Request,
@@ -10,12 +14,50 @@ export async function POST(
   const { slug } = context.params;
   try {
     // Get the current user session
-    const { userId } = await auth();
-    if (!userId) {
+    const { userId: clerkUserId } = await auth();
+    if (!clerkUserId) {
       return new NextResponse(JSON.stringify({ error: 'Unauthorized' }), { 
         status: 401,
         headers: { 'Content-Type': 'application/json' }
       });
+    }
+    
+    // Get the user's database ID using their Clerk ID
+    const [user] = await db.select()
+      .from(users)
+      .where(eq(users.clerkId, clerkUserId))
+      .limit(1);
+    
+    if (!user) {
+      return new NextResponse(JSON.stringify({ error: 'User not found' }), {
+        status: 404,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+    
+    // Deduct 10 credits for EPUB publishing
+    const creditResult = await creditService.spendCredits({
+      userId: user.id,
+      amount: 10,
+      reason: 'epub_publish',
+      idempotencyKey: `publish-epub:${user.id}:${Date.now()}`,
+      ref: slug,
+      metadata: {
+        action: 'epub_publish',
+        bookSlug: slug
+      }
+    });
+    
+    if (!creditResult.ok) {
+      return new NextResponse(
+        JSON.stringify({ 
+          error: 'Insufficient credits',
+          message: 'You do not have enough credits to publish an EPUB'
+        }), {
+          status: 402, // Payment Required
+          headers: { 'Content-Type': 'application/json' }
+        }
+      );
     }
 
     // Validate GitHub token
@@ -43,8 +85,9 @@ export async function POST(
     // Prepare metadata
     const metadata = {
       generatedAt: new Date().toISOString(),
-      userId: userId,
-      bookSlug: slug
+      userId: clerkUserId,
+      bookSlug: slug,
+      databaseUserId: user.id
     };
 
     // Trigger the workflow

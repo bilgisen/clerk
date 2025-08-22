@@ -2,8 +2,8 @@ import { NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import { db } from '@/db';
 import { books, users } from '@/db/schema';
-import { eq, desc } from 'drizzle-orm';
 import type { InferSelectModel } from 'drizzle-orm';
+import { creditService } from '@/lib/services/credits/credit-service';
 
 type User = InferSelectModel<typeof users>;
 
@@ -128,6 +128,23 @@ export async function POST(request: Request) {
       );
     }
 
+    // Deduct 40 credits for creating a new book
+    const creditResult = await creditService.spendCredits({
+      userId: user.id,
+      amount: 40,
+      reason: 'book_creation',
+      idempotencyKey: `create-book:${user.id}:${Date.now()}`,
+      ref: undefined,
+      metadata: {
+        action: 'book_creation',
+        bookTitle: title
+      }
+    });
+
+    if (!creditResult.ok) {
+      throw new Error('Failed to deduct credits for book creation');
+    }
+
     // Create a new book
     const [newBook] = await db.insert(books).values({
       title,
@@ -138,7 +155,10 @@ export async function POST(request: Request) {
       slug: title.toLowerCase().replace(/\s+/g, '-'), // Simple slug generation
     }).returning();
 
-    return NextResponse.json(newBook, { status: 201 });
+    return NextResponse.json({
+      ...newBook,
+      remainingCredits: creditResult.balance
+    }, { status: 201 });
   } catch (error) {
     console.error('Error creating book:', error);
     return NextResponse.json(

@@ -1,6 +1,9 @@
 import { eq, and, isNull, gt, or, sql } from "drizzle-orm";
-import { db } from "@/db";
+import { db } from "@/lib/db/server";
 import { creditLedger, activity } from "@/db/schema/credits";
+
+// Type for the transaction
+type Transaction = Parameters<typeof db.transaction>[0];
 
 export class CreditService {
   /**
@@ -44,14 +47,12 @@ export class CreditService {
       throw new Error("Amount must be positive");
     }
 
-    return db.transaction(async (tx) => {
+    return await db.transaction(async (tx) => {
       // Check for idempotency
       const exists = await tx.query.creditLedger.findFirst({
-        where: (t, { and, eq }) => 
-          and(
-            eq(t.userId, options.userId), 
-            eq(t.idempotencyKey, options.idempotencyKey)
-          ),
+        where: (ledger, { eq }) => 
+          eq(ledger.userId, options.userId) && 
+          eq(ledger.idempotencyKey, options.idempotencyKey)
       });
 
       if (exists) {
@@ -110,14 +111,12 @@ export class CreditService {
       throw new Error("Amount must be positive");
     }
 
-    return db.transaction(async (tx) => {
+    return await db.transaction(async (tx) => {
       // Check for idempotency
       const exists = await tx.query.creditLedger.findFirst({
-        where: (t, { and, eq }) => 
-          and(
-            eq(t.userId, options.userId), 
-            eq(t.idempotencyKey, options.idempotencyKey)
-          ),
+        where: (ledger, { eq }) => 
+          eq(ledger.userId, options.userId) && 
+          eq(ledger.idempotencyKey, options.idempotencyKey)
       });
 
       if (exists) {
@@ -160,11 +159,12 @@ export class CreditService {
    * @returns List of recent activities
    */
   async getRecentActivities(userId: string, limit: number = 10) {
-    return db.query.activity.findMany({
+    const result = await db.query.activity.findMany({
       where: (activity, { eq }) => eq(activity.userId, userId),
       orderBy: (activity, { desc }) => [desc(activity.createdAt)],
       limit,
     });
+    return result;
   }
 }
 
