@@ -279,6 +279,7 @@ export default function EditChapterPage() {
           </div>
           <BooksMenu 
             slug={bookSlug}
+            bookId={chapter?.book_id || ''}
             onView={() => router.push(`/dashboard/books/${bookSlug}/chapters/${chapterId}`)}
           />
         </div>

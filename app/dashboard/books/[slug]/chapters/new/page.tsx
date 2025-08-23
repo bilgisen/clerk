@@ -75,6 +75,7 @@ export default function NewChapterPage() {
   const [isLoading, setIsLoading] = React.useState<boolean>(true);
   const [chapters, setChapters] = React.useState<Chapter[]>([]);
   const [bookName, setBookName] = React.useState<string>('');
+  const [bookId, setBookId] = React.useState<string>('');
   
   // Load book and chapters data
   React.useEffect(() => {
@@ -88,6 +89,7 @@ export default function NewChapterPage() {
         if (!bookResponse.ok) throw new Error('Failed to load book details');
         const bookData = await bookResponse.json();
         setBookName(bookData.title || 'this book');
+        setBookId(bookData.id || '');
 
         // Load chapters
         const chaptersResponse = await fetch(`/api/books/by-slug/${bookSlug}/chapters`);
@@ -228,7 +230,7 @@ export default function NewChapterPage() {
           <div className="mb-6">
             <div className="flex justify-between items-center">
               <h1 className="text-3xl font-bold">Create New Chapter</h1>
-              <BooksMenu slug={bookSlug} />
+              <BooksMenu slug={bookSlug} bookId={bookId} />
             </div>
             <p className="text-muted-foreground mt-2">
               Add a new chapter to <span className="font-medium">{bookName || 'this book'}</span>

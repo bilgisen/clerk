@@ -61,6 +61,7 @@ export default function NewBookPage() {
         <div className="flex items-center">
           <BooksMenu 
             slug="new" 
+            bookId="new"
             hideEdit={true}
             onView={() => window.location.href = '/dashboard/books'}
           />

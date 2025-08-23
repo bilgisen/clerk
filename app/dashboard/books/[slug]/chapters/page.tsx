@@ -13,7 +13,7 @@ interface PageProps {
 }
 
 // Separate component for the book header section
-function BookHeader({ book, slug }: { book: Book; slug: string }) {
+function BookHeader({ book, slug }: { book: Book & { id: string }; slug: string }) {
   return (
     <div className="flex flex-col space-y-2 sm:flex-row sm:items-center sm:justify-between sm:space-y-0">
       <div>
@@ -25,7 +25,7 @@ function BookHeader({ book, slug }: { book: Book; slug: string }) {
         )}
       </div>
       <div className="flex-shrink-0">
-        <BooksMenu slug={slug} />
+        <BooksMenu slug={slug} bookId={book.id} />
       </div>
     </div>
   );
@@ -51,7 +51,7 @@ export default async function BookDetailPage({ params, searchParams }: PageProps
     console.log(`[DEBUG] Fetching book with slug: ${slug}`);
     // First, get the book by slug
     console.log(`[DEBUG] Fetching book with slug: ${slug}`);
-    const book = await getBookBySlug(slug);
+    const book = await getBookBySlug(slug) as Book & { id: string };
     console.log(`[DEBUG] Book fetch result:`, book ? 'Found' : 'Not found');
     if (!book) {
       console.error(`[ERROR] Book not found with slug: ${slug}`);

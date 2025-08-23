@@ -14,10 +14,11 @@ import { MoreVertical } from "lucide-react";
 import { useEffect, useState } from "react";
 
 type BooksMenuProps = {
-  slug: string;  // Make slug required
+  slug: string;  // Book slug for navigation
+  bookId: string; // Book ID for API calls
   onView?: () => void;
   onEdit?: () => void;
-  onDelete?: () => void;
+  onDelete?: () => Promise<{success: boolean; error?: string}>;
   onAddChapter?: () => void;
   hideEdit?: boolean; // New prop to hide Edit Book menu item
   activeTab?: string; // Active tab for highlighting
@@ -25,6 +26,7 @@ type BooksMenuProps = {
 
 export function BooksMenu({
   slug,
+  bookId,
   onView,
   onEdit,
   onDelete,
@@ -70,20 +72,22 @@ export function BooksMenu({
         )}
         <DropdownMenuItem
           onSelect={async () => {
-            if (onDelete) return onDelete();
-            if (confirm("Are you sure you want to delete this book?")) {
-              try {
-                const result = await deleteBook(slug);
-                if (result.success) {
-                  router.push('/dashboard/books');
-                  router.refresh();
-                } else {
-                  alert(result.error || 'Failed to delete book');
-                }
-              } catch (error) {
-                console.error('Error deleting book:', error);
-                alert('An error occurred while deleting the book');
+            if (!confirm("Are you sure you want to delete this book?")) return;
+            
+            try {
+              const result = onDelete 
+                ? await onDelete()
+                : await deleteBook(bookId);
+                
+              if (result.success) {
+                router.push('/dashboard/books');
+                router.refresh();
+              } else {
+                alert(result.error || 'Failed to delete book');
               }
+            } catch (error) {
+              console.error('Error deleting book:', error);
+              alert('An error occurred while deleting the book');
             }
           }}
           className="text-red-600"
