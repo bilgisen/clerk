@@ -15,7 +15,7 @@ interface PageProps {
 // Separate component for the book header section
 function BookHeader({ book, slug }: { book: Book; slug: string }) {
   return (
-    <div className="flex flex-col space-y-2 sm:flex-row sm:items-center sm:justify-between sm:space-y-0">
+    <div className="w-full flex flex-col space-y-2 sm:flex-row sm:items-center sm:justify-between sm:space-y-0 p-8">
       <div>
         <h1 className="text-2xl font-bold tracking-tight md:text-3xl">
           {book.title}
@@ -98,7 +98,7 @@ export default async function BookDetailPage({ params, searchParams }: PageProps
     };
     
     return (
-      <div className="container mx-auto max-w-6xl space-y-6 p-4 md:p-8">
+      <div className="container mx-auto w-full space-y-6 p-8 md:p-8">
         <div className="flex flex-col lg:flex-row gap-8">
           {/* Main content */}
           <div className="flex-1">
@@ -141,14 +141,15 @@ export default async function BookDetailPage({ params, searchParams }: PageProps
             </div>
           </div>
           
-          {/* Sidebar */}
-          <aside className="lg:w-80 space-y-6">
+         
+        </div>
+         {/* Sidebar */}
+         <aside className="lg:w-80 space-y-6">
             <SimpleChapterList 
               bookSlug={slug}
               bookTitle={book.title}
             />
           </aside>
-        </div>
       </div>
     );
   } catch (error) {

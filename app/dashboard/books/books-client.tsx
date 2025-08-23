@@ -76,7 +76,7 @@ export default function BooksPage({ initialBooks = [] }: BooksPageProps) {
 
   if (isLoading) {
     return (
-      <div className="container mx-auto py-6">
+      <div className="container mx-auto p-8">
         <div className="animate-pulse space-y-4">
           <div className="h-8 bg-muted rounded w-1/4"></div>
           <div className="h-64 bg-muted rounded"></div>
@@ -88,7 +88,7 @@ export default function BooksPage({ initialBooks = [] }: BooksPageProps) {
   console.log('[BooksPage] Rendering with books:', books);
   
   return (
-    <div className="container mx-auto py-6">
+    <div className="container mx-auto p-8">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold">My Books</h1>
         <Button onClick={() => router.push('/dashboard/books/new')}>

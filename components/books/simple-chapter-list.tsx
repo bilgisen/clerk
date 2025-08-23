@@ -5,6 +5,10 @@ import React, { useMemo, useContext, createContext } from 'react';
 import { Skeleton } from "@/components/ui/skeleton";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@clerk/nextjs";
+import { Button } from "@/components/ui/button";
+import { Eye, Pencil, Trash2 } from "lucide-react";
+import { useRouter } from 'next/navigation';
+import { toast } from "sonner";
 
 // Define the chapter structure based on your API response
 interface Chapter {
@@ -172,13 +176,53 @@ interface ChapterItemProps {
 }
 
 function ChapterItem({ chapter, level }: ChapterItemProps) {
+  const router = useRouter();
+  const { getToken } = useAuth();
   const chapterMap = useContext(ChapterMapContext);
   const hasChildren = Boolean(chapter.children?.length);
+
+  const handleView = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    router.push(`/dashboard/books/${chapter.book_slug}/chapters/${chapter.id}`);
+  };
+
+  const handleEdit = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    router.push(`/dashboard/books/${chapter.book_slug}/chapters/${chapter.id}/edit`);
+  };
+
+  const handleDelete = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!window.confirm('Are you sure you want to delete this chapter?')) return;
+    
+    try {
+      const token = await getToken();
+      const response = await fetch(`/api/books/by-slug/${chapter.book_slug}/chapters/${chapter.id}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || 'Failed to delete chapter');
+      }
+
+      toast.success('Chapter deleted successfully');
+      // Refresh the page to update the chapter list
+      window.location.reload();
+    } catch (error) {
+      console.error('Error deleting chapter:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to delete chapter');
+    }
+  };
   
   return (
     <div className="space-y-1">
       <div 
-        className={`p-3 border rounded hover:bg-muted/10 transition-colors ${level > 0 ? 'ml-6' : ''}`}
+        className={`p-3 border rounded hover:bg-muted/10 transition-colors flex flex-col ${level > 0 ? 'ml-6' : ''}`}
         style={{ marginLeft: `${level * 1}rem` }}
       >
         <h4 className="font-medium flex items-center">
@@ -188,6 +232,17 @@ function ChapterItem({ chapter, level }: ChapterItemProps) {
             </span>
           )}
           {chapter.title}
+          <div className="ml-auto flex space-x-1">
+            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleView} title="View Chapter">
+              <Eye className="h-3.5 w-3.5" />
+            </Button>
+            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleEdit} title="Edit Chapter">
+              <Pencil className="h-3.5 w-3.5" />
+            </Button>
+            <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive/90" onClick={handleDelete} title="Delete Chapter">
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          </div>
         </h4>
         <div className="text-xs text-muted-foreground mt-1 grid grid-cols-3 gap-2">
           <div className="truncate" title={chapter.id}>

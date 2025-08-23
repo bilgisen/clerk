@@ -70,9 +70,7 @@ export default function NewBookPage() {
       <BookInfoForm 
         onSubmit={handleSubmit} 
         defaultValues={{
-          language: 'tr',
-          isPublished: false,
-          isFeatured: false,
+          language: 'en',
         }}
         isSubmitting={isSubmitting}
       />

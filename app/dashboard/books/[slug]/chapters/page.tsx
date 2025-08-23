@@ -98,7 +98,7 @@ export default async function BookDetailPage({ params, searchParams }: PageProps
     };
     
     return (
-      <div className="container mx-auto max-w-6xl space-y-6 p-4 md:p-8">
+      <div className="container mx-auto w-full space-y-6 p-8 md:p-8">
         <div className="flex flex-col lg:flex-row gap-8">
           {/* Main content */}
           <div className="flex-1">
