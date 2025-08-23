@@ -1,7 +1,8 @@
 "use client";
 
 import React from "react";
-import { useRouter, useParams } from "next/navigation";
+import { useRouter } from "next/navigation";
+import { useParams } from 'next/navigation';
 import { ParentChapterSelect } from "@/components/books/chapters/ParentChapterSelect";
 import { useForm, type SubmitHandler } from "react-hook-form";
 import { z } from "zod";
@@ -13,6 +14,8 @@ import { Input } from "@/components/ui/input";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import dynamic from "next/dynamic";
+import { Separator } from "@/components/ui/separator";
+import { BooksMenu } from "@/components/books/books-menu";
 
 // Import editor dynamically to avoid SSR issues
 const ChapterContentEditor = dynamic(
@@ -67,26 +70,32 @@ type FormControlType = Control<FormValues>;
 export default function NewChapterPage() {
   const router = useRouter();
   const params = useParams<{ slug: string }>();
-  const bookSlug = params.slug;
+  const bookSlug = params?.slug as string;
 
-  // Get book data
-  // Mock data for now - replace with actual data fetching
-  const [isLoading, setIsLoading] = React.useState<boolean>(false);
+  const [isLoading, setIsLoading] = React.useState<boolean>(true);
   const [chapters, setChapters] = React.useState<Chapter[]>([]);
+  const [bookName, setBookName] = React.useState<string>('');
   
-  // Load chapters
+  // Load book and chapters data
   React.useEffect(() => {
-    const loadChapters = async () => {
+    const loadData = async () => {
       if (!bookSlug) return;
       
       setIsLoading(true);
       try {
-        const response = await fetch(`/api/books/by-slug/${bookSlug}/chapters`);
-        if (!response.ok) throw new Error('Failed to load chapters');
-        const data = await response.json();
+        // Load book details
+        const bookResponse = await fetch(`/api/books/by-slug/${bookSlug}`);
+        if (!bookResponse.ok) throw new Error('Failed to load book details');
+        const bookData = await bookResponse.json();
+        setBookName(bookData.title || 'this book');
+
+        // Load chapters
+        const chaptersResponse = await fetch(`/api/books/by-slug/${bookSlug}/chapters`);
+        if (!chaptersResponse.ok) throw new Error('Failed to load chapters');
+        const chaptersData = await chaptersResponse.json();
         
         // Transform the data to match the Chapter type
-        const formattedChapters = data.map((chapter: any) => ({
+        const formattedChapters = chaptersData.map((chapter: any) => ({
           id: chapter.id,
           title: chapter.title,
           level: chapter.level || 0,
@@ -95,14 +104,14 @@ export default function NewChapterPage() {
         
         setChapters(formattedChapters);
       } catch (error) {
-        console.error('Error loading chapters:', error);
-        toast.error('Failed to load chapters');
+        console.error('Error loading data:', error);
+        toast.error('Failed to load data');
       } finally {
         setIsLoading(false);
       }
     };
     
-    loadChapters();
+    loadData();
   }, [bookSlug]);
 
   // Initialize form with explicit type and default values
@@ -213,80 +222,94 @@ export default function NewChapterPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen w-full bg-background">
       <main className="container mx-auto py-8 px-4">
-        <div className="max-w-4xl mx-auto">
-          <h1 className="text-3xl font-bold mb-6">Create New Chapter</h1>
-          
+        <div className="max-w-full mx-auto">
+          <div className="mb-6">
+            <div className="flex justify-between items-center">
+              <h1 className="text-3xl font-bold">Create New Chapter</h1>
+              <BooksMenu slug={bookSlug} />
+            </div>
+            <p className="text-muted-foreground mt-2">
+              Add a new chapter to <span className="font-medium">{bookName || 'this book'}</span>
+            </p>
+          </div>
+          <Separator className="mb-6" />
           <Form {...form as any}>
             <form onSubmit={form.handleSubmit(onSubmit as any)} className="space-y-6">
-              {/* Title Field */}
-              <FormField<FormValues>
-                control={form.control as unknown as Control<FormValues>}
-                name="title"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Chapter Title</FormLabel>
-                    <FormControl>
-                      <Input placeholder="Enter chapter title" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                {/* Title Field */}
+                <div className="md:col-span-2">
+                  <FormField<FormValues>
+                    control={form.control as unknown as Control<FormValues>}
+                    name="title"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Chapter Title</FormLabel>
+                        <FormControl>
+                          <Input placeholder="Enter chapter title" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
 
-              {/* Parent Chapter Select */}
-              <FormField<FormValues>
-                control={form.control as unknown as Control<FormValues>}
-                name="parent_chapter_id"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Parent Chapter (Optional)</FormLabel>
-                    <FormControl>
-                      <ParentChapterSelect
-                        parentChapters={parentChapterOptions}
-                        value={field.value || null}
-                        onChange={field.onChange}
-                        placeholder="Select a parent chapter (optional)"
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+                {/* Parent Chapter Select */}
+                <div>
+                  <FormField<FormValues>
+                    control={form.control as unknown as Control<FormValues>}
+                    name="parent_chapter_id"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Parent Chapter (Optional)</FormLabel>
+                        <FormControl>
+                          <ParentChapterSelect
+                            parentChapters={parentChapterOptions}
+                            value={field.value || null}
+                            onChange={field.onChange}
+                            placeholder="Select a parent chapter (optional)"
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
 
-              {/* Content Editor */}
-              <FormField<FormValues>
-                control={form.control as unknown as Control<FormValues>}
-                name="content"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Chapter Content</FormLabel>
-                    <FormControl>
-                      <div className="border rounded-md overflow-hidden">
-                        <ChapterContentEditor
-                          name="content"
-                          initialContent={(() => {
-                            try {
-                              if (!field.value) return undefined;
-                              return typeof field.value === 'string' 
-                                ? JSON.parse(field.value) 
-                                : field.value;
-                            } catch (e) {
-                              console.error('Error parsing initial content:', e);
-                              return undefined; // Will use default from component
-                            }
-                          })()}
-                          onChange={field.onChange}
-                          className="min-h-[400px] p-4"
-                          placeholder="Start writing your chapter content here..."
-                        />
-                      </div>
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+                {/* Content Editor */}
+                <FormField<FormValues>
+                  control={form.control as unknown as Control<FormValues>}
+                  name="content"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Chapter Content</FormLabel>
+                      <FormControl>
+                        <div className="border rounded-md overflow-hidden">
+                          <ChapterContentEditor
+                            name="content"
+                            initialContent={(() => {
+                              try {
+                                if (!field.value) return undefined;
+                                return typeof field.value === 'string' 
+                                  ? JSON.parse(field.value) 
+                                  : field.value;
+                              } catch (e) {
+                                console.error('Error parsing initial content:', e);
+                                return undefined; // Will use default from component
+                              }
+                            })()}
+                            onChange={field.onChange}
+                            className="min-h-[400px] p-4"
+                            placeholder="Start writing your chapter content here..."
+                          />
+                        </div>
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
 
               {/* Form Actions */}
               <div className="flex justify-end space-x-4 pt-4">

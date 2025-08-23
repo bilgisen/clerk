@@ -116,12 +116,17 @@ export function InsertImageUploadedDialogBody({
   // Upload image to R2 via API
   const uploadImage = async (file: File) => {
     const formData = new FormData()
+    const fileName = `editor/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.-]/g, '')}`
+    
     formData.append("file", file)
 
     try {
       setIsUploading(true)
       const res = await fetch("/api/upload/image", {
         method: "POST",
+        headers: {
+          'X-File-Key': fileName,
+        },
         body: formData,
       })
 
@@ -132,6 +137,9 @@ export function InsertImageUploadedDialogBody({
 
       const data = await res.json()
       return data.url as string
+    } catch (error) {
+      console.error('Upload error:', error)
+      throw error
     } finally {
       setIsUploading(false)
     }
