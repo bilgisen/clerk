@@ -148,10 +148,11 @@ export function SimpleChapterList({ bookSlug, bookTitle }: SimpleChapterListProp
       <div className="space-y-4">
         <h3 className="text-lg font-semibold">Chapters</h3>
         <div className="space-y-1">
-          {flatChapters.map((chapter) => (
+          {chapterTree.map((chapter) => (
             <ChapterItem 
               key={chapter.id} 
               chapter={chapter} 
+              bookSlug={bookSlug}
               level={0} 
             />
           ))}
@@ -172,10 +173,11 @@ export function SimpleChapterList({ bookSlug, bookTitle }: SimpleChapterListProp
 
 interface ChapterItemProps {
   chapter: Chapter & { children?: Chapter[] };
+  bookSlug: string;
   level: number;
 }
 
-function ChapterItem({ chapter, level }: ChapterItemProps) {
+function ChapterItem({ chapter, bookSlug, level }: ChapterItemProps) {
   const router = useRouter();
   const { getToken } = useAuth();
   const chapterMap = useContext(ChapterMapContext);
@@ -183,12 +185,12 @@ function ChapterItem({ chapter, level }: ChapterItemProps) {
 
   const handleView = (e: React.MouseEvent) => {
     e.stopPropagation();
-    router.push(`/dashboard/books/${chapter.book_slug}/chapters/${chapter.id}`);
+    router.push(`/dashboard/books/${bookSlug}/chapters/${chapter.id}`);
   };
 
   const handleEdit = (e: React.MouseEvent) => {
     e.stopPropagation();
-    router.push(`/dashboard/books/${chapter.book_slug}/chapters/${chapter.id}/edit`);
+    router.push(`/dashboard/books/${bookSlug}/chapters/${chapter.id}/edit`);
   };
 
   const handleDelete = async (e: React.MouseEvent) => {
@@ -197,7 +199,7 @@ function ChapterItem({ chapter, level }: ChapterItemProps) {
     
     try {
       const token = await getToken();
-      const response = await fetch(`/api/books/by-slug/${chapter.book_slug}/chapters/${chapter.id}`, {
+      const response = await fetch(`/api/books/by-slug/${bookSlug}/chapters/${chapter.id}`, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -271,6 +273,7 @@ function ChapterItem({ chapter, level }: ChapterItemProps) {
             <ChapterItem 
               key={child.id} 
               chapter={child} 
+              bookSlug={bookSlug}
               level={level + 1} 
             />
           ))}

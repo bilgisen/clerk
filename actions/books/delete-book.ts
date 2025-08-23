@@ -6,13 +6,22 @@ import { eq, and } from "drizzle-orm";
 import { auth } from "@clerk/nextjs/server";
 import { creditService } from "@/lib/services/credits/credit-service";
 import { revalidatePath } from "next/cache";
+/**
+ * Checks if a string is a valid UUID
+ * @param str - The string to check
+ * @returns boolean indicating if the string is a valid UUID
+ */
+const isUUID = (str: string): boolean => {
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  return uuidRegex.test(str);
+};
 
 /**
- * Deletes a book by its ID
- * @param bookId - The ID of the book to delete
+ * Deletes a book by its ID or slug
+ * @param identifier - The ID or slug of the book to delete
  * @returns Object with success status and optional error message
  */
-export const deleteBook = async (bookId: string) => {
+export const deleteBook = async (identifier: string) => {
   try {
     // Get the current user session
     const session = await auth();
@@ -25,22 +34,31 @@ export const deleteBook = async (bookId: string) => {
       };
     }
     
-    if (!bookId) {
+    if (!identifier) {
       return { 
         success: false, 
-        error: "Book ID is required" 
+        error: "Book identifier (ID or slug) is required" 
       };
     }
 
-    // First verify the book belongs to the current user
-    const [book] = await db
-      .select()
-      .from(books)
-      .where(and(
-        eq(books.id, bookId),
-        eq(books.userId, userId)
-      ))
-      .limit(1);
+    // First verify the book exists and belongs to the current user
+    const bookQuery = isUUID(identifier)
+      ? db
+          .select()
+          .from(books)
+          .where(and(
+            eq(books.id, identifier),
+            eq(books.userId, userId)
+          ))
+      : db
+          .select()
+          .from(books)
+          .where(and(
+            eq(books.slug, identifier),
+            eq(books.userId, userId)
+          ));
+
+    const [book] = await bookQuery.limit(1);
       
     if (!book) {
       return { 
@@ -55,12 +73,12 @@ export const deleteBook = async (bookId: string) => {
         // First delete all chapters associated with the book
         await tx
           .delete(chapters)
-          .where(eq(chapters.bookId, bookId));
+          .where(eq(chapters.bookId, book.id));
           
         // Then delete the book
         await tx
           .delete(books)
-          .where(eq(books.id, bookId));
+          .where(eq(books.id, book.id));
         
         // Refund credits for book creation (300 credits)
         await creditService.addCredits({
@@ -69,7 +87,7 @@ export const deleteBook = async (bookId: string) => {
           reason: 'book_deletion_refund',
           source: 'system',
           metadata: {
-            bookId,
+            bookId: book.id,
             refundReason: 'book_deletion'
           }
         });

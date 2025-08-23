@@ -283,33 +283,45 @@ export const useChapters = (bookId: string) => {
 };
 
 // Hook to fetch all chapters for a book by slug
-export const useChaptersBySlug = (bookSlug: string) => {
+export function useChaptersBySlug(
+  bookSlug: string | undefined, 
+  options?: { enabled?: boolean }
+) {
   const { getToken } = useAuth();
   
   return useQuery<Chapter[], Error>({
     queryKey: ['chapters', bookSlug],
     queryFn: async () => {
+      if (!bookSlug) {
+        throw new Error('Book slug is required');
+      }
       const token = await getToken();
       if (!token) throw new Error('Not authenticated');
-      const chapters = await fetchChaptersByBookSlug(bookSlug, getToken);
-      return chapters;
+      return fetchChaptersByBookSlug(bookSlug, getToken);
     },
-    enabled: !!bookSlug,
+    enabled: options?.enabled !== false && !!bookSlug,
   });
 };
 
 // Hook to fetch a single chapter by book slug and chapter ID
-export const useChapter = (bookSlug: string, chapterId: string) => {
+export function useChapter(
+  bookSlug: string | undefined, 
+  chapterId: string | undefined, 
+  options?: { enabled?: boolean }
+) {
   const { getToken } = useAuth();
   
   return useQuery<Chapter, Error>({
     queryKey: ['chapter', bookSlug, chapterId],
     queryFn: async () => {
+      if (!bookSlug || !chapterId) {
+        throw new Error('Book slug and chapter ID are required');
+      }
       const token = await getToken();
       if (!token) throw new Error('Not authenticated');
       return fetchChapterBySlug(bookSlug, chapterId, getToken);
     },
-    enabled: !!bookSlug && !!chapterId,
+    enabled: options?.enabled !== false && !!bookSlug && !!chapterId,
   });
 };
 
