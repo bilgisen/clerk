@@ -4,7 +4,7 @@ import 'server-only';
 import { eq, and, isNull, gt, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db/server";
 import { creditLedger, activity } from "@/db/schema/credits";
-import { users } from "@/db/schema";
+
 
 type CreditTransaction = {
   userId: string;
@@ -66,7 +66,7 @@ export class CreditService {
         await tx.insert(activity).values({
           userId,
           type: 'signup_bonus',
-          title: 'Hoş geldin bonusu',
+          title: 'Welcome Bonus',
           delta: SIGNUP_BONUS_AMOUNT,
           ref: 'system'
         });
@@ -141,6 +141,30 @@ export class CreditService {
   }
 
   /**
+   * Charge for creating a new book
+   * @param userId The ID of the user
+   * @returns The result of the operation
+   */
+  async chargeForBookCreation(userId: string) {
+    const BOOK_CREATION_COST = 300;
+    const idempotencyKey = `book_create_${Date.now()}_${userId}`;
+
+    try {
+      return await this.spendCredits({
+        userId,
+        amount: BOOK_CREATION_COST,
+        reason: 'book_creation',
+        type: 'book_create',
+        title: 'Kitap oluşturma ücreti',
+        idempotencyKey,
+      });
+    } catch (error) {
+      console.error('Error charging for book creation:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Spend credits from a user's account
    * @param options Options for spending credits
    * @returns The result of the operation
@@ -149,6 +173,8 @@ export class CreditService {
     userId: string;
     amount: number;
     reason: string;
+    type?: string;
+    title?: string;
     ref?: string;
     metadata?: any;
     idempotencyKey: string;
@@ -191,8 +217,8 @@ export class CreditService {
       // Record activity
       await tx.insert(activity).values({
         userId: options.userId,
-        type: "spend",
-        title: options.reason,
+        type: options.type || 'spend',
+        title: options.title || options.reason,
         delta: -options.amount,
         ref: options.ref,
       });

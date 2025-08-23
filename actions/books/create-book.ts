@@ -6,6 +6,7 @@ import { books, users } from "@/db/schema";
 import { v4 as uuidv4 } from "uuid";
 import { eq } from 'drizzle-orm';
 import { auth } from "@clerk/nextjs/server";
+import { creditService } from "@/lib/services/credits/credit-service";
 
 // Helper function to generate a slug from a title
 const generateSlug = (title: string): string => {
@@ -103,6 +104,20 @@ export const createBook = async (formData: FormData): Promise<CreateBookResult> 
       throw new Error("A book with this title already exists. Please choose a different title.");
     }
 
+    // Charge credits for book creation
+    try {
+      await creditService.chargeForBookCreation(user.id);
+    } catch (error: any) {
+      if (error.message === 'INSUFFICIENT_CREDITS') {
+        return {
+          success: false,
+          message: 'Yetersiz kredi. Lütfen kredi yükleyin.',
+          redirectTo: '/dashboard/credits'
+        };
+      }
+      throw error; // Re-throw other errors
+    }
+
     // Create the new book object with proper types
     const newBook = {
       id: uuidv4(),
@@ -114,7 +129,7 @@ export const createBook = async (formData: FormData): Promise<CreateBookResult> 
       description: description ?? null,
       isbn: isbn?.trim() || null,
       publishYear: publish_year ?? null,
-      language: language?.trim() || null,
+      language: language?.trim() || 'tr',
       coverImageUrl: cover_image_url?.trim() || null,
       createdAt: new Date(),
       updatedAt: new Date(),

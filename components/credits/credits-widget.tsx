@@ -78,7 +78,10 @@ export function CreditsWidget() {
   // Monthly target (can be customized based on user's plan)
   const monthlyTarget = 1000;
   const balance = data?.data?.balance ?? 0;
-  const usagePercentage = Math.min(100, Math.round((balance / monthlyTarget) * 100));
+  
+  // Calculate monthly usage (spent this month)
+  const monthlyUsage = monthlyTarget - Math.max(0, balance);
+  const usagePercentage = Math.min(100, Math.round((monthlyUsage / monthlyTarget) * 100));
   const recentActivities = data?.data?.recentActivities ?? [];
 
   return (
@@ -130,9 +133,9 @@ export function CreditsWidget() {
               <span>{usagePercentage}%</span>
             </div>
             <Progress value={usagePercentage} className="h-2" />
-            <p className="text-xs text-muted-foreground mt-1 text-right">
-              {formatNumber(balance)} of {formatNumber(monthlyTarget)} credits
-            </p>
+            <div className="text-sm font-medium text-muted-foreground">
+              {formatNumber(monthlyUsage)} of {formatNumber(monthlyTarget)} credits used
+            </div>
           </div>
         </div>
 
