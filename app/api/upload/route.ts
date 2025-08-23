@@ -1,3 +1,4 @@
+// app/api/upload/route.ts
 import { NextResponse } from 'next/server';
 import { uploadImage } from '@/actions/upload-image';
 

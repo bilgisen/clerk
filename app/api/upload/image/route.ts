@@ -1,3 +1,4 @@
+// app/api/upload/image/route.ts
 import { NextResponse } from 'next/server';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getAuth } from '@clerk/nextjs/server';
@@ -19,10 +20,11 @@ export async function POST(request: Request) {
       return new NextResponse('Missing file or key', { status: 400 });
     }
 
-    // Initialize S3 client for R2
+    // ✅ S3 client (Cloudflare R2)
     const s3 = new S3Client({
       region: 'auto',
       endpoint: `https://${process.env.CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+      forcePathStyle: true, // <-- önemli
       credentials: {
         accessKeyId: process.env.R2_UPLOAD_IMAGE_ACCESS_KEY_ID!,
         secretAccessKey: process.env.R2_UPLOAD_IMAGE_SECRET_ACCESS_KEY!,
@@ -32,18 +34,17 @@ export async function POST(request: Request) {
     // Convert file to buffer
     const buffer = Buffer.from(await file.arrayBuffer());
 
-    // Upload to R2
+    // ✅ Upload to R2 (ACL kaldırıldı!)
     await s3.send(
       new PutObjectCommand({
         Bucket: process.env.R2_UPLOAD_IMAGE_BUCKET_NAME,
         Key: key,
         Body: buffer,
         ContentType: file.type,
-        ACL: 'public-read',
       })
     );
 
-    // Construct the public URL using the correct domain
+    // ✅ Public URL (senin custom domainin üzerinden)
     const url = `https://storage.bookshall.com/${key}`;
 
     return NextResponse.json({

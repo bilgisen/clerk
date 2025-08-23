@@ -109,19 +109,44 @@ export function InsertImageUploadedDialogBody({
 }) {
   const [src, setSrc] = useState("")
   const [altText, setAltText] = useState("")
+  const [isUploading, setIsUploading] = useState(false)
 
-  const isDisabled = src === ""
+  const isDisabled = src === "" || isUploading
 
-  const loadImage = (files: FileList | null) => {
-    const reader = new FileReader()
-    reader.onload = function () {
-      if (typeof reader.result === "string") {
-        setSrc(reader.result)
+  // Upload image to R2 via API
+  const uploadImage = async (file: File) => {
+    const formData = new FormData()
+    formData.append("file", file)
+
+    try {
+      setIsUploading(true)
+      const res = await fetch("/api/upload/image", {
+        method: "POST",
+        body: formData,
+      })
+
+      if (!res.ok) {
+        const error = await res.text()
+        throw new Error(error || "Upload failed")
       }
-      return ""
+
+      const data = await res.json()
+      return data.url as string
+    } finally {
+      setIsUploading(false)
     }
-    if (files !== null) {
-      reader.readAsDataURL(files[0])
+  }
+
+  const loadImage = async (files: FileList | null) => {
+    if (!files || files.length === 0) return
+
+    const file = files[0]
+    try {
+      const url = await uploadImage(file) // Upload to R2
+      setSrc(url) // Set the R2 public URL
+    } catch (err) {
+      console.error("Upload failed:", err)
+      alert("Resim yüklenirken bir hata oluştu. Lütfen tekrar deneyin.")
     }
   }
 
@@ -153,7 +178,7 @@ export function InsertImageUploadedDialogBody({
         onClick={() => onClick({ altText, src })}
         data-test-id="image-modal-file-upload-btn"
       >
-        Confirm
+        {isUploading ? "Yükleniyor..." : "Onayla"}
       </Button>
     </div>
   )

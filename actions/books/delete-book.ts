@@ -4,6 +4,7 @@ import { db } from "@/db/drizzle";
 import { books } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { auth } from "@clerk/nextjs/server";
+import { creditService } from "@/lib/services/credits/credit-service";
 
 /**
  * Deletes a book by its ID
@@ -47,10 +48,25 @@ export const deleteBook = async (bookId: string) => {
       };
     }
     
-    // Delete the book
-    await db
-      .delete(books)
-      .where(eq(books.id, bookId));
+    // Start a transaction to ensure both operations succeed or fail together
+    await db.transaction(async (tx) => {
+      // First delete the book
+      await tx
+        .delete(books)
+        .where(eq(books.id, bookId));
+      
+      // Refund credits for book creation (300 credits)
+      await creditService.addCredits({
+        userId,
+        amount: 300,
+        reason: 'book_deletion_refund',
+        source: 'system',
+        metadata: {
+          bookId,
+          refundReason: 'book_deletion'
+        }
+      });
+    });
       
     return { 
       success: true 

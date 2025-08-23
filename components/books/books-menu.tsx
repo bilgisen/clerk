@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { deleteBook } from "@/actions/books/delete-book";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -68,10 +69,21 @@ export function BooksMenu({
           </DropdownMenuItem>
         )}
         <DropdownMenuItem
-          onSelect={() => {
+          onSelect={async () => {
             if (onDelete) return onDelete();
             if (confirm("Are you sure you want to delete this book?")) {
-              go(`/dashboard/books/${slug}/delete`);
+              try {
+                const result = await deleteBook(slug);
+                if (result.success) {
+                  router.push('/dashboard/books');
+                  router.refresh();
+                } else {
+                  alert(result.error || 'Failed to delete book');
+                }
+              } catch (error) {
+                console.error('Error deleting book:', error);
+                alert('An error occurred while deleting the book');
+              }
             }
           }}
           className="text-red-600"

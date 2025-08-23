@@ -58,7 +58,7 @@ const formatActivityTitle = (activity: any) => {
 export function CreditsWidget() {
   const { getToken } = useAuth();
   
-  const { data, isLoading, error, refetch } = useQuery<CreditSummary>({
+  const { data, isLoading, error, refetch, isRefetching } = useQuery<CreditSummary>({
     queryKey: ['credits-summary'],
     queryFn: async () => {
       const token = await getToken();
@@ -101,10 +101,11 @@ export function CreditsWidget() {
             variant="outline" 
             size="sm" 
             onClick={() => refetch()}
-            disabled={isLoading}
+            className="ml-auto"
+            disabled={isLoading || isRefetching}
           >
-            <RefreshCw className={cn("h-4 w-4 mr-2", isLoading && "animate-spin")} />
-            Refresh
+            <RefreshCw className={`h-4 w-4 mr-2 ${isLoading || isRefetching ? 'animate-spin' : ''}`} />
+            {isLoading || isRefetching ? 'Refreshing...' : 'Refresh'}
           </Button>
         </div>
       </CardHeader>
@@ -180,9 +181,9 @@ export function CreditsWidget() {
           
           {recentActivities.length > 0 && (
             <div className="mt-4 text-center">
-              <Link href="/dashboard/activity">
-                <Button variant="ghost" size="sm">
-                  View All Activity
+              <Link href="/dashboard/activity" passHref>
+                <Button variant="ghost" size="sm" asChild>
+                  <span>View All Activities</span>
                 </Button>
               </Link>
             </div>

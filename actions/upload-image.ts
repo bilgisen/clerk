@@ -1,6 +1,6 @@
 "use server";
 
-import { uploadImageAssets } from "@/lib/upload/r2";
+import { uploadToR2 } from "@/lib/upload/r2";
 
 /**
  * Type for the expected form data structure
@@ -50,7 +50,11 @@ export async function uploadImage(formData: UploadImageFormData): Promise<{ url:
     const key = `uploads/${Date.now()}-${sanitizedFilename}.${fileExtension}`;
     
     // Upload to R2 and get the public URL
-    const url = await uploadImageAssets(buffer, key, file.type);
+    const url = await uploadToR2({
+      key,
+      body: buffer,
+      contentType: file.type
+    });
     
     return { url };
   } catch (error) {
