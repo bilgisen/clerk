@@ -26,7 +26,7 @@ export async function uploadToR2({
   contentType?: string;
 }): Promise<string> {
   const bucketName = getEnvVar("R2_UPLOAD_IMAGE_BUCKET_NAME");
-  const r2PublicDomain = `https://pub-9622d218dd724cc19fd2873849e9fa58.r2.dev`;
+  const r2PublicDomain = `https://pub-3cfc29e59e5243f4917194e2466f5fa0.r2.dev`;
 
   try {
     const command = new PutObjectCommand({
