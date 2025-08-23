@@ -1,10 +1,11 @@
 "use server";
 
 import { db } from "@/db/drizzle";
-import { books } from "@/db/schema";
+import { books, chapters } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { auth } from "@clerk/nextjs/server";
 import { creditService } from "@/lib/services/credits/credit-service";
+import { revalidatePath } from "next/cache";
 
 /**
  * Deletes a book by its ID
@@ -48,29 +49,42 @@ export const deleteBook = async (bookId: string) => {
       };
     }
     
-    // Start a transaction to ensure both operations succeed or fail together
-    await db.transaction(async (tx) => {
-      // First delete the book
-      await tx
-        .delete(books)
-        .where(eq(books.id, bookId));
-      
-      // Refund credits for book creation (300 credits)
-      await creditService.addCredits({
-        userId,
-        amount: 300,
-        reason: 'book_deletion_refund',
-        source: 'system',
-        metadata: {
-          bookId,
-          refundReason: 'book_deletion'
-        }
+    // Start a transaction to ensure all operations succeed or fail together
+    try {
+      await db.transaction(async (tx) => {
+        // First delete all chapters associated with the book
+        await tx
+          .delete(chapters)
+          .where(eq(chapters.bookId, bookId));
+          
+        // Then delete the book
+        await tx
+          .delete(books)
+          .where(eq(books.id, bookId));
+        
+        // Refund credits for book creation (300 credits)
+        await creditService.addCredits({
+          userId,
+          amount: 300,
+          reason: 'book_deletion_refund',
+          source: 'system',
+          metadata: {
+            bookId,
+            refundReason: 'book_deletion'
+          }
+        });
       });
-    });
       
-    return { 
-      success: true 
-    };
+      // Revalidate the books page to update the UI
+      revalidatePath('/dashboard/books');
+      
+      return { 
+        success: true 
+      };
+    } catch (error) {
+      console.error('Transaction error during book deletion:', error);
+      throw error; // This will be caught by the outer catch block
+    }
   } catch (error) {
     console.error('Error deleting book:', error);
     return { 

@@ -1,56 +1,66 @@
 "use client";
 
-import { useMemo, useCallback, useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
-import { toast } from "sonner";
 import dynamic from 'next/dynamic';
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { Loader2, ArrowLeft, Edit, Download } from "lucide-react";
-import { BooksMenu } from "@/components/books/books-menu";
-import { generateCompleteChapterHTML } from "@/lib/generateChapterHTML";
+import { Loader2, ArrowLeft, Edit } from "lucide-react";
+import { useChapter, useChaptersBySlug } from "@/hooks/api/use-chapters";
 
 const LexicalRenderer = dynamic(
-  () => import('../../../../../../components/editor/lexical-renderer').then((mod) => mod.LexicalRenderer),
+  () => import('@/components/editor/lexical-renderer').then((mod) => mod.LexicalRenderer),
   { ssr: false }
 );
-import { useChapter, useChaptersBySlug } from "@/hooks/api/use-chapters";
-import type { Book } from "@/db/schema";
-import type { Chapter, ChapterWithChildren } from "@/types/chapter";
+import type { Chapter } from "@/types/chapter";
+
+// Define ChapterWithChildren locally to match our needs
+type ChapterWithChildren = Chapter & {
+  children_chapters?: ChapterWithChildren[];
+  parent_chapter?: ChapterWithChildren | null;
+  book?: {
+    title: string;
+  };
+};
 
 // Type for the base chapter format expected by generateCompleteChapterHTML
 type ChapterBase = {
   id: string;
   title: string;
   content: string;
-  bookId: string;
-  userId: string;
-  parentChapterId: string | null;
+  book_id: string;
+  user_id: string;
+  parent_chapter_id: string | null;
   order: number;
   level: number;
   excerpt: string;
-  isDraft: boolean;
-  wordCount: number;
-  readingTime: number | null;
-  createdAt: Date;
-  updatedAt: Date;
-  publishedAt: Date | null;
+  is_draft: boolean;
+  word_count: number;
+  reading_time: number | null;
+  created_at: string;
+  updated_at: string;
+  published_at: string | null;
+  // Add these for compatibility with both formats
+  bookId?: string;
+  userId?: string;
+  parentChapterId?: string | null;
+  isDraft?: boolean;
+  wordCount?: number;
+  readingTime?: number | null;
+  createdAt?: string | Date;
+  updatedAt?: string | Date;
+  publishedAt?: string | Date | null;
 };
 
 interface BookWithChapters {
-  // Core fields
   id: string;
   userId: string;
   title: string;
   slug: string;
   author: string;
-  
-  // Author Information
   contributor: string | null;
   translator: string | null;
-  
-  // Optional fields
   subtitle: string | null;
   description: string | null;
   publisher: string | null;
@@ -58,10 +68,7 @@ interface BookWithChapters {
   publishYear: number | null;
   isbn: string | null;
   language: string;
-  genre: 'FICTION' | 'NON_FICTION' | 'SCIENCE_FICTION' | 'FANTASY' | 'ROMANCE' |
-    'THRILLER' | 'MYSTERY' | 'HORROR' | 'BIOGRAPHY' | 'HISTORY' | 'SELF_HELP' |
-    'CHILDREN' | 'YOUNG_ADULT' | 'COOKBOOK' | 'TRAVEL' | 'HUMOR' | 'POETRY' |
-    'BUSINESS' | 'TECHNOLOGY' | 'SCIENCE' | 'PHILOSOPHY' | 'RELIGION' | 'OTHER' | null;
+  genre: string | null;
   series: string | null;
   seriesIndex: number | null;
   tags: string[] | null;
@@ -70,20 +77,12 @@ interface BookWithChapters {
   isPublished: boolean;
   isFeatured: boolean;
   viewCount: number;
-  
-  // Timestamps
   createdAt: Date;
   updatedAt: Date;
   publishedAt: Date | null;
-  
-  // Backward compatibility
   created_at: string;
   updated_at: string;
-  
-  // Relations - use the base Chapter type for HTML generation
   chapters: ChapterBase[];
-  
-  // Additional fields
   metadata?: Record<string, any> | null;
 }
 
@@ -93,319 +92,109 @@ export default function ChapterDetailPage() {
   const { userId } = useAuth();
   const bookSlug = params?.slug as string;
   const chapterId = params?.chapterId as string;
-  
-  const handleEditChapter = useCallback(() => {
-    router.push(`/dashboard/books/${bookSlug}/chapters/${chapterId}/edit`);
-  }, [bookSlug, chapterId, router]);
-  
-  const handleBackToBook = useCallback(() => {
-    router.push(`/dashboard/books/${bookSlug}`);
-  }, [bookSlug, router]);
-    
-  // Fetch chapter data using React Query
-  const { 
-    data: chapterData, 
-    isLoading: isChapterLoading, 
-    error: chapterError 
-  } = useChapter(bookSlug, chapterId);
-  
-  // Fetch all chapters for the book
-  const { 
-    data: chaptersData, 
-    isLoading: isChaptersLoading, 
-    error: chaptersError 
-  } = useChaptersBySlug(bookSlug);
-  
-  // Process chapters data into a tree structure
-  const { chapters, chapter } = useMemo(() => {
-    if (!chaptersData) return { chapters: [], chapter: null };
-    
-    // Build the chapters tree
-    const chaptersMap = new Map<string, ChapterWithChildren>();
-    const rootChapters: ChapterWithChildren[] = [];
-    
-    // First pass: create map of all chapters
-    chaptersData.forEach((chapterData: ChapterWithChildren) => {
-      const chapterForMap: ChapterWithChildren = {
-        ...chapterData,
-        children_chapters: []
-      };
-      chaptersMap.set(chapterForMap.id, chapterForMap);
-    });
-    
-    // Second pass: build tree structure
-    chaptersMap.forEach((chapter: ChapterWithChildren) => {
-      if (chapter.parent_chapter_id && chaptersMap.has(chapter.parent_chapter_id)) {
-        const parent = chaptersMap.get(chapter.parent_chapter_id);
-        if (parent) {
-          parent.children_chapters = parent.children_chapters || [];
-          parent.children_chapters.push(chapter);
-        }
-      } else {
-        rootChapters.push(chapter);
-      }
-    });
-    
-    // Find the current chapter
-    const currentChapter = chaptersData.find((c: Chapter) => c.id === chapterId) || null;
-    
-    return { 
-      chapters: rootChapters, 
-      chapter: currentChapter as Chapter | null 
-    };
-  }, [chaptersData, chapterId]);
-  
-  // Function to convert ChapterWithChildren to ChapterBase
-  const convertToChapterBase = (ch: ChapterWithChildren): ChapterBase => ({
-    id: ch.id,
-    title: ch.title,
-    content: ch.content || '',
-    bookId: ch.book_id,
-    userId: ch.user_id,
-    parentChapterId: ch.parent_chapter_id || null,
-    order: ch.order || 0,
-    level: ch.level || 1,
-    excerpt: '',
-    isDraft: false,
-    wordCount: 0,
-    readingTime: null,
-    createdAt: new Date(ch.created_at),
-    updatedAt: new Date(ch.updated_at),
-    publishedAt: null,
-  });
 
-  // Get book data from the first chapter if available
-  const book = useMemo(() => {
-    if (!chapter) return null;
-    
-    // Get book data from chapter relations if available
-    const bookData = chapter as unknown as { book?: { title?: string; slug?: string; author?: string; description?: string; coverImageUrl?: string } };
-    
-    // Create a book object from chapter data with all required fields
-    const now = new Date();
-    return {
-      // Core fields
-      id: chapter.book_id,
-      userId: chapter.user_id,
-      title: bookData.book?.title || 'Unknown Book',
-      slug: bookData.book?.slug || '',
-      author: bookData.book?.author || 'Unknown Author',
-      
-      // Optional fields with defaults
-      contributor: null,
-      translator: null,
-      subtitle: null,
-      description: bookData.book?.description || null,
-      publisher: null,
-      publisherWebsite: null,
-      publishYear: null,
-      isbn: null,
-      language: 'tr',
-      genre: null,
-      series: null,
-      seriesIndex: null,
-      tags: null,
-      coverImageUrl: bookData.book?.coverImageUrl || null,
-      epubUrl: null,
-      isPublished: false,
-      isFeatured: false,
-      viewCount: 0,
-      
-      // Timestamps
-      createdAt: now,
-      updatedAt: now,
-      publishedAt: null,
-      created_at: now.toISOString(),
-      updated_at: now.toISOString(),
-      
-      // Chapters will be populated later
-      chapters: []
-    };
-  }, [chapter]);
-  
-  // Create a version of the book with properly typed chapters for HTML generation
-  const bookWithChapters = useMemo(() => {
-    if (!book || !chaptersData) return null;
-    
-    const flatChapters: ChapterBase[] = [];
-    
-    // Process chapters and their children recursively
-    const processChapters = (chapters: ChapterWithChildren[] = []) => {
-      for (const ch of chapters) {
-        if (!ch) continue;
-        
-        const chapterBase: ChapterBase = {
-          id: ch.id,
-          title: ch.title,
-          content: ch.content || '',
-          bookId: ch.book_id,
-          userId: ch.user_id,
-          parentChapterId: ch.parent_chapter_id || null,
-          order: ch.order || 0,
-          level: ch.level || 1,
-          // Provide default values for required fields not in the base Chapter type
-          excerpt: '',
-          isDraft: false,
-          wordCount: 0,
-          readingTime: null,
-          // Convert string dates to Date objects
-          createdAt: new Date(ch.created_at),
-          updatedAt: new Date(ch.updated_at),
-          publishedAt: null, // Not available in base Chapter type
+  const { data: chapterData, isLoading, error: chapterError } = useChapter(bookSlug, chapterId);
+  const { data: chaptersData, isLoading: isChaptersLoading, error: chaptersError } = useChaptersBySlug(bookSlug);
+
+  const [chapter, setChapter] = useState<ChapterWithChildren | null>(null);
+  const [bookWithChapters, setBookWithChapters] = useState<BookWithChapters | null>(null);
+
+  // Process chapter and book data when loaded
+  useEffect(() => {
+    if (chapterData) {
+      setChapter(chapterData as unknown as ChapterWithChildren);
+    }
+  }, [chapterData]);
+
+  useEffect(() => {
+    if (chaptersData) {
+      // Create a proper BookWithChapters object from the chapters data
+      if (chaptersData.length > 0) {
+        const firstChapter = chaptersData[0] as any;
+        const bookData: BookWithChapters = {
+          id: firstChapter.bookId,
+          userId: firstChapter.userId,
+          title: firstChapter.book?.title || '',
+          slug: bookSlug,
+          author: firstChapter.book?.author || '',
+          contributor: firstChapter.book?.contributor || null,
+          translator: firstChapter.book?.translator || null,
+          subtitle: firstChapter.book?.subtitle || null,
+          description: firstChapter.book?.description || null,
+          publisher: firstChapter.book?.publisher || null,
+          publisherWebsite: firstChapter.book?.publisherWebsite || null,
+          publishYear: firstChapter.book?.publishYear || null,
+          isbn: firstChapter.book?.isbn || null,
+          language: firstChapter.book?.language || 'en',
+          genre: firstChapter.book?.genre || null,
+          series: firstChapter.book?.series || null,
+          seriesIndex: firstChapter.book?.seriesIndex || null,
+          tags: firstChapter.book?.tags || null,
+          coverImageUrl: firstChapter.book?.coverImageUrl || null,
+          epubUrl: firstChapter.book?.epubUrl || null,
+          isPublished: firstChapter.book?.isPublished || false,
+          isFeatured: firstChapter.book?.isFeatured || false,
+          viewCount: firstChapter.book?.viewCount || 0,
+          createdAt: firstChapter.book?.createdAt || new Date(),
+          updatedAt: firstChapter.book?.updatedAt || new Date(),
+          publishedAt: firstChapter.book?.publishedAt || null,
+          created_at: firstChapter.book?.created_at || new Date().toISOString(),
+          updated_at: firstChapter.book?.updated_at || new Date().toISOString(),
+          chapters: (chaptersData as any[]).map(ch => ({
+            id: ch.id,
+            title: ch.title,
+            content: ch.content || '',
+            book_id: ch.bookId || ch.book_id,
+            user_id: ch.userId || ch.user_id,
+            parent_chapter_id: ch.parentChapterId || ch.parent_chapter_id || null,
+            order: ch.order || 0,
+            level: ch.level || 0,
+            excerpt: ch.excerpt || '',
+            is_draft: ch.isDraft || ch.is_draft || false,
+            word_count: ch.wordCount || ch.word_count || 0,
+            reading_time: ch.readingTime || ch.reading_time || null,
+            created_at: ch.createdAt || ch.created_at || new Date().toISOString(),
+            updated_at: ch.updatedAt || ch.updated_at || new Date().toISOString(),
+            published_at: ch.publishedAt || ch.published_at || null,
+            // Add compatibility fields
+            bookId: ch.bookId || ch.book_id,
+            userId: ch.userId || ch.user_id,
+            parentChapterId: ch.parentChapterId || ch.parent_chapter_id || null,
+            isDraft: ch.isDraft || ch.is_draft || false,
+            wordCount: ch.wordCount || ch.word_count || 0,
+            readingTime: ch.readingTime || ch.reading_time || null,
+            createdAt: ch.createdAt || ch.created_at || new Date().toISOString(),
+            updatedAt: ch.updatedAt || ch.updated_at || new Date().toISOString(),
+            publishedAt: ch.publishedAt || ch.published_at || null
+          }))
         };
-        
-        flatChapters.push(chapterBase);
-        
-        // Process child chapters if they exist
-        if (ch.children_chapters && ch.children_chapters.length > 0) {
-          processChapters(ch.children_chapters);
-        }
+        setBookWithChapters(bookData);
       }
-    };
-    
-    // Start processing from the root chapters
-    processChapters(chaptersData);
-    
-    return {
-      ...book,
-      chapters: flatChapters
-    };
-  }, [book, chaptersData]);
-  
-  // Type for the flattened chapter format expected by generateCompleteChapterHTML
-  type FlattenedChapter = {
-    id: string;
-    title: string;
-    content: string;
-    bookId: string;
-    userId: string;
-    parentChapterId: string | null;
-    order: number;
-    level: number;
-    excerpt: string;
-    isDraft: boolean;
-    wordCount: number;
-    readingTime: number | null;
-    createdAt: Date;
-    updatedAt: Date;
-    publishedAt: Date | null;
-  };
-
-  // Flatten chapters for parent lookup
-  const flattenChapters = useCallback((chaptersToFlatten: ChapterWithChildren[] = []): FlattenedChapter[] => {
-    if (!Array.isArray(chaptersToFlatten)) {
-      return [];
     }
-    
-    return chaptersToFlatten.reduce<FlattenedChapter[]>((acc, ch) => {
-      if (!ch) return acc;
-      
-      // Map each chapter to the expected format for generateCompleteChapterHTML
-      const mappedChapter: FlattenedChapter = {
-        id: ch.id,
-        title: ch.title,
-        content: ch.content || '',
-        bookId: ch.book_id,
-        userId: ch.user_id,
-        parentChapterId: ch.parent_chapter_id || null,
-        order: ch.order || 0,
-        level: ch.level || 1,
-        // Provide default values for required fields not in the base Chapter type
-        excerpt: '',
-        isDraft: false,
-        wordCount: 0,
-        readingTime: null,
-        // Convert string dates to Date objects
-        createdAt: new Date(ch.created_at),
-        updatedAt: new Date(ch.updated_at),
-        publishedAt: null, // Not available in base Chapter type
-      };
-      
-      // Process child chapters if they exist
-      const childChapters = ch.children_chapters ? flattenChapters(ch.children_chapters) : [];
-      
-      return [...acc, mappedChapter, ...childChapters];
-    }, []);
-  }, []);
-
-  // Get parent chapter title
-  const parentTitle = useMemo(() => {
-    if (!chapter?.parent_chapter_id || !chaptersData?.length) return null;
-    const parent = chaptersData.find((c: ChapterWithChildren) => c.id === chapter.parent_chapter_id);
-    return parent?.title || null;
-  }, [chapter, chaptersData]);
-
-  // Handle export to HTML
-  const handleExportHTML = useCallback(() => {
-    if (!chapter || !bookWithChapters) return;
-
-    try {
-      // Map chapter properties to match the expected format for generateCompleteChapterHTML
-      // First create a properly typed object with all required fields
-      const formattedChapter = {
-        id: chapter.id,
-        title: chapter.title,
-        content: chapter.content || '',
-        bookId: chapter.book_id,
-        userId: chapter.user_id,
-        parentChapterId: chapter.parent_chapter_id || null,
-        order: chapter.order || 0,
-        level: chapter.level || 1,
-        // Provide default values for required fields
-        excerpt: '',
-        isDraft: false,
-        wordCount: 0,
-        readingTime: null,
-        // Convert dates
-        createdAt: new Date(chapter.created_at),
-        updatedAt: new Date(chapter.updated_at),
-        publishedAt: null,
-      };
-
-      const html = generateCompleteChapterHTML(
-        formattedChapter,
-        flattenChapters(chapters),
-        bookWithChapters
-      );
-
-      // Create a blob and download link
-      const blob = new Blob([html], { type: 'text/html' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${chapter.title.replace(/\s+/g, '-').toLowerCase()}.html`;
-      document.body.appendChild(a);
-      a.click();
-      
-      // Clean up
-      setTimeout(() => {
-        document.body.removeChild(a);
-        window.URL.revokeObjectURL(url);
-      }, 0);
-    } catch (error) {
-      console.error('Error exporting HTML:', error);
-      toast.error('Failed to export chapter as HTML');
-    }
-  }, [chapter, bookWithChapters, chapters, parentTitle, flattenChapters]);
-
-  // Handle loading and error states
-  const isLoading = isChapterLoading || isChaptersLoading;
-  const error = chapterError?.message || chaptersError?.message || null;
+  }, [chaptersData, bookSlug]);
 
   // Handle loading state
-  if (isLoading) {
+  if (isLoading || isChaptersLoading) {
     return (
-      <div className="flex items-center justify-center h-64">
+      <div className="flex items-center justify-center min-h-screen">
         <Loader2 className="h-8 w-8 animate-spin" />
       </div>
     );
   }
 
-  if (!chapter || !bookWithChapters) {
+  // Handle error state
+  const errorMessage = chapterError?.message || chaptersError?.message || '';
+  if (errorMessage) {
     return (
       <div className="p-8 text-center">
-        <p>Chapter or book not found</p>
-        <Button onClick={() => router.push(`/dashboard/books/${bookSlug}`)} variant="ghost" className="mt-4">
+        <p className="text-red-500 mb-4">
+          {errorMessage}
+        </p>
+        <Button 
+          onClick={() => router.push(`/dashboard/books/${bookSlug}`)} 
+          variant="ghost" 
+          className="mt-4"
+        >
           <ArrowLeft className="mr-2 h-4 w-4" />
           Back to Book
         </Button>
@@ -413,37 +202,32 @@ export default function ChapterDetailPage() {
     );
   }
 
-  // Handle error state
-  if (error) {
+  if (!chapter) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[calc(100vh-200px)] text-center p-4">
-        <div className="text-red-500 mb-4">Error loading chapter: {error}</div>
+      <div className="p-8 text-center">
+        <p>Chapter not found</p>
         <Button 
-          onClick={() => router.push(`/dashboard/books/${bookSlug}`)} 
-          variant="outline"
+          onClick={() => router.push(`/dashboard/books/${bookSlug}`)}
+          variant="ghost"
+          className="mt-4"
         >
-          <ArrowLeft className="mr-2 h-4 w-4" /> Back to Book
+          <ArrowLeft className="mr-2 h-4 w-4" />
+          Back to Book
         </Button>
       </div>
     );
   }
 
-  // Get book title from chapter data or fallback to bookSlug
-  const bookTitle = useMemo(() => {
-    if (!chapter) return 'Loading...';
-    // Try to get the book title from the chapter's book relation if it exists
-    const chapterWithBook = chapter as any;
-    return chapterWithBook.book?.title || bookSlug.split('-').map(word => 
-      word.charAt(0).toUpperCase() + word.slice(1)
-    ).join(' ');
-  }, [chapter, bookSlug]);
+  const bookTitle = chapter.book?.title || bookWithChapters?.title || bookSlug;
 
   return (
     <div className="container mx-auto py-8">
       <div className="mb-8">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold"><span className="text-muted-foreground">Chapter: </span> {chapter?.title || 'Loading...'}</h1>
+            <h1 className="text-3xl font-bold">
+              <span className="text-muted-foreground">Chapter: </span> {chapter.title}
+            </h1>
             <p className="text-muted-foreground">Book: {bookTitle}</p>
           </div>
           
@@ -451,28 +235,32 @@ export default function ChapterDetailPage() {
             <Button 
               variant="outline" 
               size="sm"
-              onClick={handleEditChapter}
-              className="flex items-center"
+              onClick={() => router.push(`/dashboard/books/${bookSlug}/chapters/${chapterId}/edit`)}
             >
               <Edit className="mr-2 h-4 w-4" />
               Edit
             </Button>
-            <BooksMenu 
-              slug={bookSlug}
-              onView={() => router.push(`/dashboard/books/${bookSlug}`)}
-              onEdit={() => router.push(`/dashboard/books/${bookSlug}/edit`)}
-              hideEdit={false}
-            />
+            <Button 
+              variant="outline" 
+              size="sm"
+              onClick={() => router.push(`/dashboard/books/${bookSlug}`)}
+            >
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Back to Book
+            </Button>
           </div>
         </div>
       </div>
-      
-      <div className="prose max-w-none">
-        {parentTitle && <div className="text-sm text-muted-foreground mb-4">Parent: {parentTitle}</div>}
-        <Separator className="my-6" />
-        
+
+      <Separator className="my-6" />
+
+      <div className="prose dark:prose-invert max-w-none">
         {chapter.content ? (
-          <LexicalRenderer content={chapter.content} />
+          typeof chapter.content === 'string' && (chapter.content.startsWith('{') || chapter.content.startsWith('[')) ? (
+            <LexicalRenderer content={chapter.content} />
+          ) : (
+            <div dangerouslySetInnerHTML={{ __html: chapter.content }} />
+          )
         ) : (
           <p className="text-muted-foreground italic">No content available</p>
         )}

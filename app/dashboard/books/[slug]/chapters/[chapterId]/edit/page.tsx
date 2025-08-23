@@ -69,14 +69,17 @@ export default function EditChapterPage() {
     };
   }, [debouncedSave]);
 
+  // State management
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [chapter, setChapter] = useState<Chapter | null>(null);
   const [chapters, setChapters] = useState<Chapter[]>([]);
-  const [formError, setFormError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+  
+  // Refs
   const formRef = useRef<HTMLFormElement>(null);
   const formDataRef = useRef<ChapterFormValues | null>(null);
 
@@ -134,8 +137,10 @@ export default function EditChapterPage() {
 
   const childrenMap = useMemo(() => {
     const map = new Map<string, string[]>();
+    if (!Array.isArray(chapters)) return map;
+    
     chapters.forEach((ch) => {
-      if (ch.parent_chapter_id) {
+      if (ch?.parent_chapter_id) {
         map.set(ch.parent_chapter_id, [...(map.get(ch.parent_chapter_id) || []), ch.id]);
       }
     });
@@ -162,13 +167,15 @@ export default function EditChapterPage() {
   }, [chapter, childrenMap]);
 
   const parentChapters = useMemo(() => {
-    if (!chapter) return [];
-    return chapters.filter((c: Chapter) => c.id !== chapter.id && !descendants.has(c.id)).map((ch: Chapter) => ({
-      id: ch.id,
-      title: ch.title,
-      level: ch.level,
-      parent_chapter_id: ch.parent_chapter_id
-    }));
+    if (!chapter || !Array.isArray(chapters)) return [];
+    return chapters
+      .filter((c: Chapter) => c?.id !== chapter?.id && !descendants.has(c.id))
+      .map((ch: Chapter) => ({
+        id: ch.id,
+        title: ch.title,
+        level: ch.level,
+        parent_chapter_id: ch.parent_chapter_id
+      }));
   }, [chapters, chapter, descendants]);
 
   const handleFormChange = useCallback((data: ChapterFormValues) => {

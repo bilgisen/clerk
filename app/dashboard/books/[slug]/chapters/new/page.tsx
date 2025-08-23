@@ -237,15 +237,15 @@ export default function NewChapterPage() {
           <Separator className="mb-6" />
           <Form {...form as any}>
             <form onSubmit={form.handleSubmit(onSubmit as any)} className="space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="space-y-6">
                 {/* Title Field */}
-                <div className="md:col-span-2">
+                <div>
                   <FormField<FormValues>
                     control={form.control as unknown as Control<FormValues>}
                     name="title"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Chapter Title</FormLabel>
+                        <FormLabel className="text-muted-foreground">Chapter Title</FormLabel>
                         <FormControl>
                           <Input placeholder="Enter chapter title" {...field} />
                         </FormControl>
@@ -256,13 +256,13 @@ export default function NewChapterPage() {
                 </div>
 
                 {/* Parent Chapter Select */}
-                <div>
+                <div className="pt-2">
                   <FormField<FormValues>
                     control={form.control as unknown as Control<FormValues>}
                     name="parent_chapter_id"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Parent Chapter (Optional)</FormLabel>
+                        <FormLabel className="text-muted-foreground">Parent Chapter (Optional)</FormLabel>
                         <FormControl>
                           <ParentChapterSelect
                             parentChapters={parentChapterOptions}
@@ -278,14 +278,15 @@ export default function NewChapterPage() {
                 </div>
 
                 {/* Content Editor */}
-                <FormField<FormValues>
+                <div className="pt-2">
+                  <FormField<FormValues>
                   control={form.control as unknown as Control<FormValues>}
                   name="content"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Chapter Content</FormLabel>
+                      <FormLabel className="text-muted-foreground">Chapter Content</FormLabel>
                       <FormControl>
-                        <div className="border rounded-md overflow-hidden">
+                        <div className="overflow-hidden">
                           <ChapterContentEditor
                             name="content"
                             initialContent={(() => {
@@ -309,6 +310,7 @@ export default function NewChapterPage() {
                     </FormItem>
                   )}
                 />
+                </div>
               </div>
 
               {/* Form Actions */}

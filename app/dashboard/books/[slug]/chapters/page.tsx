@@ -15,7 +15,7 @@ interface PageProps {
 // Separate component for the book header section
 function BookHeader({ book, slug }: { book: Book; slug: string }) {
   return (
-    <div className="flex flex-col space-y-2 sm:flex-row sm:items-center sm:justify-between sm:space-y-0 p-8">
+    <div className="flex flex-col space-y-2 sm:flex-row sm:items-center sm:justify-between sm:space-y-0">
       <div>
         <h1 className="text-2xl font-bold tracking-tight md:text-3xl">
           {book.title}
@@ -99,57 +99,60 @@ export default async function BookDetailPage({ params, searchParams }: PageProps
     
     return (
       <div className="container mx-auto w-full space-y-6 p-8 md:p-8">
-        <div className="flex flex-col lg:flex-row gap-8">
-          {/* Main content */}
-          <div className="flex-1">
-            <BookHeader book={book} slug={slug} />
-            <Separator className="my-6" />
-            
-            <div className="space-y-8">
-              {/* Book Title */}
-              <div>
-                <h1 className="text-3xl font-bold tracking-tight text-foreground">
-                  {book.title}
-                </h1>
-                {book.subtitle && (
-                  <h2 className="text-xl text-muted-foreground mt-1">
-                    {book.subtitle}
-                  </h2>
-                )}
+        <BookHeader book={book} slug={slug} />
+        <Separator className="my-6" />
+        
+        <div className="space-y-6">
+          {/* Book Details */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="md:col-span-1 space-y-4">
+              <div className="space-y-2">
+                <h2 className="text-2xl font-semibold">Book Details</h2>
+                <div className="space-y-3">
+                  <div className="flex items-center">
+                    <User className="h-5 w-5 mr-2 text-muted-foreground flex-shrink-0" />
+                    <div>
+                      <p className="text-sm text-muted-foreground">Author</p>
+                      <p className="font-medium">{book.author || 'Unknown Author'}</p>
+                    </div>
+                  </div>
+                  
+                  {book.publisher && (
+                    <div className="flex items-center">
+                      <BookOpen className="h-5 w-5 mr-2 text-muted-foreground flex-shrink-0" />
+                      <div>
+                        <p className="text-sm text-muted-foreground">Publisher</p>
+                        <p className="font-medium">{book.publisher}</p>
+                      </div>
+                    </div>
+                  )}
+                  
+                  <div className="flex items-center">
+                    <Globe className="h-5 w-5 mr-2 text-muted-foreground flex-shrink-0" />
+                    <div>
+                      <p className="text-sm text-muted-foreground">Language</p>
+                      <p className="font-medium">{formatLanguage(book.language)}</p>
+                    </div>
+                  </div>
+                </div>
               </div>
-
-              {/* Book Details */}
-              <div className="space-y-4">
-                {/* Author */}
-                <div className="flex items-center text-muted-foreground">
-                  <User className="h-5 w-5 mr-2 flex-shrink-0" />
-                  <span className="text-foreground">{book.author || 'Unknown Author'}</span>
+            </div>
+            
+            {/* Chapter Tree */}
+            <div className="md:col-span-2">
+              <div className="border rounded-lg overflow-hidden bg-card">
+                <div className="p-4 border-b">
+                  <h2 className="text-xl font-semibold">Chapters</h2>
                 </div>
-
-                {/* Publisher */}
-                <div className="flex items-center text-muted-foreground">
-                  <BookOpen className="h-5 w-5 mr-2 flex-shrink-0" />
-                  <span>{book.publisher || 'No publisher specified'}</span>
-                </div>
-
-                {/* Language */}
-                <div className="flex items-center text-muted-foreground">
-                  <Globe className="h-5 w-5 mr-2 flex-shrink-0" />
-                  <span>Language: {formatLanguage(book.language)}</span>
+                <div className="p-4">
+                  <ChapterTreeArborist 
+                    bookSlug={slug}
+                    onSelectChapter={undefined}
+                  />
                 </div>
               </div>
             </div>
           </div>
-          
-          {/* Sidebar */}
-          <aside className="lg:w-96 space-y-6">
-            <div className="border rounded-lg overflow-hidden">
-              <ChapterTreeArborist 
-                bookSlug={slug}
-                onSelectChapter={undefined} // Remove the inline function
-              />
-            </div>
-          </aside>
         </div>
       </div>
     );
