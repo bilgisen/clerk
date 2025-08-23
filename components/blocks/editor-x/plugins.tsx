@@ -115,9 +115,7 @@ import { TABLE } from "@/components/editor/transformers/markdown-table-transform
 import { Separator } from "@/components/ui/separator"
 
 const placeholder = "Press / for commands..."
-const maxLength = 500
-
-export function Plugins({}) {
+export function Plugins({ maxLength = 50000 }: { maxLength?: number }) {
   const [floatingAnchorElem, setFloatingAnchorElem] =
     useState<HTMLDivElement | null>(null)
 
