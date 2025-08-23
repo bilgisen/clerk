@@ -1,7 +1,7 @@
 // middleware.ts
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
-import { headers } from 'next/headers';
+// Not: next/headers içindeki headers fonksiyonunu kullanmıyorsunuz, kaldırılabilir.
 
 // Public routes (no auth needed)
 const isPublicRoute = createRouteMatcher([
@@ -12,7 +12,7 @@ const isPublicRoute = createRouteMatcher([
   "/sso-callback(.*)",
   "/api/auth/token",
   "/api/webhooks(.*)",
-  "/api/upload",
+  "/api/upload", // Bu rota zaten herkese açık
 ]);
 
 // API routes that require authentication
@@ -30,15 +30,20 @@ function applyCsp(req: Request) {
   // Generate a random nonce
   const nonce = Buffer.from(crypto.randomUUID()).toString('base64');
   
-  // Define CSP header
+  // Define CSP header - GÜNCELLENMİŞ connect-src ve img-src
   const cspHeader = `
     default-src 'self';
     script-src 'self' 'strict-dynamic' 'nonce-${nonce}' 'unsafe-inline' https: http: ${
       process.env.NODE_ENV === 'production' ? '' : `'unsafe-eval'`
     };
     script-src-elem 'self' 'unsafe-inline' https: http:;
-    connect-src 'self' https://clerk.editor.bookshall.com https://*.clerk.accounts.dev https://storage.bookshall.com;
-    img-src 'self' https: http: data: blob:;
+    // Turnstile için connect-src ve img-src'e eklendi
+    connect-src 'self' 
+      https://clerk.editor.bookshall.com 
+      https://*.clerk.accounts.dev 
+      https://storage.bookshall.com
+      https://challenges.cloudflare.com; 
+    img-src 'self' https: http: data: blob: https://challenges.cloudflare.com;
     media-src 'self' https: http: data: blob:;
     worker-src 'self' blob:;
     style-src 'self' 'unsafe-inline' https: http:;
