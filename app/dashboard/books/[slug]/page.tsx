@@ -5,7 +5,25 @@ import { getBookBySlug } from "@/actions/books/get-book-by-slug";
 import { getChaptersByBook } from "@/actions/books/get-chapters-by-book";
 import { SimpleChapterList } from "@/components/books/simple-chapter-list";
 import type { Book } from "@/types/book";
-import { BookOpen, Globe, User } from "lucide-react";
+import { 
+  BookOpen, 
+  Globe, 
+  User, 
+  BookText, 
+  Calendar, 
+  FileText, 
+  Hash, 
+  Info, 
+  Languages, 
+  ListOrdered, 
+  Tag, 
+  List, 
+  Tags, 
+  Plus 
+} from "lucide-react";
+import { BookInfo } from "@/components/books/book-info";
+import { Button } from "@/components/ui/button";
+import Link from "next/link";
 
 interface PageProps {
   params: { slug: string };
@@ -106,58 +124,224 @@ export default async function BookDetailPage({ params, searchParams }: PageProps
     };
     
     return (
-      <div className="container mx-auto w-full space-y-6 p-8 md:p-8">
-        <div className="flex flex-col lg:flex-row gap-8">
-          {/* Main content */}
-          <div className="flex-1">
-            <BookHeader book={book} slug={slug} />
-            <Separator className="my-6" />
+      <div className="container mx-auto w-full p-8">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          {/* Left Column - Book Info */}
+          <div className="lg:col-span-1">
+            <BookInfo 
+              book={{
+                id: book.id,
+                title: book.title,
+                author: book.author,
+                publisher: book.publisher,
+                coverImageUrl: book.coverImageUrl
+              }}
+              showEditButton
+              editHref={`/dashboard/books/${slug}/edit`}
+            />
+          </div>
+          
+          {/* Middle Column - Book Details */}
+          <div className="lg:col-span-1 space-y-6">
+            <div className="flex items-center justify-between">
+              <h2 className="text-2xl font-bold flex items-center">
+                <Info className="h-5 w-5 mr-2" />
+                Book Details
+              </h2>
+              <Button variant="outline" size="sm" asChild>
+                <Link href={`/dashboard/books/${slug}/edit`}>
+                  Edit Details
+                </Link>
+              </Button>
+            </div>
             
-            <div className="space-y-8">
-              {/* Book Title */}
-              <div>
-                <h1 className="text-3xl font-bold tracking-tight text-foreground">
-                  {book.title}
-                </h1>
+            <div className="space-y-4">
+              {book.description && (
+                <div className="prose dark:prose-invert max-w-none">
+                  <h3 className="text-sm font-medium text-muted-foreground mb-2">Description</h3>
+                  <p className="text-foreground">{book.description}</p>
+                </div>
+              )}
+              
+              <div className="grid grid-cols-1 gap-4">
+                <div className="flex items-start">
+                  <BookText className="h-5 w-5 mr-2 mt-0.5 flex-shrink-0 text-muted-foreground" />
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground">Title</p>
+                    <p className="text-foreground">{book.title}</p>
+                  </div>
+                </div>
+                
                 {book.subtitle && (
-                  <h2 className="text-xl text-muted-foreground mt-1">
-                    {book.subtitle}
-                  </h2>
+                  <div className="flex items-start">
+                    <FileText className="h-5 w-5 mr-2 mt-0.5 flex-shrink-0 text-muted-foreground" />
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Subtitle</p>
+                      <p className="text-foreground">{book.subtitle}</p>
+                    </div>
+                  </div>
                 )}
-              </div>
-
-              {/* Book Details */}
-              <div className="space-y-4">
-                {/* Author */}
-                <div className="flex items-center text-muted-foreground">
-                  <User className="h-5 w-5 mr-2 flex-shrink-0" />
-                  <span className="text-foreground">{book.author || 'Unknown Author'}</span>
-                </div>
-
-                {/* Publisher */}
-                <div className="flex items-center text-muted-foreground">
-                  <BookOpen className="h-5 w-5 mr-2 flex-shrink-0" />
-                  <span>{book.publisher || 'No publisher specified'}</span>
-                </div>
-
-                {/* Language */}
-                <div className="flex items-center text-muted-foreground">
-                  <Globe className="h-5 w-5 mr-2 flex-shrink-0" />
-                  <span>Language: {formatLanguage(book.language)}</span>
-                </div>
+                
+                {book.author && (
+                  <div className="flex items-start">
+                    <User className="h-5 w-5 mr-2 mt-0.5 flex-shrink-0 text-muted-foreground" />
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Author</p>
+                      <p className="text-foreground">{book.author}</p>
+                    </div>
+                  </div>
+                )}
+                
+                {book.contributor && (
+                  <div className="flex items-start">
+                    <User className="h-5 w-5 mr-2 mt-0.5 flex-shrink-0 text-muted-foreground" />
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Contributor</p>
+                      <p className="text-foreground">{book.contributor}</p>
+                    </div>
+                  </div>
+                )}
+                
+                {book.translator && (
+                  <div className="flex items-start">
+                    <User className="h-5 w-5 mr-2 mt-0.5 flex-shrink-0 text-muted-foreground" />
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Translator</p>
+                      <p className="text-foreground">{book.translator}</p>
+                    </div>
+                  </div>
+                )}
+                
+                {book.publisher && (
+                  <div className="flex items-start">
+                    <BookOpen className="h-5 w-5 mr-2 mt-0.5 flex-shrink-0 text-muted-foreground" />
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Publisher</p>
+                      <p className="text-foreground">
+                        {book.publisher}
+                        {book.publisherWebsite && (
+                          <a 
+                            href={book.publisherWebsite.startsWith('http') ? book.publisherWebsite : `https://${book.publisherWebsite}`} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="ml-2 text-blue-500 hover:underline"
+                          >
+                            (Website)
+                          </a>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                )}
+                
+                {book.publishYear && (
+                  <div className="flex items-start">
+                    <Calendar className="h-5 w-5 mr-2 mt-0.5 flex-shrink-0 text-muted-foreground" />
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Publication Year</p>
+                      <p className="text-foreground">{book.publishYear}</p>
+                    </div>
+                  </div>
+                )}
+                
+                {book.language && (
+                  <div className="flex items-start">
+                    <Languages className="h-5 w-5 mr-2 mt-0.5 flex-shrink-0 text-muted-foreground" />
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Language</p>
+                      <p className="text-foreground">{formatLanguage(book.language)}</p>
+                    </div>
+                  </div>
+                )}
+                
+                {book.isbn && (
+                  <div className="flex items-start">
+                    <Hash className="h-5 w-5 mr-2 mt-0.5 flex-shrink-0 text-muted-foreground" />
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">ISBN</p>
+                      <p className="text-foreground">{book.isbn}</p>
+                    </div>
+                  </div>
+                )}
+                
+                {book.genre && (
+                  <div className="flex items-start">
+                    <Tag className="h-5 w-5 mr-2 mt-0.5 flex-shrink-0 text-muted-foreground" />
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Genre</p>
+                      <p className="text-foreground">
+                        {book.genre.split('_').map(word => 
+                          word.charAt(0) + word.slice(1).toLowerCase()
+                        ).join(' ')}
+                      </p>
+                    </div>
+                  </div>
+                )}
+                
+                {book.series && (
+                  <div className="flex items-start">
+                    <List className="h-5 w-5 mr-2 mt-0.5 flex-shrink-0 text-muted-foreground" />
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">
+                        {book.seriesIndex ? `Series (${book.seriesIndex})` : 'Series'}
+                      </p>
+                      <p className="text-foreground">{book.series}</p>
+                    </div>
+                  </div>
+                )}
+                
+                {book.tags && book.tags.length > 0 && (
+                  <div className="flex items-start">
+                    <Tags className="h-5 w-5 mr-2 mt-0.5 flex-shrink-0 text-muted-foreground" />
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground mb-1">Tags</p>
+                      <div className="flex flex-wrap gap-2">
+                        {book.tags.map((tag, index) => (
+                          <span 
+                            key={index} 
+                            className="inline-flex items-center rounded-md bg-muted px-2 py-1 text-xs font-medium text-muted-foreground ring-1 ring-inset ring-ring/10"
+                          >
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
           
-         
+          {/* Right Column - Chapters */}
+          <div className="lg:col-span-1">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-2xl font-bold flex items-center">
+                <ListOrdered className="h-5 w-5 mr-2" />
+                Chapters
+              </h2>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" asChild>
+                  <Link href={`/dashboard/books/${slug}/chapters/reorder`}>
+                    <ListOrdered className="h-4 w-4 mr-1" />
+                    Reorder
+                  </Link>
+                </Button>
+                <Button size="sm" asChild>
+                  <Link href={`/dashboard/books/${slug}/chapters/new`}>
+                    <Plus className="h-4 w-4 mr-1" />
+                    Add Chapter
+                  </Link>
+                </Button>
+              </div>
+            </div>
+            <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+              <SimpleChapterList 
+                bookSlug={slug}
+                bookTitle={book.title}
+              />
+            </div>
+          </div>
         </div>
-         {/* Sidebar */}
-         <aside className="lg:w-80 space-y-6">
-            <SimpleChapterList 
-              bookSlug={slug}
-              bookTitle={book.title}
-            />
-          </aside>
       </div>
     );
   } catch (error) {

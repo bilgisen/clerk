@@ -187,7 +187,7 @@ const deleteChapter = async (id: string, getToken: () => Promise<string | null>)
       throw new Error('Not authenticated');
     }
     
-    const response = await fetch(`/api/chapters/${id}`, {
+    const response = await fetch(`/api/books/${id.split('_')[0]}/chapters/${id}`, {
       method: 'DELETE',
       headers: {
         'Authorization': `Bearer ${token}`,
@@ -196,12 +196,13 @@ const deleteChapter = async (id: string, getToken: () => Promise<string | null>)
       credentials: 'include',
     });
     
+    const data = await response.json().catch(() => ({}));
+    
     if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      throw new Error(error.message || 'Failed to delete chapter');
+      throw new Error(data.error || 'Failed to delete chapter');
     }
     
-    return await response.json();
+    return { success: true };
   } catch (error) {
     console.error('Error deleting chapter:', error);
     throw error;

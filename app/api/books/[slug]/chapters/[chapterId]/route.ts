@@ -81,14 +81,14 @@ export async function DELETE(
       .returning();
 
     if (!deletedChapter) {
-      return NextResponse.json({ error: "Chapter not found" }, { status: 404 });
+      return NextResponse.json({ success: false, error: "Chapter not found" }, { status: 404 });
     }
 
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("Error deleting chapter:", error);
     return NextResponse.json(
-      { error: "Failed to delete chapter" },
+      { success: false, error: "Failed to delete chapter" },
       { status: 500 }
     );
   }

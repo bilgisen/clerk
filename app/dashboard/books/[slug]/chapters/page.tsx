@@ -5,7 +5,10 @@ import { getBookBySlug } from "@/actions/books/get-book-by-slug";
 import { getChaptersByBook } from "@/actions/books/get-chapters-by-book";
 import { ChapterTreeArborist } from "@/components/chapters/ChapterTreeArborist";
 import type { Book } from "@/types/book";
-import { BookOpen, Globe, User } from "lucide-react";
+import { BookOpen, Globe, User, BookText, Calendar, FileText, Hash, Info, Languages, ListOrdered, Tag, List, Tags, Plus } from "lucide-react";
+import { BookInfo } from "@/components/books/book-info";
+import { Button } from "@/components/ui/button";
+import Link from "next/link";
 
 interface PageProps {
   params: { slug: string };
@@ -98,57 +101,76 @@ export default async function BookDetailPage({ params, searchParams }: PageProps
     };
     
     return (
-      <div className="container mx-auto w-full space-y-6 p-8 md:p-8">
-        <BookHeader book={book} slug={slug} />
-        <Separator className="my-6" />
-        
-        <div className="space-y-6">
-          {/* Book Details */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="md:col-span-1 space-y-4">
-              <div className="space-y-2">
-                <h2 className="text-2xl font-semibold">Book Details</h2>
-                <div className="space-y-3">
-                  <div className="flex items-center">
-                    <User className="h-5 w-5 mr-2 text-muted-foreground flex-shrink-0" />
-                    <div>
-                      <p className="text-sm text-muted-foreground">Author</p>
-                      <p className="font-medium">{book.author || 'Unknown Author'}</p>
-                    </div>
-                  </div>
-                  
-                  {book.publisher && (
-                    <div className="flex items-center">
-                      <BookOpen className="h-5 w-5 mr-2 text-muted-foreground flex-shrink-0" />
-                      <div>
-                        <p className="text-sm text-muted-foreground">Publisher</p>
-                        <p className="font-medium">{book.publisher}</p>
-                      </div>
-                    </div>
-                  )}
-                  
-                  <div className="flex items-center">
-                    <Globe className="h-5 w-5 mr-2 text-muted-foreground flex-shrink-0" />
-                    <div>
-                      <p className="text-sm text-muted-foreground">Language</p>
-                      <p className="font-medium">{formatLanguage(book.language)}</p>
-                    </div>
-                  </div>
-                </div>
+      <div className="container mx-auto w-full p-8">
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
+          {/* Main Content - Chapter Tree */}
+          <div className="lg:col-span-3 space-y-6">
+            <div className="flex items-center justify-between">
+              <h1 className="text-2xl font-bold tracking-tight">
+                {book.title} - Chapters
+              </h1>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" asChild>
+                  <Link href={`/dashboard/books/${slug}/chapters/reorder`}>
+                    <ListOrdered className="h-4 w-4 mr-1" />
+                    Reorder
+                  </Link>
+                </Button>
+                <Button size="sm" asChild>
+                  <Link href={`/dashboard/books/${slug}/chapters/new`}>
+                    <Plus className="h-4 w-4 mr-1" />
+                    Add Chapter
+                  </Link>
+                </Button>
               </div>
             </div>
             
-            {/* Chapter Tree */}
-            <div className="md:col-span-2">
-              <div className="border rounded-lg overflow-hidden bg-card">
-                <div className="p-4 border-b">
-                  <h2 className="text-xl font-semibold">Chapters</h2>
-                </div>
-                <div className="p-4">
-                  <ChapterTreeArborist 
-                    bookSlug={slug}
-                    onSelectChapter={undefined}
-                  />
+            <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+              <div className="p-4">
+                <ChapterTreeArborist 
+                  bookSlug={slug}
+                  onSelectChapter={undefined}
+                />
+              </div>
+            </div>
+          </div>
+          
+          {/* Sidebar - Book Info */}
+          <div className="lg:col-span-1">
+            <div className="sticky top-4 space-y-6">
+              <BookInfo 
+                book={{
+                  id: book.id,
+                  title: book.title,
+                  author: book.author,
+                  publisher: book.publisher,
+                  coverImageUrl: book.coverImageUrl
+                }}
+                showEditButton
+                editHref={`/dashboard/books/${slug}/edit`}
+              />
+              
+              <div className="rounded-lg border bg-card p-4 space-y-4">
+                <h3 className="text-lg font-semibold">Quick Actions</h3>
+                <div className="space-y-2">
+                  <Button variant="outline" className="w-full justify-start" asChild>
+                    <Link href={`/dashboard/books/${slug}/chapters/new`}>
+                      <Plus className="h-4 w-4 mr-2" />
+                      New Chapter
+                    </Link>
+                  </Button>
+                  <Button variant="outline" className="w-full justify-start" asChild>
+                    <Link href={`/dashboard/books/${slug}/chapters/reorder`}>
+                      <ListOrdered className="h-4 w-4 mr-2" />
+                      Reorder Chapters
+                    </Link>
+                  </Button>
+                  <Button variant="outline" className="w-full justify-start" asChild>
+                    <Link href={`/dashboard/books/${slug}/edit`}>
+                      <BookOpen className="h-4 w-4 mr-2" />
+                      Edit Book Details
+                    </Link>
+                  </Button>
                 </div>
               </div>
             </div>
