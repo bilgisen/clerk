@@ -10,7 +10,7 @@ import { useChapter, useChaptersBySlug } from "@/hooks/api/use-chapters";
 import Link from "next/link";
 
 const LexicalRenderer = dynamic(
-  () => import('@/components/editor/lexical-renderer').then((mod) => mod.LexicalRendererContent),
+  () => import('@/components/editor/lexical-renderer').then((mod) => mod.LexicalRenderer),
   { ssr: false }
 );
 
