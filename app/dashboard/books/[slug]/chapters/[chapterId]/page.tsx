@@ -196,7 +196,7 @@ export default function ChapterDetailPage() {
       <article className="prose dark:prose-invert max-w-none">
         <header className="mb-8">
           <h1 className="text-3xl font-bold tracking-tight">{chapterData.title}</h1>
-          {chapterData.content && (
+          {typeof chapterData.content === 'string' && chapterData.content && (
             <div className="text-muted-foreground mt-2 text-lg">
               {chapterData.content.replace(/<[^>]*>?/gm, ' ').substring(0, 200).trim()}
               {chapterData.content.length > 200 ? '...' : ''}
@@ -205,7 +205,7 @@ export default function ChapterDetailPage() {
         </header>
         
         <div className="prose-lg dark:prose-invert max-w-none">
-          {chapterData.content ? (
+          {typeof chapterData.content === 'string' && chapterData.content ? (
             <LexicalRenderer content={chapterData.content} />
           ) : (
             <div className="text-muted-foreground italic">No content available for this chapter.</div>
