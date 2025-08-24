@@ -1,5 +1,5 @@
 //  app/dashboard/books/[slug]/chapters/[chapterId]/page.tsx
-
+"use client";
 import { useState, useEffect } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
