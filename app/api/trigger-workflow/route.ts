@@ -17,7 +17,7 @@ export async function POST(request: Request) {
     const userId = session.userId;
 
     // Parse request body
-    const { content_id, format, metadata } = await request.json();
+    const { content_id, metadata } = await request.json();
     
     if (!content_id) {
       return NextResponse.json(
@@ -28,7 +28,6 @@ export async function POST(request: Request) {
 
     const result = await GitHubActionsService.triggerContentProcessing({
       contentId: content_id.toString(),
-      format: format || 'epub',
       metadata: {
         ...(metadata || {}),
         user_id: userId,

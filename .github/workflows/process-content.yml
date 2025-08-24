@@ -140,7 +140,15 @@ jobs:
         timeout-minutes: 30
         env:
           CONTENT_ID: ${{ github.event.inputs.content_id }}
-          BASE_URL: 'https://matbu.vercel.app'
+          # OIDC configuration
+          GHA_OIDC_AUDIENCE: ${{ env.GITHUB_OIDC_AUDIENCE }}
+          GHA_ALLOWED_REPO: ${{ env.GITHUB_REPO_OWNER }}/${{ env.GITHUB_REPO_NAME }}
+          GHA_ALLOWED_REF: refs/heads/main
+          GHA_ALLOWED_WORKFLOW: Process Content
+          GHA_OIDC_ISSUER: https://token.actions.githubusercontent.com
+          GHA_OIDC_JWKS_URL: https://token.actions.githubusercontent.com/.well-known/jwks
+          # Base URL for API requests
+          BASE_URL: 'https://editor.bookshall.com'
           GITHUB_REPO_OWNER: ${{ env.GITHUB_REPO_OWNER }}
           GITHUB_REPO_NAME: ${{ env.GITHUB_REPO_NAME }}
           GITHUB_REF: ${{ github.ref }}

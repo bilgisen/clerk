@@ -458,63 +458,6 @@ export default function GenerateEbookPage() {
           <Card>
             <CardHeader>
               <CardTitle>Generation Progress</CardTitle>
-              <CardDescription>Track your ebook generation</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {status === 'completed' ? (
-                <div className="text-center space-y-4">
-                  <div className="text-green-500 font-medium">Generation Complete!</div>
-                  {downloadUrl && (
-                    <a 
-                      href={downloadUrl} 
-                      download
-                      className="inline-flex items-center justify-center px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors"
-                    >
-                      Download EPUB
-                    </a>
-                  )}
-                </div>
-              ) : status === 'processing' ? (
-                <div className="space-y-2">
-                  <div className="flex justify-between text-sm">
-                    <span>Generating EPUB...</span>
-                    <span>Please wait</span>
-                  </div>
-                  <Progress value={getProgress()} className="h-2" />
-                </div>
-              ) : (
-                <div className="text-muted-foreground text-center py-4">
-                  Your generated EPUB will appear here
-                </div>
-              )}
-            </CardContent>
-            <CardFooter className="flex justify-end border-t px-6 py-4">
-              <Button 
-                onClick={handleGenerateEPUB} 
-                disabled={isGenerating}
-                className="w-full sm:w-auto"
-              >
-                {isGenerating ? (
-                  <>
-                    <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    Generating...
-                  </>
-                ) : (
-                  'Generate E-Book'
-                )}
-              </Button>
-            </CardFooter>
-          </Card>
-        </div>
-
-        {/* Right Column - Generation Progress (1/3 width) */}
-        <div className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Generation Progress</CardTitle>
               <CardDescription>Track the status of your ebook generation</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
