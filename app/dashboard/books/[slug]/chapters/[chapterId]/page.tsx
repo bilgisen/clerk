@@ -1,5 +1,6 @@
 //  app/dashboard/books/[slug]/chapters/[chapterId]/page.tsx
 "use client";
+
 import { useState, useEffect } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
@@ -13,6 +14,28 @@ const LexicalRenderer = dynamic(
   () => import('@/components/editor/lexical-renderer').then((mod) => mod.LexicalRenderer),
   { ssr: false }
 );
+
+function getPreviewText(content: unknown, max = 200) {
+  try {
+    if (!content) return "";
+    if (typeof content === "string") {
+      if (content.trim().startsWith("<")) {
+        // HTML ise: tag'leri temizle
+        return content.replace(/<[^>]*>?/gm, " ").slice(0, max).trim();
+      }
+      // Düz string ise direkt kısalt
+      return content.slice(0, max).trim();
+    }
+    // Lexical JSON ise: basitçe text alanlarını toplayalım
+    const obj = content as any;
+    const s = JSON.stringify(obj);
+    // çok basit çıkarım: "text":"..." alanlarını yakala
+    const texts = [...s.matchAll(/"text"\s*:\s*"([^"]*)"/g)].map((m) => m[1]);
+    return texts.join(" ").slice(0, max).trim();
+  } catch {
+    return "";
+  }
+}
 
 export default function ChapterDetailPage() {
   const router = useRouter();
@@ -189,20 +212,34 @@ export default function ChapterDetailPage() {
       <article className="prose dark:prose-invert max-w-none">
         <header className="mb-8">
           <h1 className="text-3xl font-bold tracking-tight">{chapterData.title}</h1>
-          {typeof chapterData.content === 'string' && chapterData.content && (
-            <div className="text-muted-foreground mt-2 text-lg">
-              {chapterData.content.replace(/<[^>]*>?/gm, ' ').substring(0, 200).trim()}
-              {chapterData.content.length > 200 ? '...' : ''}
-            </div>
-          )}
+          {(() => {
+            const preview = getPreviewText(chapterData.content);
+            return preview ? (
+              <div className="text-muted-foreground mt-2 text-lg">
+                {preview}
+                {preview.length >= 200 ? "…" : ""}
+              </div>
+            ) : null;
+          })()}
         </header>
 
         <div className="prose-lg dark:prose-invert max-w-none">
-          {typeof chapterData.content === 'string' && chapterData.content ? (
-            <LexicalRenderer content={chapterData.content} />
-          ) : (
-            <div className="text-muted-foreground italic">No content available for this chapter.</div>
-          )}
+          {(() => {
+            const contentForRenderer =
+              typeof chapterData.content === "string"
+                ? chapterData.content
+                : chapterData.content
+                ? JSON.stringify(chapterData.content)
+                : "";
+
+            return contentForRenderer ? (
+              <LexicalRenderer content={chapterData.content as any} />
+            ) : (
+              <div className="text-muted-foreground italic">
+                No content available for this chapter.
+              </div>
+            );
+          })()}
         </div>
       </article>
 
