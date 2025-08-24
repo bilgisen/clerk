@@ -79,7 +79,7 @@ export function LexicalRenderer({ content }: { content: ContentInput }) {
 
   if (canUseLexical) {
     return (
-      <div className="prose max-w-none">
+      <div className="prose max-w-none [&_p]:mb-4 [&_p:last-child]:mb-0 [&_p]:leading-relaxed">
         <LexicalComposer
           initialConfig={{
             namespace: "LexicalRenderer",
@@ -94,6 +94,9 @@ export function LexicalRenderer({ content }: { content: ContentInput }) {
             },
             onError: (error) => console.error(error),
             nodes: [],
+            theme: {
+              paragraph: 'mb-4 last:mb-0 leading-relaxed',
+            },
           }}
         >
           <LexicalRendererContent content={serialized} />
@@ -106,7 +109,7 @@ export function LexicalRenderer({ content }: { content: ContentInput }) {
     // İçerik HTML kaydedildiyse okunur şekilde göster
     return (
       <div
-        className="prose max-w-none"
+        className="prose max-w-none [&_p]:mb-4 [&_p:last-child]:mb-0 [&_p]:leading-relaxed"
         dangerouslySetInnerHTML={{ __html: serialized }}
       />
     );

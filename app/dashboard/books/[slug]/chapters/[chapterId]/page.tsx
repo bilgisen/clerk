@@ -215,7 +215,7 @@ export default function ChapterDetailPage() {
           {(() => {
             const preview = getPreviewText(chapterData.content);
             return preview ? (
-              <div className="text-muted-foreground mt-2 text-lg">
+              <div className="hidden text-muted-foreground mt-2 text-lg">
                 {preview}
                 {preview.length >= 200 ? "…" : ""}
               </div>
@@ -253,7 +253,11 @@ export default function ChapterDetailPage() {
             View All Chapters
           </Button>
           <div className="text-sm text-muted-foreground">
-            Last updated: {new Date(chapterData.updated_at).toLocaleDateString()}
+            {chapterData.updated_at ? (
+              `Last updated: ${new Date(chapterData.updated_at).toLocaleDateString()}`
+            ) : (
+              `Created: ${new Date(chapterData.created_at).toLocaleDateString()}`
+            )}
           </div>
         </div>
       </div>

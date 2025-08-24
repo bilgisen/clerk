@@ -56,6 +56,7 @@ export type SerializedImageNode = Spread<
     showCaption: boolean
     src: string
     width?: number
+    captionsEnabled?: boolean
   },
   SerializedLexicalNode
 >
@@ -90,7 +91,7 @@ export class ImageNode extends DecoratorNode<JSX.Element> {
   }
 
   static importJSON(serializedNode: SerializedImageNode): ImageNode {
-    const { altText, height, width, maxWidth, caption, src, showCaption } =
+    const { altText, height, width, maxWidth, caption, src, showCaption, captionsEnabled } =
       serializedNode
     const node = $createImageNode({
       altText,
@@ -99,6 +100,7 @@ export class ImageNode extends DecoratorNode<JSX.Element> {
       showCaption,
       src,
       width,
+      captionsEnabled,
     })
     const nestedEditor = node.__caption
     const editorState = nestedEditor.parseEditorState(caption.editorState)
@@ -163,6 +165,7 @@ export class ImageNode extends DecoratorNode<JSX.Element> {
       type: "image",
       version: 1,
       width: this.__width === "inherit" ? 0 : this.__width,
+      captionsEnabled: this.__captionsEnabled,
     }
   }
 

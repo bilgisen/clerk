@@ -9,11 +9,10 @@ import { useAuth } from '@clerk/nextjs';
 import { BooksMenu } from '@/components/books/books-menu';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Separator } from '@/components/ui/separator';
-import { Input } from '@/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Slider } from '@/components/ui/slider';
+import { BookInfo } from '@/components/books/book-info';
 import { Progress } from '@/components/ui/progress';
 
 // Polling interval in milliseconds
@@ -31,11 +30,13 @@ export default function GenerateEbookPage() {
 
   // Publishing options state
   const [format, setFormat] = useState<'epub' | 'mobi'>('epub');
+  const [style, setStyle] = useState<'default' | 'style2'>('default');
+  const [includeMetadata, setIncludeMetadata] = useState<boolean>(true);
   const [generateToc, setGenerateToc] = useState<boolean>(true);
+  const [tocDepth, setTocDepth] = useState<number>(3);
   const [includeImprint, setIncludeImprint] = useState<boolean>(true);
   const [includeCover, setIncludeCover] = useState<boolean>(true);
-  const [style, setStyle] = useState<'default' | 'style2'>('default');
-  const [tocDepth, setTocDepth] = useState<number>(3);
+  const [bookData, setBookData] = useState<any>(null);
 
   // Simple progress state
   const [status, setStatus] = useState<'idle' | 'starting' | 'triggered' | 'processing' | 'completed' | 'failed'>('idle');
@@ -76,6 +77,7 @@ export default function GenerateEbookPage() {
         const res = await fetch(`/api/books/by-slug/${slug}`, { cache: 'no-store', credentials: 'include' });
         if (!res.ok) return;
         const book = await res.json();
+        setBookData(book);
         setBookId(book.id);
         if (book?.epubUrl) {
           setDownloadUrl(book.epubUrl);
@@ -330,164 +332,161 @@ export default function GenerateEbookPage() {
     }
   };
 
-  return (
-    <div className="container mx-auto px-8 py-6 space-y-6">
-      {/* Header */}
-      <div className="flex flex-col space-y-2">
-        <div className="flex justify-between items-start">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight">Publish E-Book</h1>
-            <p className="text-muted-foreground">Publish ebook version of {slug}</p>
-          </div>
-          <BooksMenu slug={slug as string} />
+  if (!bookData) {
+    return (
+      <div className="container mx-auto p-6">
+        <div className="flex items-center justify-center h-64">
+          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
         </div>
-        <Separator className="my-4" />
       </div>
+    );
+  }
 
-      {/* Main Content */}
-      <div className="space-y-6">
-        {/* Download Section */}
-        {status === 'completed' && downloadUrl && (
-          <Card>
-            <CardHeader>
-              <CardTitle>E-Book Preview</CardTitle>
-              <CardDescription>Preview your generated e-book</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <p className="text-sm text-muted-foreground">
-                Your e-book is ready for download.
-              </p>
-            </CardContent>
-            <CardFooter className="flex justify-between border-t pt-4">
-              <div className="space-x-2">
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    if (downloadUrl) {
-                      const a = document.createElement('a');
-                      a.href = downloadUrl;
-                      a.download = `book-${bookId || 'preview'}.epub`;
-                      document.body.appendChild(a);
-                      a.click();
-                      document.body.removeChild(a);
-                    }
-                  }}
-                >
-                  Download Local Copy
-                </Button>
-              </div>
-              <Button
-                onClick={() => {
-                  if (downloadUrl) {
-                    window.open(downloadUrl, '_blank');
-                  }
-                }}
-              >
-                View in Cloud
-              </Button>
-            </CardFooter>
-          </Card>
+  return (
+    <div className="container mx-auto p-6 space-y-6">
+      <div className="flex justify-between items-center">
+        <h1 className="text-2xl font-bold">Generate Ebook</h1>
+        {bookId && (
+          <BooksMenu 
+            slug={typeof slug === 'string' ? slug : ''} 
+            bookId={bookId}
+          />
         )}
-
-        <div className="lg:col-span-2 space-y-6">
+      </div>
+      
+      <Separator />
+      
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Left Column - Book Info */}
+        <div className="space-y-6">
+          <BookInfo 
+            book={{
+              id: bookData.id,
+              title: bookData.title,
+              author: bookData.author,
+              coverImageUrl: bookData.coverImageUrl
+            }} 
+            className="w-full"
+          />
+        </div>
+        
+        {/* Middle Column - Publishing Options */}
+        <div className="space-y-6">
           <Card>
             <CardHeader>
               <CardTitle>Publishing Options</CardTitle>
-              <CardDescription>Customize how your ebook will be generated</CardDescription>
+              <CardDescription>Customize your ebook settings</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-6">
-              {/* Format Selection */}
+            <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label>Format</Label>
-                <RadioGroup 
-                  value={format} 
-                  onValueChange={(value) => setFormat(value as 'epub' | 'mobi')}
-                  className="grid grid-cols-2 gap-4 pt-2"
-                >
-                  <div>
-                    <RadioGroupItem value="epub" id="epub" className="peer sr-only" />
-                    <Label
-                      htmlFor="epub"
-                      className="flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary"
-                    >
-                      <div className="font-medium">EPUB</div>
-                      <div className="text-xs text-muted-foreground">Standard format</div>
-                    </Label>
+                <div className="flex items-center space-x-2">
+                  <Checkbox 
+                    id="include-metadata" 
+                    checked={includeMetadata} 
+                    onCheckedChange={(checked) => setIncludeMetadata(checked === true)}
+                  />
+                  <Label htmlFor="include-metadata">Include Metadata</Label>
+                </div>
+                
+                <div className="space-y-2 pl-6">
+                  <div className="flex items-center space-x-2">
+                    <Checkbox 
+                      id="include-cover" 
+                      checked={includeCover} 
+                      onCheckedChange={(checked) => setIncludeCover(checked === true)}
+                      disabled={!includeMetadata}
+                    />
+                    <Label htmlFor="include-cover">Include Cover</Label>
                   </div>
-                  <div>
-                    <RadioGroupItem value="mobi" id="mobi" className="peer sr-only" />
-                    <Label
-                      htmlFor="mobi"
-                      className="flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary"
-                    >
-                      <div className="font-medium">MOBI</div>
-                      <div className="text-xs text-muted-foreground">Kindle format</div>
-                    </Label>
+                  
+                  <div className="flex items-center space-x-2">
+                    <Checkbox 
+                      id="include-imprint" 
+                      checked={includeImprint} 
+                      onCheckedChange={(checked) => setIncludeImprint(checked === true)}
+                      disabled={!includeMetadata}
+                    />
+                    <Label htmlFor="include-imprint">Include Imprint</Label>
                   </div>
-                </RadioGroup>
+                </div>
               </div>
-
-              {/* Checkbox Options */}
+              
+              <Separator className="my-4" />
+              
               <div className="space-y-4">
                 <div className="flex items-center space-x-2">
                   <Checkbox 
-                    id="generateToc" 
+                    id="generate-toc" 
                     checked={generateToc} 
-                    onCheckedChange={(checked) => setGenerateToc(checked as boolean)} 
+                    onCheckedChange={(checked) => setGenerateToc(checked === true)}
                   />
-                  <Label htmlFor="generateToc" className="font-normal">
-                    Generate Table of Contents
-                  </Label>
+                  <Label htmlFor="generate-toc">Generate Table of Contents</Label>
                 </div>
-                <div className="flex items-center space-x-2">
-                  <Checkbox 
-                    id="includeImprint" 
-                    checked={includeImprint} 
-                    onCheckedChange={(checked) => setIncludeImprint(checked as boolean)} 
-                  />
-                  <Label htmlFor="includeImprint" className="font-normal">
-                    Include Imprint Page
-                  </Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <Checkbox 
-                    id="includeCover" 
-                    checked={includeCover} 
-                    onCheckedChange={(checked) => setIncludeCover(checked as boolean)} 
-                  />
-                  <Label htmlFor="includeCover" className="font-normal">
-                    Include Book Cover
-                  </Label>
-                </div>
+                
+                {generateToc && (
+                  <div className="pl-6 space-y-2">
+                    <div className="flex justify-between">
+                      <Label htmlFor="toc-depth">TOC Depth: {tocDepth}</Label>
+                    </div>
+                    <Slider
+                      id="toc-depth"
+                      min={1}
+                      max={5}
+                      step={1}
+                      value={[tocDepth]}
+                      onValueChange={(value) => setTocDepth(value[0])}
+                      className="w-full"
+                    />
+                  </div>
+                )}
               </div>
-
-              {/* Advanced Options */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
-                <div className="space-y-2">
-                  <Label htmlFor="style">Style</Label>
-                  <Select value={style} onValueChange={(value) => setStyle(value as 'default' | 'style2')}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select style" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="default">Default</SelectItem>
-                      <SelectItem value="style2">Style 2</SelectItem>
-                    </SelectContent>
-                  </Select>
+            </CardContent>
+            <CardFooter>
+              <Button 
+                onClick={handleGenerateEPUB}
+                disabled={isGenerating || status === 'processing'}
+                className="w-full"
+              >
+                {isGenerating || status === 'processing' ? 'Generating...' : 'Generate EPUB'}
+              </Button>
+            </CardFooter>
+          </Card>
+        </div>
+        
+        {/* Right Column - Generation Progress */}
+        <div className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Generation Progress</CardTitle>
+              <CardDescription>Track your ebook generation</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {status === 'completed' ? (
+                <div className="text-center space-y-4">
+                  <div className="text-green-500 font-medium">Generation Complete!</div>
+                  {downloadUrl && (
+                    <a 
+                      href={downloadUrl} 
+                      download
+                      className="inline-flex items-center justify-center px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors"
+                    >
+                      Download EPUB
+                    </a>
+                  )}
                 </div>
+              ) : status === 'processing' ? (
                 <div className="space-y-2">
-                  <Label htmlFor="tocDepth">TOC Depth</Label>
-                  <Input 
-                    id="tocDepth"
-                    type="number" 
-                    min={1} 
-                    max={6} 
-                    value={tocDepth} 
-                    onChange={(e) => setTocDepth(parseInt(e.target.value || '3', 10))} 
-                  />
+                  <div className="flex justify-between text-sm">
+                    <span>Generating EPUB...</span>
+                    <span>Please wait</span>
+                  </div>
+                  <Progress value={getProgress()} className="h-2" />
                 </div>
-
-              </div>
+              ) : (
+                <div className="text-muted-foreground text-center py-4">
+                  Your generated EPUB will appear here
+                </div>
+              )}
             </CardContent>
             <CardFooter className="flex justify-end border-t px-6 py-4">
               <Button 
@@ -594,7 +593,7 @@ export default function GenerateEbookPage() {
               >
                 <a 
                   href={downloadUrl || '#'} 
-                  target="_blank" 
+                  target="_blank"
                   rel="noopener noreferrer"
                   onClick={(e) => {
                     if (!downloadUrl || status !== 'completed') {
@@ -633,45 +632,7 @@ export default function GenerateEbookPage() {
           </Card>
         </div>
       </div>
-
-      {downloadUrl && (
-        <div className="mt-8">
-          <Card>
-            <CardHeader>
-              <CardTitle>E-Book</CardTitle>
-              <CardDescription>Download your generated e-book</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <p className="text-muted-foreground">Your e-book is ready for download.</p>
-            </CardContent>
-            <CardFooter className="flex justify-between border-t pt-4">
-              <div className="space-x-2">
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    const a = document.createElement('a');
-                    a.href = downloadUrl;
-                    a.download = `book-${bookId || 'download'}.epub`;
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
-                  }}
-                >
-                  Download Local Copy
-                </Button>
-              </div>
-              <Button
-                variant="default"
-                onClick={() => {
-                  window.open(downloadUrl, '_blank');
-                }}
-              >
-                View in Cloud
-              </Button>
-            </CardFooter>
-          </Card>
-        </div>
-      )}
     </div>
   );
 }
+
