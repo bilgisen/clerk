@@ -52,22 +52,32 @@ export default function BookDetailPage({ params, searchParams }: PageProps) {
       try {
         setIsLoading(true);
         const token = await getToken();
+        if (!token) {
+          throw new Error('No authentication token found');
+        }
         
-        // Fetch book data
-        const bookResponse = await fetch(`/api/books/${slug}`, {
-          headers: { Authorization: `Bearer ${token}` }
+        console.log(`Fetching book with slug: ${slug}`);
+        const bookResponse = await fetch(`/api/books/by-slug/${slug}`, {
+          headers: { 
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          cache: 'no-store'
         });
         
         if (!bookResponse.ok) {
-          throw new Error('Failed to fetch book');
+          const errorData = await bookResponse.text();
+          console.error('Book fetch error:', bookResponse.status, errorData);
+          throw new Error(`Failed to fetch book: ${bookResponse.status} ${bookResponse.statusText}`);
         }
         
         const bookData = await bookResponse.json();
+        console.log('Book data loaded:', bookData);
         setBook(bookData);
         
       } catch (err) {
-        console.error('Error fetching data:', err);
-        setError('Failed to load book data');
+        console.error('Error in fetchData:', err);
+        setError(err instanceof Error ? err.message : 'Failed to load book data');
       } finally {
         setIsLoading(false);
       }
@@ -76,6 +86,7 @@ export default function BookDetailPage({ params, searchParams }: PageProps) {
     if (slug && typeof slug === 'string') {
       fetchData();
     } else {
+      console.error('Invalid slug parameter:', slug);
       router.push('/dashboard/books');
     }
   }, [slug, getToken, router]);
@@ -134,24 +145,37 @@ export default function BookDetailPage({ params, searchParams }: PageProps) {
                 router.push(`/dashboard/books/${slug}/chapters/${chapter.id}/edit`);
               }}
               onDeleteChapter={async (chapter) => {
-                if (confirm(`Are you sure you want to delete "${chapter.title}"?`)) {
-                  try {
-                    const token = await getToken();
-                    const response = await fetch(`/api/books/${slug}/chapters/${chapter.id}`, {
-                      method: 'DELETE',
-                      headers: { Authorization: `Bearer ${token}` }
-                    });
-                    
-                    if (response.ok) {
-                      router.refresh();
-                    } else {
-                      const error = await response.json();
-                      alert(error.message || 'Failed to delete chapter');
-                    }
-                  } catch (error) {
-                    console.error('Error deleting chapter:', error);
-                    alert('An error occurred while deleting the chapter');
+                if (!confirm(`Are you sure you want to delete "${chapter.title}"?`)) {
+                  return;
+                }
+                
+                try {
+                  const token = await getToken();
+                  if (!token) {
+                    throw new Error('No authentication token found');
                   }
+                  
+                  console.log(`Deleting chapter ${chapter.id} from book ${slug}`);
+                  const response = await fetch(`/api/books/by-slug/${slug}/chapters/${chapter.id}`, {
+                    method: 'DELETE',
+                    headers: { 
+                      'Authorization': `Bearer ${token}`,
+                      'Content-Type': 'application/json'
+                    }
+                  });
+                  
+                  if (!response.ok) {
+                    const errorData = await response.text();
+                    console.error('Delete chapter error:', response.status, errorData);
+                    throw new Error(errorData || 'Failed to delete chapter');
+                  }
+                  
+                  console.log('Chapter deleted successfully, refreshing...');
+                  router.refresh();
+                  
+                } catch (error) {
+                  console.error('Error in onDeleteChapter:', error);
+                  alert(error instanceof Error ? error.message : 'An error occurred while deleting the chapter');
                 }
               }}
             />
