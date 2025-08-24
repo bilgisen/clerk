@@ -49,14 +49,27 @@ export function LexicalRenderer({ content }: { content: string }) {
         initialConfig={{
           namespace: "LexicalRenderer",
           editable: false,
-          editorState: content,
+          editorState: (editor) => {
+            try {
+              const editorState = editor.parseEditorState(content);
+              editor.setEditorState(editorState);
+            } catch (err) {
+              console.error("Error parsing editor state:", err);
+            }
+          },
           onError: (error) => {
             console.error(error);
           },
-          nodes: []
+          nodes: [],
         }}
       >
-        <LexicalRendererContent content={content} />
+        <RichTextPlugin
+          contentEditable={
+            <ContentEditable className="prose max-w-none focus:outline-none" />
+          }
+          placeholder={null}
+          ErrorBoundary={({ children }) => <>{children}</>}
+        />
         <HistoryPlugin />
       </LexicalComposer>
     </div>
