@@ -1,3 +1,4 @@
+// app/dashboard/books/[slug]/chapters/[chapterId]/edit/page.tsx
 "use client";
 
 import { useState, useRef, useMemo, useEffect, useCallback } from 'react';
@@ -94,7 +95,7 @@ export default function EditChapterPage() {
         
         console.log('Fetching chapter with:', { bookSlug, chapterId });
         // Fetch chapter
-        const chapterRes = await fetch(`/api/books/by-slug/${bookSlug}/chapters/${chapterId}`, {
+        const chapterRes = await fetch(`/api/books/${bookSlug}/chapters/${chapterId}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         
@@ -110,7 +111,7 @@ export default function EditChapterPage() {
         
         // Fetch all chapters for the book
         console.log('Fetching all chapters for book:', bookSlug);
-        const chaptersRes = await fetch(`/api/books/by-slug/${bookSlug}/chapters`, {
+        const chaptersRes = await fetch(`/api/books/${bookSlug}/chapters`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         

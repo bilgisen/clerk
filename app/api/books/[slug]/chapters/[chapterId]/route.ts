@@ -1,102 +1,95 @@
-import { NextResponse } from 'next/server';
-import { auth } from '@clerk/nextjs/server';
-import { eq, and } from 'drizzle-orm';
-import { db } from '@/db/drizzle';
-import { books, chapters } from '@/db/schema';
+import { NextRequest, NextResponse } from "next/server";
+import { db } from "@/db/drizzle";
+import { chapters } from "@/db/schema";
+import { eq } from "drizzle-orm";
 
 export async function GET(
-  request: Request,
+  _request: NextRequest,
   { params }: { params: { slug: string; chapterId: string } }
 ) {
   try {
-    const { userId } = await auth();
-    if (!userId) {
-      return new NextResponse('Unauthorized', { status: 401 });
-    }
+    const chapterId = String(params.chapterId);
 
-    const { slug, chapterId } = params;
-
-    // Verify the book exists and belongs to the user
-    const book = await db.query.books.findFirst({
-      where: and(
-        eq(books.slug, slug),
-        eq(books.userId, userId)
-      ),
-    });
-
-    if (!book) {
-      return new NextResponse('Book not found', { status: 404 });
-    }
-
-    // Get the chapter
     const chapter = await db.query.chapters.findFirst({
-      where: and(
-        eq(chapters.id, chapterId),
-        eq(chapters.bookId, book.id)
-      ),
+      where: eq(chapters.id, chapterId),
     });
 
     if (!chapter) {
-      return new NextResponse('Chapter not found', { status: 404 });
+      return NextResponse.json({ error: "Chapter not found" }, { status: 404 });
     }
 
     return NextResponse.json(chapter);
   } catch (error) {
-    console.error('[CHAPTER_GET_ERROR]', error);
-    return new NextResponse('Internal Error', { status: 500 });
+    console.error("Error fetching chapter:", error);
+    return NextResponse.json(
+      { error: "Failed to fetch chapter" },
+      { status: 500 }
+    );
   }
 }
 
 export async function PATCH(
-  request: Request,
+  request: NextRequest,
   { params }: { params: { slug: string; chapterId: string } }
 ) {
   try {
-    const { userId } = await auth();
-    if (!userId) {
-      return new NextResponse('Unauthorized', { status: 401 });
-    }
-
-    const { slug, chapterId } = params;
+    const chapterId = String(params.chapterId);
     const body = await request.json();
 
-    // Verify the book exists and belongs to the user
-    const book = await db.query.books.findFirst({
-      where: and(
-        eq(books.slug, slug),
-        eq(books.userId, userId)
-      ),
-    });
+    const { title, content, order, parentChapterId, level, isDraft } = body;
 
-    if (!book) {
-      return new NextResponse('Book not found', { status: 404 });
-    }
-
-    // Verify the chapter exists and belongs to the book
-    const existingChapter = await db.query.chapters.findFirst({
-      where: and(
-        eq(chapters.id, chapterId),
-        eq(chapters.bookId, book.id)
-      ),
-    });
-
-    if (!existingChapter) {
-      return new NextResponse('Chapter not found', { status: 404 });
-    }
-
-    // Update the chapter
     const [updatedChapter] = await db
       .update(chapters)
       .set({
-        ...body,
+        ...(title !== undefined && { title }),
+        ...(content !== undefined && {
+          content: typeof content === "string" ? JSON.parse(content) : content,
+        }),
+        ...(order !== undefined && { order }),
+        ...(parentChapterId !== undefined && { parentChapterId }),
+        ...(level !== undefined && { level }),
+        ...(isDraft !== undefined && { isDraft }),
         updatedAt: new Date(),
       })
       .where(eq(chapters.id, chapterId))
       .returning();
 
+    if (!updatedChapter) {
+      return NextResponse.json({ error: "Chapter not found" }, { status: 404 });
+    }
+
     return NextResponse.json(updatedChapter);
   } catch (error) {
-    console.error('[CHAPTER_UPDATE_ERROR]', error);
-    return new NextResponse('Internal Error', { status: 500 });
+    console.error("Error updating chapter:", error);
+    return NextResponse.json(
+      { error: "Failed to update chapter" },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(
+  _request: NextRequest,
+  { params }: { params: { slug: string; chapterId: string } }
+) {
+  try {
+    const chapterId = String(params.chapterId);
+
+    const [deletedChapter] = await db
+      .delete(chapters)
+      .where(eq(chapters.id, chapterId))
+      .returning();
+
+    if (!deletedChapter) {
+      return NextResponse.json({ error: "Chapter not found" }, { status: 404 });
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error("Error deleting chapter:", error);
+    return NextResponse.json(
+      { error: "Failed to delete chapter" },
+      { status: 500 }
+    );
   }
 }

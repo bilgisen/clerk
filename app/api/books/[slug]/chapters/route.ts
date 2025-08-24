@@ -1,126 +1,74 @@
-import { NextResponse } from 'next/server';
-import { auth } from '@clerk/nextjs/server';
-import { db } from '@/db';
-import { chapters } from '@/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { NextRequest, NextResponse } from "next/server";
+import { db } from "@/db/drizzle";
+import { chapters, books } from "@/db/schema";
+import { eq, and, desc } from "drizzle-orm";
 
 export async function GET(
-  request: Request,
+  _request: NextRequest,
   { params }: { params: { slug: string } }
 ) {
   try {
-    const { userId } = auth();
-    if (!userId) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
-    }
-
     const { slug } = params;
-    if (!slug) {
-      return NextResponse.json(
-        { error: 'Book slug is required' },
-        { status: 400 }
-      );
-    }
 
-    // First, get the book ID using the slug
     const book = await db.query.books.findFirst({
-      where: (books, { eq }) => eq(books.slug, slug),
-      columns: {
-        id: true
-      }
+      where: eq(books.slug, slug),
     });
 
     if (!book) {
-      return NextResponse.json(
-        { error: 'Book not found' },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: "Book not found" }, { status: 404 });
     }
 
-    // Fetch all chapters for the book
-    const bookChapters = await db.query.chapters.findMany({
-      where: and(
-        eq(chapters.bookId, book.id),
-        eq(chapters.userId, userId)
-      ),
-      orderBy: (chapters, { asc }) => [asc(chapters.order)]
+    const result = await db.query.chapters.findMany({
+      where: eq(chapters.bookId, book.id),
+      orderBy: desc(chapters.createdAt),
     });
 
-    return NextResponse.json(bookChapters);
+    return NextResponse.json(result);
   } catch (error) {
-    console.error('Error fetching chapters:', error);
+    console.error("Error fetching chapters:", error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: "Failed to fetch chapters" },
       { status: 500 }
     );
   }
 }
 
 export async function POST(
-  request: Request,
+  request: NextRequest,
   { params }: { params: { slug: string } }
 ) {
   try {
-    const { userId } = auth();
-    if (!userId) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
-    }
-
     const { slug } = params;
-    if (!slug) {
-      return NextResponse.json(
-        { error: 'Book slug is required' },
-        { status: 400 }
-      );
-    }
+    const body = await request.json();
 
-    // First, get the book ID using the slug
     const book = await db.query.books.findFirst({
-      where: (books, { eq }) => eq(books.slug, slug),
-      columns: {
-        id: true
-      }
+      where: eq(books.slug, slug),
     });
 
     if (!book) {
-      return NextResponse.json(
-        { error: 'Book not found' },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: "Book not found" }, { status: 404 });
     }
 
-    const { title, content, order, parentId } = await request.json();
+    const { title, content, order, parentChapterId, level, isDraft } = body;
 
-    if (!title) {
-      return NextResponse.json(
-        { error: 'Title is required' },
-        { status: 400 }
-      );
-    }
+    const [chapter] = await db
+      .insert(chapters)
+      .values({
+        bookId: book.id,
+        title,
+        content: content ? JSON.parse(content) : null,
+        order,
+        parentChapterId,
+        level,
+        isDraft: isDraft ?? false,
+      })
+      .returning();
 
-    // Create the new chapter
-    const [newChapter] = await db.insert(chapters).values({
-      title,
-      content: content || '',
-      order: order || 0,
-      bookId: book.id,
-      userId,
-      parentId: parentId || null,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    }).returning();
-
-    return NextResponse.json(newChapter, { status: 201 });
+    return NextResponse.json(chapter, { status: 201 });
   } catch (error) {
-    console.error('Error creating chapter:', error);
+    console.error("Error creating chapter:", error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: "Failed to create chapter" },
       { status: 500 }
     );
   }
