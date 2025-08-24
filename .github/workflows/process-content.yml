@@ -366,8 +366,8 @@ jobs:
           NEXT_PUBLIC_IMAGE_BASE_URL: ${{ secrets.NEXT_PUBLIC_IMAGE_BASE_URL }}
         run: |
           set -e
-          # Ensure S3 client is available for the upload script
-          npm i -D @aws-sdk/client-s3
+          # Install AWS SDK for JavaScript v3
+          pnpm add -D @aws-sdk/client-s3
           CONTENT_ID="${{ github.event.inputs.content_id }}"
           FILE_PATH="./output/${CONTENT_ID}.epub"
           # Build a pretty, URL-safe slug for the EPUB key
