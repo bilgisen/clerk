@@ -55,17 +55,16 @@ jobs:
           node-version: '20.x'
           cache: 'pnpm'
 
-      - name: Install dependencies
-        run: |
-          # Ensure we're using the correct Node.js version
-          node --version
-          npm --version
-          
-          # Install dependencies
-          npm install --legacy-peer-deps
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
 
-          # Install dependencies
-          pnpm install --frozen-lockfile
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        env:
+          NODE_ENV: production
 
       - name: Install system tools
         run: |
