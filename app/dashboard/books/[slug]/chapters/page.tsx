@@ -116,7 +116,36 @@ export default async function BookDetailPage({ params, searchParams }: PageProps
           <div className="lg:col-span-2">
             <ChapterTreeArborist 
               bookSlug={slug}
-              onSelectChapter={undefined}
+              onSelectChapter={(chapter) => {
+                // Handle chapter selection if needed
+              }}
+              onViewChapter={(chapter) => {
+                // Navigate to view chapter
+                window.location.href = `/dashboard/books/${slug}/chapters/${chapter.id}`;
+              }}
+              onEditChapter={(chapter) => {
+                // Navigate to edit chapter
+                window.location.href = `/dashboard/books/${slug}/chapters/${chapter.id}/edit`;
+              }}
+              onDeleteChapter={async (chapter) => {
+                if (confirm(`Are you sure you want to delete "${chapter.title}"?`)) {
+                  try {
+                    const response = await fetch(`/api/books/${slug}/chapters/${chapter.id}`, {
+                      method: 'DELETE',
+                    });
+                    if (response.ok) {
+                      // Refresh the page to show updated list
+                      window.location.reload();
+                    } else {
+                      const error = await response.json();
+                      alert(error.message || 'Failed to delete chapter');
+                    }
+                  } catch (error) {
+                    console.error('Error deleting chapter:', error);
+                    alert('An error occurred while deleting the chapter');
+                  }
+                }
+              }}
             />
           </div>
           

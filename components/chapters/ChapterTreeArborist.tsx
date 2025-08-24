@@ -6,13 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@clerk/nextjs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
-import { GripVertical, MoreVertical, Eye, Pencil, Trash2 } from 'lucide-react';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { GripVertical, Eye, Pencil, Trash2 } from 'lucide-react';
 
 // Define the chapter structure based on your API response
 interface Chapter {
@@ -27,12 +21,18 @@ interface Chapter {
 interface ChapterTreeArboristProps {
   bookSlug: string;
   onSelectChapter?: (chapter: Chapter) => void;
+  onViewChapter?: (chapter: Chapter) => void;
+  onEditChapter?: (chapter: Chapter) => void;
+  onDeleteChapter?: (chapter: Chapter) => void;
   selectedChapterId?: string | null;
 }
 
 export function ChapterTreeArborist({ 
   bookSlug, 
-  onSelectChapter,
+  onSelectChapter, 
+  onViewChapter, 
+  onEditChapter, 
+  onDeleteChapter, 
   selectedChapterId 
 }: ChapterTreeArboristProps) {
   const { getToken } = useAuth();
@@ -210,7 +210,7 @@ export function ChapterTreeArborist({
       <div 
         ref={dragHandle}
         style={style} 
-        className={`group flex items-center px-2 py-1 hover:bg-primary/10 dark:hover:bg-primary/20 rounded transition-colors ${
+        className={`group flex flex-col px-2 py-2 hover:bg-primary/10 dark:hover:bg-primary/20 rounded transition-colors ${
           node.data.id === selectedChapterId ? 'bg-primary/5 dark:bg-primary/10' : ''
         }`}
         onClick={() => {
@@ -219,35 +219,56 @@ export function ChapterTreeArborist({
           }
         }}
       >
-        <GripVertical className="w-4 h-4 mr-2 text-muted-foreground/50 group-hover:text-foreground cursor-move" />
-        <span className="truncate">{node.data.title}</span>
-        <div className="ml-auto flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button 
-                variant="ghost" 
-                size="icon" 
-                className="h-6 w-6"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <MoreVertical className="h-3.5 w-3.5" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem className="cursor-pointer">
-                <Eye className="mr-2 h-4 w-4" />
-                <span>View</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem className="cursor-pointer">
-                <Pencil className="mr-2 h-4 w-4" />
-                <span>Edit</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem className="cursor-pointer text-destructive focus:text-destructive">
-                <Trash2 className="mr-2 h-4 w-4" />
-                <span>Delete</span>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+        <div className="flex items-center w-full">
+          <GripVertical className="w-4 h-4 mr-2 text-muted-foreground/50 group-hover:text-foreground cursor-move flex-shrink-0" />
+          <div className="flex-1 min-w-0">
+            <div className="truncate">{node.data.title}</div>
+            <a 
+              href={`/dashboard/books/${bookSlug}/chapters/${node.data.id}`}
+              className="text-xs text-muted-foreground hover:underline truncate block"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {node.data.id}
+            </a>
+          </div>
+          <div className="ml-2 flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="h-6 w-6 text-muted-foreground hover:text-foreground"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (onViewChapter) onViewChapter(node.data);
+              }}
+              title="View Chapter"
+            >
+              <Eye className="h-3.5 w-3.5" />
+            </Button>
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="h-6 w-6 text-muted-foreground hover:text-foreground"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (onEditChapter) onEditChapter(node.data);
+              }}
+              title="Edit Chapter"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </Button>
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="h-6 w-6 text-destructive hover:text-destructive"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (onDeleteChapter) onDeleteChapter(node.data);
+              }}
+              title="Delete Chapter"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          </div>
         </div>
       </div>
     );
