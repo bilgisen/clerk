@@ -6,7 +6,13 @@ import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@clerk/nextjs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
-import { Plus, GripVertical } from 'lucide-react';
+import { GripVertical, MoreVertical, Eye, Pencil, Trash2 } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 // Define the chapter structure based on your API response
 interface Chapter {
@@ -204,27 +210,44 @@ export function ChapterTreeArborist({
       <div 
         ref={dragHandle}
         style={style} 
-        className={`flex items-center px-2 py-1 hover:bg-gray-100 rounded ${node.data.id === selectedChapterId ? 'bg-blue-50' : ''}`}
+        className={`group flex items-center px-2 py-1 hover:bg-primary/10 dark:hover:bg-primary/20 rounded transition-colors ${
+          node.data.id === selectedChapterId ? 'bg-primary/5 dark:bg-primary/10' : ''
+        }`}
         onClick={() => {
           if (onSelectChapter) {
             onSelectChapter(node.data);
           }
         }}
       >
-        <GripVertical className="w-4 h-4 mr-2 text-gray-400 cursor-move" />
+        <GripVertical className="w-4 h-4 mr-2 text-muted-foreground/50 group-hover:text-foreground cursor-move" />
         <span className="truncate">{node.data.title}</span>
-        <div className="ml-auto flex space-x-1">
-          <Button 
-            variant="ghost" 
-            size="icon" 
-            className="h-6 w-6"
-            onClick={(e) => {
-              e.stopPropagation();
-              handleCreate(node.data.id);
-            }}
-          >
-            <Plus className="h-3.5 w-3.5" />
-          </Button>
+        <div className="ml-auto flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="h-6 w-6"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <MoreVertical className="h-3.5 w-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem className="cursor-pointer">
+                <Eye className="mr-2 h-4 w-4" />
+                <span>View</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem className="cursor-pointer">
+                <Pencil className="mr-2 h-4 w-4" />
+                <span>Edit</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem className="cursor-pointer text-destructive focus:text-destructive">
+                <Trash2 className="mr-2 h-4 w-4" />
+                <span>Delete</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
     );
@@ -245,19 +268,7 @@ export function ChapterTreeArborist({
   }
 
   return (
-    <div className="h-full flex flex-col">
-      <div className="p-2 border-b flex justify-between items-center">
-        <h3 className="font-medium">Chapters</h3>
-        <Button 
-          variant="outline" 
-          size="sm"
-          onClick={() => handleCreate(null)}
-        >
-          <Plus className="h-4 w-4 mr-1" />
-          Add Chapter
-        </Button>
-      </div>
-      
+    <div className="h-full">
       <div className="flex-1 overflow-auto">
         <Tree
           data={treeData}

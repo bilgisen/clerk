@@ -37,10 +37,17 @@ export const deleteBook = async (bookId: string) => {
     });
 
     if (!response.ok) {
-      const error = await response.json();
+      let errorMessage = 'Failed to delete book';
+      try {
+        const errorData = await response.json();
+        errorMessage = errorData.error || errorData.message || errorMessage;
+      } catch (e) {
+        // If we can't parse the error response, use the status text
+        errorMessage = response.statusText || errorMessage;
+      }
       return { 
         success: false, 
-        error: error.error || 'Failed to delete book' 
+        error: errorMessage
       };
     }
     

@@ -223,7 +223,7 @@ export default function EditBookPage() {
     <div className="container w-full mx-auto py-10 px-10">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold">Edit Book</h1>
-        <BooksMenu slug={book.slug} />
+        <BooksMenu slug={book.slug} bookId={book.id} />
       </div>
       
       <Separator className="mb-6" />

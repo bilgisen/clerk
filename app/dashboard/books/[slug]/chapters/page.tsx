@@ -92,52 +92,37 @@ export default async function BookDetailPage({ params, searchParams }: PageProps
       ? new Date(book.publishYear).getFullYear()
       : null;
 
-    // Format language for display
-    const formatLanguage = (lang: string | null | undefined) => {
-      if (!lang) return 'Not specified';
-      return lang === 'tr' ? 'Türkçe' :
-             lang === 'en' ? 'English' :
-             lang.toUpperCase();
-    };
+
     
     return (
-      <div className="container mx-auto w-full p-8">
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
-          {/* Main Content - Chapter Tree */}
-          <div className="lg:col-span-3 space-y-6">
-            <div className="flex items-center justify-between">
-              <h1 className="text-2xl font-bold tracking-tight">
-                {book.title} - Chapters
-              </h1>
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" asChild>
-                  <Link href={`/dashboard/books/${slug}/chapters/reorder`}>
-                    <ListOrdered className="h-4 w-4 mr-1" />
-                    Reorder
-                  </Link>
-                </Button>
-                <Button size="sm" asChild>
-                  <Link href={`/dashboard/books/${slug}/chapters/new`}>
-                    <Plus className="h-4 w-4 mr-1" />
-                    Add Chapter
-                  </Link>
-                </Button>
-              </div>
+      <div className="container mx-auto w-full p-6">
+        {/* Header Section */}
+        <div className="flex flex-col space-y-2 mb-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight">Chapters of {book.title}</h1>
+              <p className="text-muted-foreground">
+                You can change the order and hierarchy of chapters using drag-and-drop.
+              </p>
             </div>
-            
-            <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
-              <div className="p-4">
-                <ChapterTreeArborist 
-                  bookSlug={slug}
-                  onSelectChapter={undefined}
-                />
-              </div>
-            </div>
+            <BooksMenu slug={slug} bookId={book.id} />
+          </div>
+          <Separator className="my-4" />
+        </div>
+
+        {/* Main Content */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Left Column - Chapter Tree (2/3) */}
+          <div className="lg:col-span-2">
+            <ChapterTreeArborist 
+              bookSlug={slug}
+              onSelectChapter={undefined}
+            />
           </div>
           
-          {/* Sidebar - Book Info */}
+          {/* Right Column - Book Info (1/3) */}
           <div className="lg:col-span-1">
-            <div className="sticky top-4 space-y-6">
+            <div className="sticky top-6">
               <BookInfo 
                 book={{
                   id: book.id,
@@ -146,33 +131,8 @@ export default async function BookDetailPage({ params, searchParams }: PageProps
                   publisher: book.publisher,
                   coverImageUrl: book.coverImageUrl
                 }}
-                showEditButton
-                editHref={`/dashboard/books/${slug}/edit`}
+                showEditButton={false}
               />
-              
-              <div className="rounded-lg border bg-card p-4 space-y-4">
-                <h3 className="text-lg font-semibold">Quick Actions</h3>
-                <div className="space-y-2">
-                  <Button variant="outline" className="w-full justify-start" asChild>
-                    <Link href={`/dashboard/books/${slug}/chapters/new`}>
-                      <Plus className="h-4 w-4 mr-2" />
-                      New Chapter
-                    </Link>
-                  </Button>
-                  <Button variant="outline" className="w-full justify-start" asChild>
-                    <Link href={`/dashboard/books/${slug}/chapters/reorder`}>
-                      <ListOrdered className="h-4 w-4 mr-2" />
-                      Reorder Chapters
-                    </Link>
-                  </Button>
-                  <Button variant="outline" className="w-full justify-start" asChild>
-                    <Link href={`/dashboard/books/${slug}/edit`}>
-                      <BookOpen className="h-4 w-4 mr-2" />
-                      Edit Book Details
-                    </Link>
-                  </Button>
-                </div>
-              </div>
             </div>
           </div>
         </div>
