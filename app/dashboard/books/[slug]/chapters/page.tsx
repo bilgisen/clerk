@@ -1,10 +1,12 @@
-import { notFound, redirect } from "next/navigation";
+'use client';
+
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { useAuth } from '@clerk/nextjs';
+import { Book } from "@/types/book";
 import { BooksMenu } from "@/components/books/books-menu";
 import { Separator } from "@/components/ui/separator";
-import { getBookBySlug } from "@/actions/books/get-book-by-slug";
-import { getChaptersByBook } from "@/actions/books/get-chapters-by-book";
 import { ChapterTreeArborist } from "@/components/chapters/ChapterTreeArborist";
-import type { Book } from "@/types/book";
 import { BookInfo } from "@/components/books/book-info";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
@@ -37,63 +39,73 @@ function BookHeader({ book, slug }: { book: Book & { id: string }; slug: string 
  * Book detail page component that displays a single book and its chapters
  * @param params - The route parameters containing the book slug
  */
-export default async function BookDetailPage({ params, searchParams }: PageProps) {
+export default function BookDetailPage({ params, searchParams }: PageProps) {
   const { slug } = params;
-  
-  // Validate slug before proceeding
-  if (!slug || typeof slug !== 'string') {
-    redirect('/dashboard/books');
-    return null;
+  const router = useRouter();
+  const { getToken } = useAuth();
+  const [book, setBook] = useState<Book & { id: string } | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setIsLoading(true);
+        const token = await getToken();
+        
+        // Fetch book data
+        const bookResponse = await fetch(`/api/books/${slug}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        
+        if (!bookResponse.ok) {
+          throw new Error('Failed to fetch book');
+        }
+        
+        const bookData = await bookResponse.json();
+        setBook(bookData);
+        
+      } catch (err) {
+        console.error('Error fetching data:', err);
+        setError('Failed to load book data');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    if (slug && typeof slug === 'string') {
+      fetchData();
+    } else {
+      router.push('/dashboard/books');
+    }
+  }, [slug, getToken, router]);
+
+  if (isLoading) {
+    return (
+      <div className="container mx-auto w-full p-6">
+        <div className="flex items-center justify-center h-64">
+          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !book) {
+    return (
+      <div className="container mx-auto w-full p-6">
+        <div className="text-red-500 text-center py-8">
+          {error || 'Book not found'}
+        </div>
+      </div>
+    );
   }
   
-  // Handle potential error from searchParams
-  const error = searchParams?.error as string | undefined;
+  // Format publication year if available
+  const publishYear = book.publishYear 
+    ? new Date(book.publishYear).getFullYear()
+    : null;
 
-  try {
-    console.log(`[DEBUG] Fetching book with slug: ${slug}`);
-    // First, get the book by slug
-    console.log(`[DEBUG] Fetching book with slug: ${slug}`);
-    const book = await getBookBySlug(slug) as Book & { id: string };
-    console.log(`[DEBUG] Book fetch result:`, book ? 'Found' : 'Not found');
-    if (!book) {
-      console.error(`[ERROR] Book not found with slug: ${slug}`);
-      notFound();
-    }
-    
-    console.log(`[DEBUG] Book found - ID: ${book.id}, Title: "${book.title}"`);
-    
-    // Now fetch the chapters for this book using the slug
-    console.log(`[DEBUG] Fetching chapters for book slug: ${slug}`);
-    const bookChapters = await getChaptersByBook(slug);
-    console.log(`[DEBUG] Fetched ${bookChapters.length} chapters for book ${slug}`);
-    
-    // Log the first few chapters for debugging
-    if (bookChapters.length > 0) {
-      console.log('[DEBUG] First 3 chapters sample:', bookChapters.slice(0, 3).map(ch => ({
-        id: ch.id,
-        title: ch.title,
-        order: ch.order,
-        parentChapterId: ch.parentChapterId,
-        hasChildren: ch.children && ch.children.length > 0
-      })));
-    } else {
-      console.log('[DEBUG] No chapters found for this book');
-    }
-    
-    // Show error message if any
-    if (error) {
-      console.error('Error from search params:', error);
-      // You can show this error to the user if needed
-    }
-    
-    // Format publication year if available
-    const publishYear = book.publishYear 
-      ? new Date(book.publishYear).getFullYear()
-      : null;
-
-
-    
-    return (
+  return (
       <div className="container mx-auto w-full p-6">
         {/* Header Section */}
         <div className="flex flex-col space-y-2 mb-6">
@@ -116,19 +128,22 @@ export default async function BookDetailPage({ params, searchParams }: PageProps
             <ChapterTreeArborist 
               bookSlug={slug}
               onViewChapter={(chapter) => {
-                window.location.href = `/dashboard/books/${slug}/chapters/${chapter.id}`;
+                router.push(`/dashboard/books/${slug}/chapters/${chapter.id}`);
               }}
               onEditChapter={(chapter) => {
-                window.location.href = `/dashboard/books/${slug}/chapters/${chapter.id}/edit`;
+                router.push(`/dashboard/books/${slug}/chapters/${chapter.id}/edit`);
               }}
               onDeleteChapter={async (chapter) => {
                 if (confirm(`Are you sure you want to delete "${chapter.title}"?`)) {
                   try {
+                    const token = await getToken();
                     const response = await fetch(`/api/books/${slug}/chapters/${chapter.id}`, {
                       method: 'DELETE',
+                      headers: { Authorization: `Bearer ${token}` }
                     });
+                    
                     if (response.ok) {
-                      window.location.reload();
+                      router.refresh();
                     } else {
                       const error = await response.json();
                       alert(error.message || 'Failed to delete chapter');
@@ -160,8 +175,4 @@ export default async function BookDetailPage({ params, searchParams }: PageProps
         </div>
       </div>
     );
-  } catch (error) {
-    console.error('Error loading book:', error);
-    notFound();
-  }
 }
