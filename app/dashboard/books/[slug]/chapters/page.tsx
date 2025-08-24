@@ -5,7 +5,6 @@ import { getBookBySlug } from "@/actions/books/get-book-by-slug";
 import { getChaptersByBook } from "@/actions/books/get-chapters-by-book";
 import { ChapterTreeArborist } from "@/components/chapters/ChapterTreeArborist";
 import type { Book } from "@/types/book";
-import { BookOpen, Globe, User, BookText, Calendar, FileText, Hash, Info, Languages, ListOrdered, Tag, List, Tags, Plus } from "lucide-react";
 import { BookInfo } from "@/components/books/book-info";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
@@ -116,15 +115,10 @@ export default async function BookDetailPage({ params, searchParams }: PageProps
           <div className="lg:col-span-2">
             <ChapterTreeArborist 
               bookSlug={slug}
-              onSelectChapter={(chapter) => {
-                // Handle chapter selection if needed
-              }}
               onViewChapter={(chapter) => {
-                // Navigate to view chapter
                 window.location.href = `/dashboard/books/${slug}/chapters/${chapter.id}`;
               }}
               onEditChapter={(chapter) => {
-                // Navigate to edit chapter
                 window.location.href = `/dashboard/books/${slug}/chapters/${chapter.id}/edit`;
               }}
               onDeleteChapter={async (chapter) => {
@@ -134,7 +128,6 @@ export default async function BookDetailPage({ params, searchParams }: PageProps
                       method: 'DELETE',
                     });
                     if (response.ok) {
-                      // Refresh the page to show updated list
                       window.location.reload();
                     } else {
                       const error = await response.json();
