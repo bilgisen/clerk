@@ -206,68 +206,82 @@ export function ChapterTreeArborist({
   }, [bookSlug, getToken, refetch]);
 
   const ChapterNode = ({ node, style, dragHandle }: NodeRendererProps<any>) => {
+    // Safely access chapter data with fallbacks
+    const chapter = node.data || {};
+    const chapterId = chapter.id || '';
+    const chapterTitle = chapter.title || 'Untitled Chapter';
+    const chapterSlug = chapter.slug || chapterId;
+
     return (
       <div 
         ref={dragHandle}
         style={style} 
         className={`group flex flex-col px-2 py-2 hover:bg-primary/10 dark:hover:bg-primary/20 rounded transition-colors ${
-          node.data.id === selectedChapterId ? 'bg-primary/5 dark:bg-primary/10' : ''
+          chapterId === selectedChapterId ? 'bg-primary/5 dark:bg-primary/10' : ''
         }`}
         onClick={() => {
           if (onSelectChapter) {
-            onSelectChapter(node.data);
+            onSelectChapter(chapter);
           }
         }}
       >
         <div className="flex items-center w-full">
           <GripVertical className="w-4 h-4 mr-2 text-muted-foreground/50 group-hover:text-foreground cursor-move flex-shrink-0" />
           <div className="flex-1 min-w-0">
-            <div className="truncate">{node.data.title}</div>
-            <a 
-              href={`/dashboard/books/${bookSlug}/chapters/${node.data.id}`}
-              className="text-xs text-muted-foreground hover:underline truncate block"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {node.data.id}
-            </a>
+            <div className="truncate">{chapterTitle}</div>
+            {chapterId && (
+              <a 
+                href={`/dashboard/books/${bookSlug}/chapters/${chapterId}`}
+                className="text-xs text-muted-foreground hover:underline truncate block"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {chapterId}
+              </a>
+            )}
           </div>
           <div className="ml-2 flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              className="h-6 w-6 text-muted-foreground hover:text-foreground"
-              onClick={(e) => {
-                e.stopPropagation();
-                if (onViewChapter) onViewChapter(node.data);
-              }}
-              title="View Chapter"
-            >
-              <Eye className="h-3.5 w-3.5" />
-            </Button>
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              className="h-6 w-6 text-muted-foreground hover:text-foreground"
-              onClick={(e) => {
-                e.stopPropagation();
-                if (onEditChapter) onEditChapter(node.data);
-              }}
-              title="Edit Chapter"
-            >
-              <Pencil className="h-3.5 w-3.5" />
-            </Button>
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              className="h-6 w-6 text-destructive hover:text-destructive"
-              onClick={(e) => {
-                e.stopPropagation();
-                if (onDeleteChapter) onDeleteChapter(node.data);
-              }}
-              title="Delete Chapter"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </Button>
+            {onViewChapter && (
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onViewChapter(chapter);
+                }}
+                title="View Chapter"
+              >
+                <Eye className="h-3.5 w-3.5" />
+              </Button>
+            )}
+            {onEditChapter && (
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onEditChapter(chapter);
+                }}
+                title="Edit Chapter"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </Button>
+            )}
+            {onDeleteChapter && (
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="h-6 w-6 text-destructive hover:text-destructive"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDeleteChapter(chapter);
+                }}
+                title="Delete Chapter"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            )}
           </div>
         </div>
       </div>
