@@ -256,9 +256,14 @@ export default clerkMiddleware(async (auth, req) => {
  */
 export const config = {
   matcher: [
-    // Tüm app route'ları ama _next, statikler ve **/api/ci/** HARİÇ
-    "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)|api/ci(?:/.*)?).*)",
-    // API/TRPC için de **/api/ci/** hariç
-    "/(api|trpc)(?!/ci)(.*)",
+    // Match all routes except:
+    // - _next/
+    // - Static files
+    // - /api/ci/...
+    '/((?!_next|api/ci|static|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|css|js|woff2?|ttf|eot|json|xml|txt|csv|docx?|xlsx?|zip|webmanifest)).*)',
+    // Match all /api/... except /api/ci/...
+    '/api/((?!ci/).*)',
+    // Match all /trpc/...
+    '/trpc/:path*',
   ],
 };
