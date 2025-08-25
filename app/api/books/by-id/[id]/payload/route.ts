@@ -336,11 +336,47 @@ export async function GET(
     // Return the payload as JSON
     return NextResponse.json(payload);
 
-  } catch (error) {
+  } catch (err: unknown) {
+    const error = err as Error & { status?: number; code?: string };
     console.error('Error generating payload by ID:', error);
-    return NextResponse.json(
-      { error: 'Failed to generate payload' },
-      { status: 500 }
-    );
+    
+    // Enhanced error details for debugging
+    console.error('Error details:', {
+      bookId: params.id,
+      timestamp: new Date().toISOString(),
+      error: error.message,
+      stack: error.stack,
+      code: error.code,
+      status: error.status
+    });
+    
+    // Provide more detailed error messages for common OIDC issues
+    let errorMessage = 'Failed to generate EPUB payload';
+    let statusCode = 500;
+    
+    if (error.message?.includes('no applicable key found in the JSON Web Key Set')) {
+      errorMessage = 'Authentication failed: Invalid or expired token';
+      statusCode = 401;
+    } else if (error.message?.includes('JWTExpired')) {
+      errorMessage = 'Authentication failed: Token has expired';
+      statusCode = 401;
+    } else if (error.message?.includes('JWSInvalid')) {
+      errorMessage = 'Authentication failed: Invalid token signature';
+      statusCode = 401;
+    } else if (error.message?.includes('JWTClaimValidationFailed')) {
+      errorMessage = 'Authentication failed: Invalid token claims';
+      statusCode = 401;
+    }
+    
+    const response: {
+      error: string;
+      details?: string;
+    } = { error: errorMessage };
+
+    if (process.env.NODE_ENV === 'development' && error instanceof Error) {
+      response.details = error.message;
+    }
+
+    return NextResponse.json(response, { status: statusCode });
   }
 }

@@ -40,15 +40,29 @@ function getEnv(name: string, fallback?: string): string | undefined {
 
 function getJwks(): ReturnType<typeof createRemoteJWKSet> {
   if (!jwks) {
-    const url = new URL(getEnv('GHA_OIDC_JWKS_URL', DEFAULT_JWKS_URL)!)
+    // Always use the production GitHub OIDC JWKS endpoint
+    const url = new URL('https://token.actions.githubusercontent.com/.well-known/jwks');
+    
+    console.log('Initializing JWKS client with URL:', url.toString());
+    
     jwks = createRemoteJWKSet(url, {
-      cache: true,
       cooldownDuration: 60_000, // 60s
-      fetcher: undefined,
-      timeoutDuration: 5_000,
-    })
+      timeoutDuration: 10_000, // Increased timeout to 10s
+    });
+    
+    // Test the JWKS fetch immediately with proper typing
+    const testKey = jwks({ alg: 'RS256' }, {} as any);
+    if (testKey instanceof Promise) {
+      testKey
+        .then(() => {
+          console.log('Successfully fetched JWKS keys');
+        })
+        .catch((err: Error) => {
+          console.error('Failed to fetch JWKS keys:', err);
+        });
+    }
   }
-  return jwks
+  return jwks;
 }
 
 export async function verifyGithubOidc(token: string, opts?: OidcVerificationOptions): Promise<GithubOidcClaims> {
@@ -56,8 +70,10 @@ export async function verifyGithubOidc(token: string, opts?: OidcVerificationOpt
     throw new OidcAuthError(401, 'missing_token', 'Authorization token is required')
   }
 
-  const issuer = getEnv('GHA_OIDC_ISSUER', DEFAULT_ISSUER)!
-  const audience = opts?.audience ?? getEnv('GHA_OIDC_AUDIENCE')
+  // Always use the production GitHub OIDC issuer for token verification
+  const issuer = 'https://token.actions.githubusercontent.com';
+  const audience = opts?.audience ?? getEnv('GHA_OIDC_AUDIENCE');
+  
   if (!audience) {
     throw new OidcAuthError(500, 'server_config', 'GHA_OIDC_AUDIENCE is not configured')
   }
@@ -94,11 +110,27 @@ export async function verifyGithubOidc(token: string, opts?: OidcVerificationOpt
 
     return claims
   } catch (err: any) {
-    if (err instanceof OidcAuthError) throw err
+    console.error('OIDC verification failed:', {
+      name: err?.name,
+      message: err?.message,
+      code: err?.code,
+      stack: err?.stack,
+    });
+    
+    if (err instanceof OidcAuthError) throw err;
+    
     // Map jose errors to HTTP-friendly ones
-    const msg = typeof err?.message === 'string' ? err.message : 'verification failed'
-    // Differentiate 401 vs 403 where possible by message
-    const status = /audience|issuer|signature|expired|not active/i.test(msg) ? 401 : 403
-    throw new OidcAuthError(status, 'invalid_token', msg)
+    const msg = typeof err?.message === 'string' ? err.message : 'verification failed';
+    
+    // More specific error handling
+    let status = 403;
+    if (msg.includes('no applicable key found in the JSON Web Key Set')) {
+      status = 401;
+      console.error('JWKS key not found - this usually means the token was issued by a different identity provider');
+    } else if (/audience|issuer|signature|expired|not active/i.test(msg)) {
+      status = 401;
+    }
+    
+    throw new OidcAuthError(status, 'invalid_token', msg);
   }
 }
