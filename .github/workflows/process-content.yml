@@ -7,8 +7,12 @@ on:
         description: 'Content ID for the book'
         required: true
         type: string
+      slug:
+        description: 'Slug for the book'
+        required: false
+        type: string
       metadata:
-        description: 'Additional metadata'
+        description: 'Additional metadata (optional)'
         required: false
         type: string
 
@@ -22,7 +26,7 @@ jobs:
     name: Build EPUB
     runs-on: ubuntu-latest
     container:
-      image: pandoc/core:3.2  # Pandoc hazır geliyor, LaTeX yok ama EPUB için yeterli
+      image: pandoc/core:3.2
 
     permissions:
       id-token: write
@@ -49,14 +53,13 @@ jobs:
         env:
           CONTENT_ID: ${{ github.event.inputs.content_id }}
           JWT_TOKEN: ${{ steps.generate_token.outputs.token }}
-          JWT_AUDIENCE: ${{ steps.generate_token.outputs.audience }}
           API_BASE_URL: ${{ env.API_BASE_URL }}
         run: |
           set -e
-          echo "🔐 Using JWT with audience: $JWT_AUDIENCE"
+          echo "🔐 Using JWT with audience: ${{ steps.generate_token.outputs.audience }}"
           export JWT_HEADER="Bearer $JWT_TOKEN"
-          export JWT_AUDIENCE
-          export API_BASE_URL
+          export CONTENT_ID
+          mkdir -p ./book-content
           chmod +x ./scripts/fetch-book.sh
           ./scripts/fetch-book.sh
           mkdir -p ./output
@@ -80,19 +83,17 @@ jobs:
             --metadata=identifier:"$CONTENT_ID"
           )
 
-          # Cover image
           if [ -f "./book-content/cover.jpg" ]; then
             PANDOC_CMD+=(--epub-cover-image=./book-content/cover.jpg)
           fi
-          # CSS
           if [ -f "./book-content/styles/epub.css" ]; then
             PANDOC_CMD+=(--css=./book-content/styles/epub.css)
           fi
-          # Chapters
+
           while IFS= read -r -d $'\0' file; do
             PANDOC_CMD+=("$file")
           done < <(find ./book-content -type f -name 'chapter-*.xhtml' -print0 | sort -z -V)
-          # Imprint
+
           if [ -f "./book-content/imprint.xhtml" ]; then
             PANDOC_CMD+=("./book-content/imprint.xhtml")
           fi
@@ -118,4 +119,3 @@ jobs:
 
           echo "🚀 Uploading to R2 as $KEY"
           npx --yes @aws-sdk/client-s3 node ./scripts/upload-epub-to-r2.mjs --file "$FILE_PATH" --key "$KEY"
-
