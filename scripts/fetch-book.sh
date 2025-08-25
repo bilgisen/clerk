@@ -8,7 +8,7 @@ readonly YELLOW='\033[1;33m'
 readonly NC='\033[0m' # No Color
 
 # Set default values
-BASE_URL=${BASE_URL:-'https://matbu.vercel.app'}
+BASE_URL=${BASE_URL:-'https://editor.bookshall.com'}
 
 # Logging functions
 log_info() {
