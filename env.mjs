@@ -16,6 +16,7 @@ export const env = createEnv({
     
     // Authentication
     CLERK_SECRET_KEY: z.string().min(1),
+    GHA_OIDC_AUDIENCE: z.string().url().default('https://editor.bookshall.com/api/ci'),
     
     // Polar.sh
     POLAR_ACCESS_TOKEN: z.string().min(1).optional(),
@@ -54,6 +55,7 @@ export const env = createEnv({
     // Server
     DATABASE_URL: process.env.DATABASE_URL,
     CLERK_SECRET_KEY: process.env.CLERK_SECRET_KEY,
+    GHA_OIDC_AUDIENCE: process.env.GHA_OIDC_AUDIENCE,
     
     // R2 Storage
     R2_UPLOAD_IMAGE_ACCESS_KEY_ID: process.env.R2_UPLOAD_IMAGE_ACCESS_KEY_ID,
