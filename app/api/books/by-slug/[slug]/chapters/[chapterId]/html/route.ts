@@ -1,11 +1,10 @@
 import { NextResponse } from 'next/server';
 import { headers } from 'next/headers';
 import { db } from '@/db/drizzle';
-import { books, chapters, users } from '@/db/schema';
+import { books, chapters } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 import { generateChapterHTML, generateCompleteDocumentHTML } from '@/lib/generateChapterHTML';
-import { auth } from '@clerk/nextjs/server';
-import { verifyGithubOidc, OidcAuthError } from '@/lib/auth/verifyGithubOidc';
+import { verifyGithubOidc } from '@/lib/auth/verifyGithubOidc';
 
 export const dynamic = 'force-dynamic';
 export const dynamicParams = true;
@@ -18,145 +17,66 @@ interface BookWithChapters extends Book {
   chapters?: Chapter[];
 }
 
+// Verify GitHub OIDC token and return claims if valid
+async function verifyRequest(headers: Headers) {
+  const authHeader = headers.get('authorization') || headers.get('Authorization') || '';
+  
+  if (!authHeader?.startsWith('Bearer ')) {
+    throw new Error('Missing or invalid Authorization header');
+  }
+
+  const token = authHeader.split(' ')[1];
+  
+  if (!token) {
+    throw new Error('Missing token in Authorization header');
+  }
+  
+  try {
+    const claims = await verifyGithubOidc(token, {
+      audience: process.env.GHA_OIDC_AUDIENCE,
+      allowedRepo: process.env.GHA_ALLOWED_REPO,
+      allowedRef: process.env.GHA_ALLOWED_REF,
+    });
+    
+    return claims;
+  } catch (error) {
+    console.error('GitHub OIDC verification failed:', error);
+    throw new Error('Invalid or expired token');
+  }
+}
+
 export async function GET(
   request: Request,
   { params }: { params: { slug: string; chapterId: string } }
 ) {
   try {
-    // Properly handle params in Next.js 13+
-    const [slug, chapterId] = await Promise.all([
-      Promise.resolve(params.slug),
-      Promise.resolve(params.chapterId)
-    ]);
+    const { slug, chapterId } = params;
+    
+    // Verify GitHub OIDC token
+    const headersList = await headers();
+    const claims = await verifyRequest(new Headers(headersList));
+    
+    console.log('GitHub OIDC token verified successfully for chapter HTML:', {
+      repository: claims.repository,
+      ref: claims.ref,
+      workflow: claims.workflow,
+      actor: claims.actor,
+      runId: claims.run_id
+    });
     
     const requestStart = Date.now();
-    
     console.log(`[${new Date().toISOString()}] Request for book: ${slug}, chapter: ${chapterId}`);
-    
-    // Determine auth method: prefer GitHub OIDC (Authorization or ?token) for CI; else Clerk for user
-    const hdrs = await headers();
-    const url = new URL(request.url);
-    const headerAuth = hdrs.get('authorization') || hdrs.get('Authorization') || '';
-    const queryToken = url.searchParams.get('token') || '';
-    const bearer = headerAuth || (queryToken ? `Bearer ${queryToken}` : '');
-    let userId: string | null = null;
-    let isCi = false;
 
-    if (bearer.startsWith('Bearer ')) {
-      const raw = bearer.substring('Bearer '.length).trim();
-      try {
-        const claims = await verifyGithubOidc(raw);
-        if (claims) {
-          isCi = true;
-          console.log('Authenticated via GitHub OIDC for chapter HTML:', {
-            repository: claims.repository,
-            ref: claims.ref,
-            workflow: claims.workflow,
-            audience: claims.aud,
-            issuer: claims.iss,
-            subject: claims.sub
-          });
-          
-          // Verify the token audience matches our expected API audience
-          const expectedAudience = process.env.GHA_OIDC_AUDIENCE;
-          if (claims.aud !== expectedAudience) {
-            console.error('Invalid audience in OIDC token:', {
-              received: claims.aud,
-              expected: expectedAudience,
-              issuer: claims.iss,
-              repository: claims.repository
-            });
-            return new NextResponse('Invalid token audience', { status: 403 });
-          }
-        }
-      } catch (e) {
-        console.error('OIDC verification error:', e);
-        if (e instanceof OidcAuthError) {
-          console.warn('OIDC verification failed for chapter HTML:', e.code, e.message);
-          return new NextResponse(`OIDC verification failed: ${e.message}`, { 
-            status: 401,
-            headers: { 'Content-Type': 'application/json' }
-          });
-        } else {
-          console.warn('Unexpected OIDC verification error for chapter HTML:', e);
-          return new NextResponse('Internal server error during authentication', { status: 500 });
-        }
-      }
-    }
-
-    // Backward-compat: allow middleware to signal CI via header if present
-    if (!isCi) {
-      const authMethod = hdrs.get('x-auth-method');
-      isCi = authMethod === 'oidc';
-    }
-
-    if (!isCi) {
-      // User flow: require Clerk auth
-      const session = await auth();
-      userId = session?.userId || null;
-      if (!userId) {
-        console.warn('Unauthenticated request');
-        return new NextResponse(
-          JSON.stringify({ error: 'Unauthorized - Please sign in' }), 
-          { status: 401, headers: { 'Content-Type': 'application/json' } }
-        );
-      }
-    }
-
-    // Get the book and verify ownership in a single query
+    // Get the book
     const [book] = await db
-      .select({
-        // Include all book fields we need
-        id: books.id,
-        userId: books.userId,
-        title: books.title,
-        slug: books.slug,
-        description: books.description,
-        language: books.language,
-        coverImageUrl: books.coverImageUrl,
-        subtitle: books.subtitle,
-        author: books.author,
-        isPublished: books.isPublished,
-        isFeatured: books.isFeatured,
-        genre: books.genre,
-        tags: books.tags,
-        publisher: books.publisher,
-        publisherWebsite: books.publisherWebsite,
-        publishYear: books.publishYear,
-        isbn: books.isbn,
-        contributor: books.contributor,
-        translator: books.translator,
-        series: books.series,
-        seriesIndex: books.seriesIndex,
-        viewCount: books.viewCount,
-        epubUrl: books.epubUrl,
-        createdAt: books.createdAt,
-        updatedAt: books.updatedAt,
-        publishedAt: books.publishedAt,
-        // Join with users table to verify ownership
-        ownerClerkId: users.clerkId,
-      })
+      .select()
       .from(books)
-      .innerJoin(users, eq(books.userId, users.id))
-      .where(eq(books.slug, slug));
+      .where(eq(books.slug, slug))
+      .limit(1);
 
     if (!book) {
-      console.error(`Book not found or access denied: ${slug}`);
-      return new NextResponse('Book not found or access denied', { status: 404 });
-    }
-
-    // For CI (OIDC) allow access without ownership; for user flows enforce ownership
-    if (!isCi) {
-      // Verify the authenticated user owns this book
-      if (book.ownerClerkId !== userId) {
-        console.error('Access denied: User does not own this book', {
-          bookId: book.id,
-          bookTitle: book.title,
-          ownerClerkId: book.ownerClerkId,
-          requestingUserId: userId,
-        });
-        return new NextResponse('Access denied', { status: 403 });
-      }
+      console.error(`Book not found: ${slug}`);
+      return new NextResponse('Book not found', { status: 404 });
     }
 
     // Get all chapters for the book in a single query

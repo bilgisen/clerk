@@ -3,7 +3,6 @@ import { headers } from 'next/headers';
 import { db } from '@/db/drizzle';
 import { books, chapters } from '@/db/schema';
 import { eq } from 'drizzle-orm';
-import { currentUser, auth } from '@clerk/nextjs/server';
 import { verifyGithubOidc } from '@/lib/auth/verifyGithubOidc';
 
 export const dynamic = 'force-dynamic';
@@ -79,42 +78,31 @@ function flattenChapterTree(chapters: ChapterWithChildren[], bookSlug: string, b
   });
 }
 
-// Check if request is authenticated via GitHub OIDC
-async function isGithubOidcAuthenticated(headers: Headers) {
-  try {
-    const authHeader = headers.get('authorization');
-    
-    if (!authHeader?.startsWith('Bearer ')) {
-      console.log('No Bearer token found in Authorization header');
-      return false;
-    }
+// Verify GitHub OIDC token and return claims if valid
+async function verifyRequest(headers: Headers) {
+  const authHeader = headers.get('authorization');
+  
+  if (!authHeader?.startsWith('Bearer ')) {
+    throw new Error('Missing or invalid Authorization header');
+  }
 
-    const token = authHeader.split(' ')[1];
-    
-    if (!token) {
-      console.log('No token found after Bearer');
-      return false;
-    }
-    
-    console.log('Verifying GitHub OIDC token...');
+  const token = authHeader.split(' ')[1];
+  
+  if (!token) {
+    throw new Error('Missing token in Authorization header');
+  }
+  
+  try {
     const claims = await verifyGithubOidc(token, {
       audience: process.env.GHA_OIDC_AUDIENCE,
       allowedRepo: process.env.GHA_ALLOWED_REPO,
       allowedRef: process.env.GHA_ALLOWED_REF,
     });
     
-    console.log('GitHub OIDC token verified successfully:', {
-      repository: claims.repository,
-      ref: claims.ref,
-      workflow: claims.workflow,
-      actor: claims.actor,
-      runId: claims.run_id
-    });
-    
-    return true;
+    return claims;
   } catch (error) {
     console.error('GitHub OIDC verification failed:', error);
-    return false;
+    throw new Error('Invalid or expired token');
   }
 }
 
@@ -126,30 +114,18 @@ export async function GET(
     // Get the book ID from params
     const bookId = params.id;
     
-    // Check GitHub OIDC authentication first
+    // Verify GitHub OIDC token
     const headersList = await headers();
     const headersObj = Object.fromEntries(Array.from(headersList.entries()));
-    const isGithubOidc = await isGithubOidcAuthenticated(new Headers(headersObj));
+    const claims = await verifyRequest(new Headers(headersObj));
     
-    // Set user context based on authentication method
-    let userId: string;
-    let isServiceAccount = false;
-    
-    if (isGithubOidc) {
-      // GitHub OIDC authenticated
-      isServiceAccount = true;
-      userId = 'github-oidc';
-    } else {
-      // Fall back to Clerk authentication
-      const user = await currentUser();
-      if (!user) {
-        return NextResponse.json(
-          { error: 'unauthorized', message: 'Authentication required' },
-          { status: 401 }
-        );
-      }
-      userId = user.id;
-    }
+    console.log('GitHub OIDC token verified successfully:', {
+      repository: claims.repository,
+      ref: claims.ref,
+      workflow: claims.workflow,
+      actor: claims.actor,
+      runId: claims.run_id
+    });
 
     // Get the book by ID
     const bookResult = await db.query.books.findFirst({
