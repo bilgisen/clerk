@@ -1,18 +1,29 @@
 import { NextResponse } from 'next/server';
 import { headers } from 'next/headers';
 import { db } from '@/db/drizzle';
-import { books } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import { books, users } from '@/db/schema';
+import { eq, and } from 'drizzle-orm';
 import { generateImprintHTML } from '@/lib/generateChapterHTML';
 import { verifyGithubOidc } from '@/lib/auth/verifyGithubOidc';
+import { auth } from '@clerk/nextjs';
 
 export const dynamic = 'force-dynamic';
 export const dynamicParams = true;
 
 type Book = typeof books.$inferSelect;
 
-// Verify GitHub OIDC token and return claims if valid
-async function verifyRequest(headers: Headers) {
+type AuthResult = {
+  type: 'github' | 'clerk';
+  userId?: string;
+  repository?: string;
+  ref?: string;
+  workflow?: string;
+  actor?: string;
+  run_id?: string;
+};
+
+// Verify authentication (either Clerk or GitHub OIDC)
+async function verifyRequest(headers: Headers): Promise<AuthResult> {
   const authHeader = headers.get('authorization') || headers.get('Authorization') || '';
   
   if (!authHeader?.startsWith('Bearer ')) {
@@ -26,16 +37,45 @@ async function verifyRequest(headers: Headers) {
   }
   
   try {
-    const claims = await verifyGithubOidc(token, {
-      audience: process.env.GHA_OIDC_AUDIENCE,
-      allowedRepo: process.env.GHA_ALLOWED_REPO,
-      allowedRef: process.env.GHA_ALLOWED_REF,
-    });
-    
-    return claims;
+    // First try to verify as GitHub OIDC token
+    try {
+      const claims = await verifyGithubOidc(token, {
+        audience: process.env.GHA_OIDC_AUDIENCE,
+        allowedRepo: process.env.GHA_ALLOWED_REPO,
+        allowedRef: process.env.GHA_ALLOWED_REF,
+      });
+      
+      console.log('Authenticated via GitHub OIDC');
+      return { 
+        type: 'github', 
+        repository: claims.repository,
+        ref: claims.ref,
+        workflow: claims.workflow,
+        actor: claims.actor,
+        run_id: claims.run_id
+      };
+    } catch (githubError) {
+      console.log('Not a GitHub OIDC token, trying Clerk session...');
+      // If not a GitHub OIDC token, it might be a Clerk session token
+      const { userId } = auth();
+      if (!userId) {
+        throw new Error('No valid authentication found');
+      }
+      console.log('Authenticated via Clerk');
+      return { 
+        type: 'clerk', 
+        userId,
+        // Add empty GitHub specific fields to satisfy TypeScript
+        repository: '',
+        ref: '',
+        workflow: '',
+        actor: '',
+        run_id: ''
+      };
+    }
   } catch (error) {
-    console.error('GitHub OIDC verification failed:', error);
-    throw new Error('Invalid or expired token');
+    console.error('Authentication failed:', error);
+    throw new Error('Authentication failed: ' + (error instanceof Error ? error.message : 'Unknown error'));
   }
 }
 
@@ -60,17 +100,29 @@ export async function GET(
       runId: claims.run_id
     });
 
-    // Get the book with proper type safety
-    const [book] = await db
-      .select()
+    // Get the book with proper type safety and access control
+    let bookQuery = db.select()
       .from(books)
-      .where(eq(books.slug, slug))
-      .limit(1);
+      .where(eq(books.slug, slug));
+    
+    // For Clerk auth, verify the user owns the book
+    if (claims.type === 'clerk' && claims.userId) {
+      bookQuery = db.select()
+        .from(books)
+        .innerJoin(users, eq(books.userId, users.id))
+        .where(and(
+          eq(users.clerkId, claims.userId),
+          eq(books.slug, slug)
+        ));
+    }
+    
+    const bookResult = await bookQuery.limit(1);
+    const book = bookResult[0]?.books;
 
     if (!book) {
-      console.error(`Book not found with slug: ${slug}`);
+      console.error(`Book not found with slug: ${slug} or access denied`);
       return new NextResponse(
-        JSON.stringify({ error: 'Book not found' }), 
+        JSON.stringify({ error: 'Book not found or access denied' }), 
         { status: 404, headers: { 'Content-Type': 'application/json' } }
       );
     }
