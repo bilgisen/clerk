@@ -119,7 +119,7 @@ jobs:
       - name: Get GitHub OIDC token
         id: oidc
         env:
-          AUDIENCE: ${{ env.GITHUB_OIDC_AUDIENCE || 'https://api.clerko.com/ci' }}
+          AUDIENCE: ${{ env.GITHUB_OIDC_AUDIENCE || 'https://editor.bookshall.com/api/ci' }}
         run: |
           set -e
           echo "🔑 Requesting GitHub OIDC token (audience=$AUDIENCE)"
