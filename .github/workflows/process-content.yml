@@ -1,4 +1,4 @@
-name: Build E-Book
+name: Build EPUB
 
 on:
   workflow_dispatch:
@@ -11,40 +11,19 @@ on:
         description: 'URL-safe slug to use in the EPUB filename (optional)'
         required: false
         type: string
-      format:
-        description: 'Output format (epub, mobi, pdf, html, docx)'
-        required: true
-        default: 'epub'
-        type: string
-      metadata:
-        description: 'Additional metadata as JSON string'
-        required: false
-        default: '{}'
-        type: string
 
 env:
-  # Environment configuration
-  NODE_ENV: development  # Development mode for Clerk integration
-  
-  # OIDC Audience used when fetching the GitHub OIDC token
-  # Must match the GHA_OIDC_AUDIENCE environment variable in your API
-  GHA_OIDC_AUDIENCE: 'https://editor.bookshall.com/api/ci'
-  
-  # API Configuration
+  NODE_ENV: production
   API_BASE_URL: 'https://editor.bookshall.com'
-  
-  # Repository information
-  GITHUB_REPO_OWNER: 'bilgisen'
-  GITHUB_REPO_NAME: 'clerk'
-  
-  # Timeouts in seconds
-  DOWNLOAD_TIMEOUT: 300
-  BUILD_TIMEOUT: 600
+  GHA_OIDC_AUDIENCE: 'https://editor.bookshall.com/api/ci'
 
 jobs:
   build-epub:
     name: Build EPUB
     runs-on: ubuntu-latest
+    container:
+      image: pandoc/core:3.2  # Pandoc hazır geliyor, LaTeX yok ama EPUB için yeterli
+
     permissions:
       id-token: write
       contents: read
@@ -53,386 +32,84 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20.x'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: |
-          # Ensure we're using the correct Node.js version
-          node --version
-          npm --version
-          
-          # Install dependencies
-          npm install --legacy-peer-deps
-      - name: Install system tools
-        run: |
-          echo "🔄 Updating package lists..."
-          sudo apt-get update -qq
-          
-          echo "📦 Installing required tools..."
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            coreutils \
-            pandoc \
-            texlive-xetex \
-            texlive-fonts-recommended \
-            texlive-latex-recommended \
-            jq \
-            wget \
-            parallel \
-            curl \
-            ca-certificates \
-            gnupg \
-            software-properties-common
-            
-          # Verify coreutils is installed and base64 is available
-          if ! command -v base64 &> /dev/null; then
-            echo "::warning::base64 command not found in PATH, checking /usr/bin/"
-            if [ -x "/usr/bin/base64" ]; then
-              echo "Found base64 in /usr/bin/, adding to PATH"
-              echo "/usr/bin" >> $GITHUB_PATH
-              export PATH="/usr/bin:$PATH"
-            else
-              echo "::error::base64 command not found after coreutils installation"
-              exit 1
-            fi
-          fi
-          
-          # Verify base64 works
-          if ! echo "test" | base64 > /dev/null 2>&1; then
-            echo "::error::base64 command is not working as expected"
-            exit 1
-          fi
-          
-          # Clean up to reduce image size
-          sudo apt-get clean
-          sudo rm -rf /var/lib/apt/lists/*
-      - name: Set up security files
-        run: |
-          echo "🔐 Setting up security files..."
-          # Create .env file for the application
-          echo "NEXT_PUBLIC_APP_URL=https://editor.bookshall.com" > .env
-          echo "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY" >> .env
-          
-          # Set secure permissions
-          chmod -R 700 .
-      
       - name: Generate OIDC Token
         id: generate_token
         run: |
           echo "🔑 Requesting OIDC token with audience: $GHA_OIDC_AUDIENCE"
           OIDC_TOKEN=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
             "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=$GHA_OIDC_AUDIENCE" | jq -r '.value')
-          
           if [ -z "$OIDC_TOKEN" ] || [ "$OIDC_TOKEN" = "null" ]; then
             echo "::error::Failed to obtain OIDC token"
             exit 1
           fi
-          
-          # Set the token as an output
           echo "token=$OIDC_TOKEN" >> $GITHUB_OUTPUT
-          echo "✅ OIDC token acquired (length: ${#OIDC_TOKEN} chars)"
-      
+
       - name: Fetch Book Content
-        id: fetch_book
         env:
           CONTENT_ID: ${{ github.event.inputs.content_id }}
-          GHA_OIDC_AUDIENCE: ${{ env.GHA_OIDC_AUDIENCE }}
-          API_BASE_URL: ${{ env.API_BASE_URL }}
           JWT_TOKEN: ${{ steps.generate_token.outputs.token }}
         run: |
           set -e
-          
-          # Use the JWT token from the previous step
-          if [ -z "$JWT_TOKEN" ]; then
-            echo "::error::JWT_TOKEN is not set"
-            exit 1
-          fi
-          
-          echo "✅ Using JWT token (length: ${#JWT_TOKEN} chars)"
-          
-          # Set environment variables for the fetch-book.sh script
           export JWT_HEADER="Bearer $JWT_TOKEN"
-          export BASE_URL="$API_BASE_URL"
-          
-          # Debug information
-          echo "🔧 Environment variables:"
-          echo "- BASE_URL: $BASE_URL"
-          echo "- CONTENT_ID: $CONTENT_ID"
-          echo "- JWT_HEADER: ***"  # Don't log the actual token
-          
-          # Make the script executable and run it
           chmod +x ./scripts/fetch-book.sh
-          if ! ./scripts/fetch-book.sh; then
-            echo "::error::Failed to fetch book content"
-            
-            # Dump response headers if they exist
-            if [ -f "./headers.txt" ]; then
-              echo "=== Response Headers ==="
-              cat ./headers.txt
-            fi
-            
-            exit 1
-          fi
-          
-          echo "✅ Successfully fetched book content"
-          
-          # Create output directory for any subsequent steps
-          mkdir -p ./book-content
-          
-          # Extract metadata from the downloaded content
-          if [ -f "./book-content/payload.json" ]; then
-            echo "📋 Extracting metadata from payload..."
-            jq '{ 
-              title: .book.title, 
-              author: .book.author, 
-              language: .book.language,
-              generateToc: (.options.generate_toc // true),
-              tocDepth: (.options.toc_depth // 2),
-              includeImprint: (.options.include_imprint // true)
-            }' ./book-content/payload.json > ./book-metadata.json
-            
-            # Set output variables (GITHUB_OUTPUT)
-            {
-              printf "title=%s\n" "$(jq -r '.title // "Untitled"' ./book-metadata.json)";
-              printf "author=%s\n" "$(jq -r '.author // "Unknown"' ./book-metadata.json)";
-              printf "language=%s\n" "$(jq -r '.language // "tr"' ./book-metadata.json)";
-              printf "generate_toc=%s\n" "$(jq -r '.generateToc // true' ./book-metadata.json)";
-              printf "toc_depth=%s\n" "$(jq -r '.tocDepth // 2' ./book-metadata.json)";
-            } >> "$GITHUB_OUTPUT"
-          else
-            echo "::warning::⚠️ No payload.json found, using default metadata"
-            {
-              echo "title=Untitled";
-              echo "author=Unknown";
-              echo "language=tr";
-              echo "generate_toc=true";
-              echo "toc_depth=2";
-            } >> "$GITHUB_OUTPUT"
-          fi
-      
-      - name: Prepare Directories
-        run: |
-          echo "📂 Preparing directories..."
+          ./scripts/fetch-book.sh
           mkdir -p ./output
-          mkdir -p ./book-content
-          echo "✅ Directories created successfully"
-          echo "Current directory structure:"
-          ls -la ./
-          
-      - name: Generate E-Book
-        id: generate-ebook
-        timeout-minutes: 30
-        env:
-          BUILD_TIMEOUT: ${{ env.BUILD_TIMEOUT }}
+
+      - name: Generate EPUB
         run: |
-          set -e
-          echo "📖 Starting e-book generation..."
-          
-          # Get metadata from previous step
-          TITLE="${{ steps.fetch-book.outputs.title }}"
-          AUTHOR="${{ steps.fetch-book.outputs.author }}"
-          LANGUAGE="${{ steps.fetch-book.outputs.language }}"
-          GENERATE_TOC="${{ steps.fetch-book.outputs.generate_toc }}"
-          TOC_DEPTH="${{ steps.fetch-book.outputs.toc_depth }}"
           CONTENT_ID="${{ github.event.inputs.content_id }}"
-          
-          echo "📚 Book: $TITLE by $AUTHOR"
-          echo "🌐 Language: $LANGUAGE"
-          echo "📑 TOC: $GENERATE_TOC (Depth: $TOC_DEPTH)"
-          
-          # Verify output directory exists
-          if [ ! -d "./output" ]; then
-            echo "::error::❌ Output directory does not exist"
-            exit 1
-          fi
-          
-          # Build Pandoc command
+          TITLE=$(jq -r '.book.title // "Untitled"' ./book-content/payload.json)
+          AUTHOR=$(jq -r '.book.author // "Unknown"' ./book-content/payload.json)
+          LANGUAGE=$(jq -r '.book.language // "tr"' ./book-content/payload.json)
+
           PANDOC_CMD=(
-            "pandoc"
-            "--from=html"
-            "--to=epub3"
-            "--output=./output/${CONTENT_ID}.epub"
-            "--epub-chapter-level=1"
-            "--metadata=title:${TITLE}"
-            "--metadata=author:${AUTHOR}"
-            "--metadata=language:${LANGUAGE}"
-            "--metadata=identifier:${CONTENT_ID}"
+            pandoc
+            --from=html
+            --to=epub3
+            --output=./output/${CONTENT_ID}.epub
+            --epub-chapter-level=1
+            --metadata=title:"$TITLE"
+            --metadata=author:"$AUTHOR"
+            --metadata=language:"$LANGUAGE"
+            --metadata=identifier:"$CONTENT_ID"
           )
-          
-          # Add TOC if enabled
-          if [ "$GENERATE_TOC" = "true" ]; then
-            PANDOC_CMD+=("--toc" "--toc-depth=${TOC_DEPTH}")
-          fi
-          
-          # Add cover image if exists
+
+          # Cover image
           if [ -f "./book-content/cover.jpg" ]; then
-            PANDOC_CMD+=("--epub-cover-image=./book-content/cover.jpg")
+            PANDOC_CMD+=(--epub-cover-image=./book-content/cover.jpg)
           fi
-          
-          # Add stylesheet if exists
+          # CSS
           if [ -f "./book-content/styles/epub.css" ]; then
-            PANDOC_CMD+=("--css=./book-content/styles/epub.css")
+            PANDOC_CMD+=(--css=./book-content/styles/epub.css)
           fi
-          
-          # Add all chapter files in order
+          # Chapters
           while IFS= read -r -d $'\0' file; do
             PANDOC_CMD+=("$file")
           done < <(find ./book-content -type f -name 'chapter-*.xhtml' -print0 | sort -z -V)
-          
-          # Add imprint if exists
+          # Imprint
           if [ -f "./book-content/imprint.xhtml" ]; then
             PANDOC_CMD+=("./book-content/imprint.xhtml")
           fi
-          
-          echo "🔄 Running Pandoc with ${#PANDOC_CMD[@]} arguments..."
-          
-          # Execute Pandoc with timeout
-          if ! timeout $BUILD_TIMEOUT "${PANDOC_CMD[@]}"; then
-            echo "::error::❌ E-book generation timed out after $BUILD_TIMEOUT seconds"
-            exit 1
-          fi
-          
-          # Verify output
-          if [ ! -f "./output/${CONTENT_ID}.epub" ]; then
-            echo "::error::❌ Failed to generate e-book: Output file not found"
-            exit 1
-          fi
-          
-          # Get file size
-          FILESIZE=$(stat -c "%s" "./output/${CONTENT_ID}.epub" 2>/dev/null || stat -f "%z" "./output/${CONTENT_ID}.epub")
-          echo "✅ E-book generated successfully: ${CONTENT_ID}.epub (${FILESIZE} bytes)"
-          echo "filename=${CONTENT_ID}.epub" >> "$GITHUB_OUTPUT"
-          echo "filesize=${FILESIZE}" >> "$GITHUB_OUTPUT"
-      - name: Upload E-Book Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: e-book-output
-          path: ./output/${{ github.event.inputs.content_id }}.epub
-          retention-days: 7
-          compression-level: 9
-          if-no-files-found: error
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      
+
+          echo "📖 Building EPUB..."
+          "${PANDOC_CMD[@]}"
+
+          ls -lh ./output
+
       - name: Upload EPUB to Cloudflare R2
         id: r2_upload
-        env:
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          R2_UPLOAD_IMAGE_ACCESS_KEY_ID: ${{ secrets.R2_UPLOAD_IMAGE_ACCESS_KEY_ID }}
-          R2_UPLOAD_IMAGE_SECRET_ACCESS_KEY: ${{ secrets.R2_UPLOAD_IMAGE_SECRET_ACCESS_KEY }}
-          R2_UPLOAD_IMAGE_BUCKET_NAME: ${{ secrets.R2_UPLOAD_IMAGE_BUCKET_NAME }}
-          NEXT_PUBLIC_IMAGE_BASE_URL: ${{ secrets.NEXT_PUBLIC_IMAGE_BASE_URL }}
         run: |
-          set -e
-          # Ensure S3 client is available for the upload script
-          npm i -D @aws-sdk/client-s3
           CONTENT_ID="${{ github.event.inputs.content_id }}"
           FILE_PATH="./output/${CONTENT_ID}.epub"
-          # Build a pretty, URL-safe slug for the EPUB key
           RAW_SLUG="${{ github.event.inputs.slug }}"
           if [ -z "$RAW_SLUG" ]; then
-            # Derive from title if not provided
-            RAW_SLUG="${{ steps.fetch-book.outputs.title }}"
+            RAW_SLUG=$(jq -r '.book.title // "untitled"' ./book-content/payload.json)
           fi
-          # Fallback if still empty
-          if [ -z "$RAW_SLUG" ] || [ "$RAW_SLUG" = "null" ]; then
-            RAW_SLUG="$CONTENT_ID"
-          fi
-          # Transliterate international characters to ASCII, then slugify
-          # iconv with //TRANSLIT will best-effort map characters like üğşçöİ to ugsc oI, etc.
-          # Fallback to original if iconv not available
-          TL=$(printf "%s" "$RAW_SLUG" | iconv -f UTF-8 -t ASCII//TRANSLIT 2>/dev/null || printf "%s" "$RAW_SLUG")
-          # slugify: lowercase, replace non-alnum with '-', collapse '-', trim '-'
+          TL=$(printf "%s" "$RAW_SLUG" | iconv -f UTF-8 -t ASCII//TRANSLIT 2>/dev/null || echo "$RAW_SLUG")
           SLUG=$(echo "$TL" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g' | sed -E 's/^-+|-+$//g')
-          if [ -z "$SLUG" ]; then SLUG="$CONTENT_ID"; fi
+          [ -z "$SLUG" ] && SLUG="$CONTENT_ID"
           KEY="books/${SLUG}-${CONTENT_ID}.epub"
-          echo "Uploading $FILE_PATH to R2 as $KEY"
-          URL=$(node ./scripts/upload-epub-to-r2.mjs --file "$FILE_PATH" --key "$KEY")
-          echo "epub_url=$URL" >> "$GITHUB_OUTPUT"
-      - name: Notify API to update epubUrl
-        env:
-          JWT_HEADER: ${{ env.JWT_HEADER }}
-          EPUB_URL: ${{ steps.r2_upload.outputs.epub_url }}
-          BASE_URL: https://editor.bookshall.com
-        run: |
-          set -e
-          if [ -z "$EPUB_URL" ]; then
-            echo "::error::EPUB_URL is empty; upload may have failed"
-            exit 1
-          fi
-          CONTENT_ID="${{ github.event.inputs.content_id }}"
-          echo "Updating epubUrl for book $CONTENT_ID to $EPUB_URL"
-          curl -sS -X POST \
-            -H "Authorization: $JWT_HEADER" \
-            -H "Content-Type: application/json" \
-            "$BASE_URL/api/books/by-id/${CONTENT_ID}/epub" \
-            -d "{\"epubUrl\":\"$EPUB_URL\"}"
-          
-      - name: Upload Debug Artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: debug-files
-          path: |
-            ./book-content/**/*
-            ./*.log
-            ./*.txt
-          retention-days: 1
-          compression-level: 6
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          
-      - name: Debug Output
-        if: always()
-        run: |
-          echo "🔍 Debugging information:"
-          echo "Current directory: $(pwd)"
-          
-          # List all files in current directory for better debugging
-          echo "📁 Current directory contents:"
-          ls -la ./
-          
-          # Check for output directory
-          if [ -d "./output" ]; then
-            echo "📂 Output directory contents:"
-            ls -la ./output/ || echo "Failed to list output directory"
-          else
-            echo "⚠️ Output directory does not exist"
-            # Try to create it for future steps
-            mkdir -p ./output
-          fi
-          
-          # Check for book content directory
-          if [ -d "./book-content" ]; then
-            echo "📚 Book content directory contents:"
-            ls -la ./book-content/ || echo "Failed to list book content directory"
-          else
-            echo "⚠️ Book content directory does not exist"
-          fi
-          
-          # Check for any error logs
-          if [ -f "pandoc.log" ]; then
-            echo "📝 Pandoc log contents:"
-            cat pandoc.log
-          fi
-          
-          # Check for the specific file (using the content ID from inputs)
-          CONTENT_ID="${{ github.event.inputs.content_id }}"
-          EPUB_FILE="./output/${CONTENT_ID}.epub"
-          
-          if [ -f "$EPUB_FILE" ]; then
-            FILESIZE=$(stat -c "%s" "$EPUB_FILE" 2>/dev/null || stat -f "%z" "$EPUB_FILE" 2>/dev/null || echo "unknown")
-            echo "✅ E-book generated successfully: $EPUB_FILE (${FILESIZE} bytes)"
-            echo "::notice title=Success::E-book generated successfully!"
-            echo "epub_path=$EPUB_FILE" >> "$GITHUB_OUTPUT"
-          else
-            echo "::warning::❌ E-book not found: $EPUB_FILE"
-            echo "Looking for any .epub files in output directory..."
-            find ./output -name "*.epub" -exec echo "Found EPUB: {}" \;
-            
-            # Don't fail the step, just provide information
-            # The actual build step will fail if there's a real issue
-          fi
+
+          echo "🚀 Uploading to R2 as $KEY"
+          npx --yes @aws-sdk/client-s3 node ./scripts/upload-epub-to-r2.mjs --file "$FILE_PATH" --key "$KEY"
+
