@@ -109,7 +109,7 @@ jobs:
         run: |
           echo "🔐 Setting up security files..."
           # Create .env file for the application
-          echo "NEXT_PUBLIC_APP_URL=https://matbu.vercel.app" > .env
+          echo "NEXT_PUBLIC_APP_URL=https://editor.bookshall.com" > .env
           echo "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY" >> .env
           
           # Set secure permissions
