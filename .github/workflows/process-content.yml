@@ -32,17 +32,17 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Install deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y curl jq iconv
+
       - name: Get OIDC token
         id: get-oidc
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const audience = process.env.GHA_OIDC_AUDIENCE;
-            const { data } = await github.rest.actions.getOidcToken({
-              repository: context.repo.owner + "/" + context.repo.repo,
-              audience
-            });
-            core.setOutput("token", data.value);
+        run: |
+          echo "🔑 Requesting OIDC token..."
+          TOKEN=$(gh auth token | core get-id-token --audience $GHA_OIDC_AUDIENCE)
+          echo "token=$TOKEN" >> $GITHUB_OUTPUT
 
       - name: Fetch Book Content
         env:
@@ -51,7 +51,7 @@ jobs:
           API_BASE_URL: ${{ env.API_BASE_URL }}
         run: |
           set -e
-          echo "🔐 Using JWT with audience: ${{ env.GHA_OIDC_AUDIENCE }}"
+          echo "🔐 Using JWT with audience: $GHA_OIDC_AUDIENCE"
           export JWT_HEADER="Bearer $JWT_TOKEN"
           mkdir -p ./book-content ./output
           chmod +x ./scripts/fetch-book.sh
@@ -76,20 +76,14 @@ jobs:
             --metadata=identifier:"$CONTENT_ID"
           )
 
-          if [ -f "./book-content/cover.jpg" ]; then
-            PANDOC_CMD+=(--epub-cover-image=./book-content/cover.jpg)
-          fi
-          if [ -f "./book-content/styles/epub.css" ]; then
-            PANDOC_CMD+=(--css=./book-content/styles/epub.css)
-          fi
+          [ -f "./book-content/cover.jpg" ] && PANDOC_CMD+=(--epub-cover-image=./book-content/cover.jpg)
+          [ -f "./book-content/styles/epub.css" ] && PANDOC_CMD+=(--css=./book-content/styles/epub.css)
 
           while IFS= read -r -d $'\0' file; do
             PANDOC_CMD+=("$file")
           done < <(find ./book-content -type f -name 'chapter-*.xhtml' -print0 | sort -z -V)
 
-          if [ -f "./book-content/imprint.xhtml" ]; then
-            PANDOC_CMD+=("./book-content/imprint.xhtml")
-          fi
+          [ -f "./book-content/imprint.xhtml" ] && PANDOC_CMD+=("./book-content/imprint.xhtml")
 
           echo "📖 Building EPUB..."
           "${PANDOC_CMD[@]}"
@@ -99,9 +93,7 @@ jobs:
           CONTENT_ID="${{ github.event.inputs.content_id }}"
           FILE_PATH="./output/${CONTENT_ID}.epub"
           RAW_SLUG="${{ github.event.inputs.slug }}"
-          if [ -z "$RAW_SLUG" ]; then
-            RAW_SLUG=$(jq -r '.book.title // "untitled"' ./book-content/payload.json)
-          fi
+          [ -z "$RAW_SLUG" ] && RAW_SLUG=$(jq -r '.book.title // "untitled"' ./book-content/payload.json)
           TL=$(printf "%s" "$RAW_SLUG" | iconv -f UTF-8 -t ASCII//TRANSLIT 2>/dev/null || echo "$RAW_SLUG")
           SLUG=$(echo "$TL" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g' | sed -E 's/^-+|-+$//g')
           [ -z "$SLUG" ] && SLUG="$CONTENT_ID"
