@@ -1,7 +1,6 @@
 // middleware.ts
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
-import type { NextRequest } from "next/server";
 
 // Public routes (no auth needed)
 const isPublicRoute = createRouteMatcher([
@@ -60,14 +59,8 @@ export default clerkMiddleware(async (auth, req) => {
   const method = req.method;
   const { cspHeader, nonce } = applyCsp();
 
-  console.log(`[Middleware] ${method} ${pathname}`, {
-    url: req.url,
-    referer: req.headers.get("referer"),
-  });
-
-  // ✅ Special case: bypass Clerk for GitHub OIDC endpoints
-  if (pathname.startsWith("/api/ci")) {
-    console.log("[Middleware] Bypassing Clerk for GitHub OIDC route:", pathname);
+  // ✅ 1) BYPASS: GitHub OIDC endpointlerini Clerk’ten tamamen çıkar
+  if (pathname.startsWith("/api/ci/") || pathname === "/api/ci") {
     const response = NextResponse.next({
       request: {
         headers: new Headers({
@@ -80,13 +73,17 @@ export default clerkMiddleware(async (auth, req) => {
     return response;
   }
 
+  console.log(`[Middleware] ${method} ${pathname}`, {
+    url: req.url,
+    referer: req.headers.get("referer"),
+  });
+
   // Yeni bir Headers nesnesi oluşturun
   const requestHeaders = new Headers(req.headers);
   requestHeaders.set("x-nonce", nonce);
 
   // ✅ Allow public routes
   if (isPublicRoute(req)) {
-    console.log(`[Middleware] Allowing public route: ${pathname}`);
     const response = NextResponse.next({ request: { headers: requestHeaders } });
     response.headers.set("Content-Security-Policy", cspHeader);
     return response;
@@ -97,7 +94,6 @@ export default clerkMiddleware(async (auth, req) => {
     process.env.NODE_ENV === "development" &&
     process.env.DISABLE_AUTH === "true"
   ) {
-    console.warn("[Middleware] ⚠️ Auth disabled in development mode");
     requestHeaders.set("x-user-id", "dev-user-id");
     requestHeaders.set("x-auth-method", "development");
     const response = NextResponse.next({ request: { headers: requestHeaders } });
@@ -107,11 +103,9 @@ export default clerkMiddleware(async (auth, req) => {
 
   // ✅ API routes with auth
   if (isApiRoute(pathname)) {
-    console.log(`[Middleware] Processing API route: ${pathname}`);
     try {
       const session = await auth();
       if (!session?.userId) {
-        console.error("[Middleware] No active session found");
         return new NextResponse(
           JSON.stringify({
             error: "Unauthorized - Please sign in",
@@ -126,9 +120,6 @@ export default clerkMiddleware(async (auth, req) => {
         );
       }
 
-      console.log(
-        `[Middleware] Clerk session verified for user: ${session.userId}`
-      );
       requestHeaders.set("x-user-id", session.userId);
       requestHeaders.set("x-auth-method", "session");
 
@@ -138,7 +129,6 @@ export default clerkMiddleware(async (auth, req) => {
       response.headers.set("Content-Security-Policy", cspHeader);
       return response;
     } catch (error) {
-      console.error("[Middleware] Error verifying session:", error);
       return new NextResponse(
         JSON.stringify({
           error: "Authentication failed",
@@ -158,8 +148,7 @@ export default clerkMiddleware(async (auth, req) => {
   if (isProtected) {
     try {
       await auth.protect();
-    } catch (error) {
-      console.error("[Middleware] Error protecting route:", error);
+    } catch {
       return new NextResponse(
         JSON.stringify({
           error: "Authentication required",
@@ -176,9 +165,15 @@ export default clerkMiddleware(async (auth, req) => {
   return response;
 });
 
+/**
+ * ✅ 2) MATCHER: /api/ci/** isteklerini tamamen middleware dışına al
+ *    Bu sayede Clerk middleware hiç çalışmaz; CI route’un doğrudan handler’a gider.
+ */
 export const config = {
   matcher: [
-    "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
-    "/(api|trpc)(.*)",
+    // Tüm app route'ları ama _next, statikler ve **/api/ci/** HARİÇ
+    "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)|api/ci(?:/.*)?).*)",
+    // API/TRPC için de **/api/ci/** hariç
+    "/(api|trpc)(?!/ci)(.*)",
   ],
 };

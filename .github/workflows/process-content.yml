@@ -27,7 +27,7 @@ env:
   NODE_ENV: production  # Development mode for Clerk integration
   
   # OIDC Audience used when fetching the GitHub OIDC token
-  GITHUB_OIDC_AUDIENCE: 'https://api.clerko.com/ci'
+  GITHUB_OIDC_AUDIENCE: 'https://editor.bookshall.com/api/ci'
   
   # Repository information
   GITHUB_REPO_OWNER: bilgisen
