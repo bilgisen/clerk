@@ -3,7 +3,8 @@ import { headers } from 'next/headers';
 import { db } from '@/db/drizzle';
 import { books, chapters } from '@/db/schema';
 import { eq } from 'drizzle-orm';
-import { currentUser } from '@clerk/nextjs/server';
+import { currentUser, auth } from '@clerk/nextjs/server';
+import { verifyGithubOidc } from '@/lib/auth/verifyGithubOidc';
 
 export const dynamic = 'force-dynamic';
 export const dynamicParams = true;
@@ -78,6 +79,29 @@ function flattenChapterTree(chapters: ChapterWithChildren[], bookSlug: string, b
   });
 }
 
+// Check if request is authenticated via GitHub OIDC
+async function isGithubOidcAuthenticated(headers: Headers) {
+  const authHeader = headers.get('authorization');
+  
+  if (!authHeader?.startsWith('Bearer ')) {
+    return false;
+  }
+
+  const token = authHeader.split(' ')[1];
+  
+  try {
+    await verifyGithubOidc(token, {
+      audience: process.env.GHA_OIDC_AUDIENCE,
+      allowedRepo: process.env.GHA_ALLOWED_REPO,
+      allowedRef: process.env.GHA_ALLOWED_REF,
+    });
+    return true;
+  } catch (error) {
+    console.error('GitHub OIDC verification failed:', error);
+    return false;
+  }
+}
+
 export async function GET(
   request: Request,
   { params }: { params: { id: string } }
@@ -86,36 +110,29 @@ export async function GET(
     // Get the book ID from params
     const bookId = params.id;
     
-    // Get headers
+    // Check GitHub OIDC authentication first
     const headersList = await headers();
-    const authMethod = headersList.get('x-auth-method');
-    const oidcUser = headersList.get('x-auth-user-id');
-
-    // Verify authentication: trust middleware signals
-    let userId: string | null = null;
+    const headersObj = Object.fromEntries(Array.from(headersList.entries()));
+    const isGithubOidc = await isGithubOidcAuthenticated(new Headers(headersObj));
+    
+    // Set user context based on authentication method
+    let userId: string;
     let isServiceAccount = false;
-
-    if (authMethod === 'oidc') {
-      // Verified by middleware via GitHub OIDC
+    
+    if (isGithubOidc) {
+      // GitHub OIDC authenticated
       isServiceAccount = true;
-      userId = oidcUser || 'ci';
+      userId = 'github-oidc';
     } else {
-      // Fall back to Clerk session for user flows
-      try {
-        const user = await currentUser();
-        if (user) {
-          userId = user.id;
-        }
-      } catch (error) {
-        console.error('❌ Clerk authentication failed:', error instanceof Error ? error.message : 'Unknown error');
+      // Fall back to Clerk authentication
+      const user = await currentUser();
+      if (!user) {
+        return NextResponse.json(
+          { error: 'unauthorized', message: 'Authentication required' },
+          { status: 401 }
+        );
       }
-    }
-
-    if (!userId) {
-      return NextResponse.json(
-        { error: 'Unauthorized - No valid authentication provided' },
-        { status: 401 }
-      );
+      userId = user.id;
     }
 
     // Get the book by ID

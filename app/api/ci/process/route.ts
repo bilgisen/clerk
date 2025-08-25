@@ -118,5 +118,6 @@ export const POST = withGithubOidc(async (req: AuthedRequest) => {
         idempotencyKey,
       },
       { status: 500 }
-    )
-})
+    );
+  }
+});

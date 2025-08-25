@@ -1,6 +1,7 @@
 // middleware.ts
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
+import { verifyGithubOidc } from './lib/auth/verifyGithubOidc';
 
 // Public routes (no auth needed)
 const isPublicRoute = createRouteMatcher([
@@ -12,6 +13,8 @@ const isPublicRoute = createRouteMatcher([
   "/api/auth/token",
   "/api/webhooks(.*)",
   "/api/upload",
+  "/api/ci/status(.*)",
+  "/api/ci/cancel(.*)",
 ]);
 
 // API routes that require authentication
@@ -54,10 +57,61 @@ function applyCsp() {
   return { cspHeader, nonce };
 }
 
+// Handle GitHub OIDC authentication
+async function handleGithubOidcAuth(req: Request) {
+  const authHeader = req.headers.get('authorization');
+  
+  if (!authHeader?.startsWith('Bearer ')) {
+    return null;
+  }
+
+  const token = authHeader.split(' ')[1];
+  
+  try {
+    const claims = await verifyGithubOidc(token, {
+      audience: process.env.GHA_OIDC_AUDIENCE,
+      allowedRepo: process.env.GHA_ALLOWED_REPO,
+      allowedRef: process.env.GHA_ALLOWED_REF,
+    });
+    
+    // Add claims to request headers for API routes
+    const headers = new Headers(req.headers);
+    headers.set('x-github-oidc-repo', claims.repository || '');
+    headers.set('x-github-oidc-ref', claims.ref || '');
+    headers.set('x-github-oidc-workflow', claims.workflow || '');
+    
+    return headers;
+  } catch (error) {
+    console.error('GitHub OIDC verification failed:', error);
+    return null;
+  }
+}
+
 export default clerkMiddleware(async (auth, req) => {
   const { pathname } = req.nextUrl;
   const method = req.method;
   const { cspHeader, nonce } = applyCsp();
+  
+  // Handle GitHub OIDC authentication for CI routes
+  if (pathname.startsWith('/api/ci/')) {
+    const newHeaders = await handleGithubOidcAuth(req);
+    if (newHeaders) {
+      // If GitHub OIDC auth succeeds, bypass Clerk auth
+      const response = NextResponse.next({
+        request: {
+          headers: newHeaders,
+        },
+      });
+      
+      // Set CSP headers
+      response.headers.set('Content-Security-Policy', cspHeader);
+      response.headers.set('x-nonce', nonce);
+      
+      return response;
+    }
+    
+    // If GitHub OIDC auth fails, continue with Clerk auth
+  }
 
   // ✅ 1) BYPASS: GitHub OIDC endpointlerini Clerk’ten tamamen çıkar
   if (pathname.startsWith("/api/ci/") || pathname === "/api/ci") {
