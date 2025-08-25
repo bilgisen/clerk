@@ -118,16 +118,10 @@ jobs:
           
           # Set secure permissions
           chmod -R 700 .
-      - name: Fetch Book Content
-        id: fetch_book
-        env:
-          CONTENT_ID: ${{ github.event.inputs.content_id }}
-          GHA_OIDC_AUDIENCE: ${{ env.GHA_OIDC_AUDIENCE }}
-          API_BASE_URL: ${{ env.API_BASE_URL }}
+      
+      - name: Generate OIDC Token
+        id: generate_token
         run: |
-          set -e
-          
-          # Get OIDC token with the configured audience
           echo "🔑 Requesting OIDC token with audience: $GHA_OIDC_AUDIENCE"
           OIDC_TOKEN=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
             "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=$GHA_OIDC_AUDIENCE" | jq -r '.value')
@@ -137,11 +131,37 @@ jobs:
             exit 1
           fi
           
+          # Set the token as an output
+          echo "token=$OIDC_TOKEN" >> $GITHUB_OUTPUT
           echo "✅ OIDC token acquired (length: ${#OIDC_TOKEN} chars)"
+      
+      - name: Fetch Book Content
+        id: fetch_book
+        env:
+          CONTENT_ID: ${{ github.event.inputs.content_id }}
+          GHA_OIDC_AUDIENCE: ${{ env.GHA_OIDC_AUDIENCE }}
+          API_BASE_URL: ${{ env.API_BASE_URL }}
+          JWT_TOKEN: ${{ steps.generate_token.outputs.token }}
+        run: |
+          set -e
+          
+          # Use the JWT token from the previous step
+          if [ -z "$JWT_TOKEN" ]; then
+            echo "::error::JWT_TOKEN is not set"
+            exit 1
+          fi
+          
+          echo "✅ Using JWT token (length: ${#JWT_TOKEN} chars)"
           
           # Set environment variables for the fetch-book.sh script
-          export JWT_HEADER="Bearer $OIDC_TOKEN"
+          export JWT_HEADER="Bearer $JWT_TOKEN"
           export BASE_URL="$API_BASE_URL"
+          
+          # Debug information
+          echo "🔧 Environment variables:"
+          echo "- BASE_URL: $BASE_URL"
+          echo "- CONTENT_ID: $CONTENT_ID"
+          echo "- JWT_HEADER: ***"  # Don't log the actual token
           
           # Make the script executable and run it
           chmod +x ./scripts/fetch-book.sh
