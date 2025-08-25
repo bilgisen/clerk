@@ -19,7 +19,7 @@ const isPublicRoute = createRouteMatcher([
 
 // API routes that require authentication
 const isApiRoute = (pathname: string) =>
-  pathname.startsWith("/api/books/by-id/") ||
+  (pathname.startsWith("/api/books/by-id/") && !pathname.includes('/payload')) ||
   pathname.startsWith("/api/books/by-slug/");
 
 // Regex patterns for protected routes
@@ -172,7 +172,21 @@ export default clerkMiddleware(async (auth, req) => {
     return response;
   }
 
-  // ✅ API routes with auth
+  // Handle books API with GitHub OIDC auth
+  if (pathname.startsWith('/api/books/by-id/') && pathname.endsWith('/payload')) {
+    const newHeaders = await handleGithubOidcAuth(req);
+    if (newHeaders) {
+      const response = NextResponse.next({
+        request: { headers: newHeaders },
+      });
+      response.headers.set('Content-Security-Policy', cspHeader);
+      response.headers.set('x-nonce', nonce);
+      return response;
+    }
+    // If GitHub OIDC auth fails, continue with Clerk auth
+  }
+
+  // ✅ API routes with Clerk auth
   if (isApiRoute(pathname)) {
     try {
       const session = await auth();
