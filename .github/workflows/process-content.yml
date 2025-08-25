@@ -7,8 +7,8 @@ on:
         description: 'Content ID for the book'
         required: true
         type: string
-      slug:
-        description: 'URL-safe slug to use in the EPUB filename (optional)'
+      metadata:
+        description: 'Additional metadata'
         required: false
         type: string
 
