@@ -24,10 +24,10 @@ on:
 
 env:
   # Environment configuration
-  NODE_ENV: production  # Development mode for Clerk integration
+  NODE_ENV: development  # Development mode for Clerk integration
   
   # OIDC Audience used when fetching the GitHub OIDC token
-  GITHUB_OIDC_AUDIENCE: 'https://editor.bookshall.com/api/ci'
+  GITHUB_OIDC_AUDIENCE: 'https://api.clerko.com/ci'
   
   # Repository information
   GITHUB_REPO_OWNER: bilgisen
@@ -63,7 +63,6 @@ jobs:
           
           # Install dependencies
           npm install --legacy-peer-deps
-
       - name: Install system tools
         run: |
           echo "🔄 Updating package lists..."
@@ -106,7 +105,6 @@ jobs:
           # Clean up to reduce image size
           sudo apt-get clean
           sudo rm -rf /var/lib/apt/lists/*
-
       - name: Set up security files
         run: |
           echo "🔐 Setting up security files..."
@@ -119,7 +117,7 @@ jobs:
       - name: Get GitHub OIDC token
         id: oidc
         env:
-          AUDIENCE: ${{ env.GITHUB_OIDC_AUDIENCE || 'https://editor.bookshall.com/api/ci' }}
+          AUDIENCE: ${{ env.GITHUB_OIDC_AUDIENCE || 'https://api.clerko.com/ci' }}
         run: |
           set -e
           echo "🔑 Requesting GitHub OIDC token (audience=$AUDIENCE)"
@@ -134,21 +132,12 @@ jobs:
           echo "JWT_HEADER=Bearer $TOKEN" >> $GITHUB_ENV
           echo "Token length: ${#TOKEN}"
           echo "✅ OIDC token acquired"
-
       - name: Fetch Book Content
         id: fetch-book
         timeout-minutes: 30
         env:
           CONTENT_ID: ${{ github.event.inputs.content_id }}
-          # OIDC configuration
-          GHA_OIDC_AUDIENCE: ${{ env.GITHUB_OIDC_AUDIENCE }}
-          GHA_ALLOWED_REPO: ${{ env.GITHUB_REPO_OWNER }}/${{ env.GITHUB_REPO_NAME }}
-          GHA_ALLOWED_REF: refs/heads/main
-          GHA_ALLOWED_WORKFLOW: Process Content
-          GHA_OIDC_ISSUER: https://token.actions.githubusercontent.com
-          GHA_OIDC_JWKS_URL: https://token.actions.githubusercontent.com/.well-known/jwks
-          # Base URL for API requests
-          BASE_URL: 'https://editor.bookshall.com'
+          BASE_URL: 'https://matbu.vercel.app'
           GITHUB_REPO_OWNER: ${{ env.GITHUB_REPO_OWNER }}
           GITHUB_REPO_NAME: ${{ env.GITHUB_REPO_NAME }}
           GITHUB_REF: ${{ github.ref }}
@@ -344,7 +333,6 @@ jobs:
           echo "✅ E-book generated successfully: ${CONTENT_ID}.epub (${FILESIZE} bytes)"
           echo "filename=${CONTENT_ID}.epub" >> "$GITHUB_OUTPUT"
           echo "filesize=${FILESIZE}" >> "$GITHUB_OUTPUT"
-
       - name: Upload E-Book Artifact
         uses: actions/upload-artifact@v4
         with:
@@ -366,8 +354,8 @@ jobs:
           NEXT_PUBLIC_IMAGE_BASE_URL: ${{ secrets.NEXT_PUBLIC_IMAGE_BASE_URL }}
         run: |
           set -e
-          # Install AWS SDK for JavaScript v3
-          pnpm add -D @aws-sdk/client-s3
+          # Ensure S3 client is available for the upload script
+          npm i -D @aws-sdk/client-s3
           CONTENT_ID="${{ github.event.inputs.content_id }}"
           FILE_PATH="./output/${CONTENT_ID}.epub"
           # Build a pretty, URL-safe slug for the EPUB key
@@ -391,12 +379,11 @@ jobs:
           echo "Uploading $FILE_PATH to R2 as $KEY"
           URL=$(node ./scripts/upload-epub-to-r2.mjs --file "$FILE_PATH" --key "$KEY")
           echo "epub_url=$URL" >> "$GITHUB_OUTPUT"
-
       - name: Notify API to update epubUrl
         env:
           JWT_HEADER: ${{ env.JWT_HEADER }}
           EPUB_URL: ${{ steps.r2_upload.outputs.epub_url }}
-          BASE_URL: https://editor.bookshall.com
+          BASE_URL: https://matbu.vercel.app
         run: |
           set -e
           if [ -z "$EPUB_URL" ]; then
