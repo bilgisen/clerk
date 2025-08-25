@@ -10,6 +10,10 @@ import { InferSelectModel } from 'drizzle-orm';
 export const dynamic = 'force-dynamic';
 export const dynamicParams = true;
 
+export const runtime = 'nodejs';
+// Force Node.js runtime since we're using Node.js modules
+// that aren't available in Edge Runtime
+
 type Chapter = InferSelectModel<typeof chapters>;
 type Book = {
   id: string;

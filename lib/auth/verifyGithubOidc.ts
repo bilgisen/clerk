@@ -1,6 +1,10 @@
 import { createRemoteJWKSet, jwtVerify, JWTPayload } from 'jose'
-import * as nodeFetch from 'node-fetch'
-import https from 'https'
+
+// Check if we're running in an Edge Runtime environment
+const isEdgeRuntime = 
+  (typeof process !== 'undefined' && 
+   typeof process.env !== 'undefined' && 
+   process.env.NEXT_RUNTIME === 'edge');
 
 // GitHub OIDC constants
 const DEFAULT_ISSUER = 'https://token.actions.githubusercontent.com'
@@ -13,19 +17,13 @@ let jwks: ReturnType<typeof createRemoteJWKSet> | null = null;
 async function createCustomJWKSClient(): Promise<ReturnType<typeof createRemoteJWKSet>> {
   const jwksUrl = 'https://token.actions.githubusercontent.com/.well-known/jwks';
   
-  // Create a custom JWKS client with more permissive settings
+  // Create a custom JWKS client with appropriate settings for the runtime
   const client = createRemoteJWKSet(new URL(jwksUrl), {
     cooldownDuration: 0, // Disable cooldown to always check for fresh keys
     timeoutDuration: 10_000,
+    // In Edge Runtime, we can't use a custom agent, but we can still use the global fetch
+    // The global fetch in Edge Runtime already has good defaults
   });
-  
-  // Set up HTTPS agent for fetch operations
-  const httpsAgent = new https.Agent({ 
-    keepAlive: true,
-    rejectUnauthorized: true,
-  });
-  
-  // Using node-fetch's RequestInit which includes agent support
 
   // Create a wrapper that handles the key selection more flexibly
   const handler = async (protectedHeader: any, token: any): Promise<CryptoKey> => {
@@ -38,16 +36,17 @@ async function createCustomJWKSClient(): Promise<ReturnType<typeof createRemoteJ
       } catch (firstError) {
         console.warn('First verification attempt failed, trying alternative approach:', firstError);
         
-        // If that fails, try fetching the keys directly with our custom agent
-        const fetchOptions: nodeFetch.RequestInit = {
-          agent: httpsAgent,
+        // If that fails, try fetching the keys directly
+        const fetchOptions: RequestInit = {
           headers: {
             'Accept': 'application/json',
             'User-Agent': 'clerko/1.0.0'
-          }
+          },
+          // In Edge Runtime, we can't set a custom agent
+          // but the global fetch will handle HTTPS properly
         };
         
-        const response = await nodeFetch.default(jwksUrl, fetchOptions);
+        const response = await fetch(jwksUrl, fetchOptions);
         if (!response.ok) {
           throw new Error(`Failed to fetch JWKS: ${response.status} ${response.statusText}`);
         }
