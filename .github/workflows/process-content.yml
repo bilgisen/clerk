@@ -55,8 +55,13 @@ jobs:
           node-version: '20.x'
           cache: 'm'
 
-      - nanl reutils \
-            pndoc \-legacypeedps
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            nano \
+            reutils \
+            pndoc \
             texlive-xetex \
             texlive-fonts-recommended \
             texlive-latex-recommended \
@@ -67,7 +72,7 @@ jobs:
             ca-certificates \
             gnupg \
             software-properties-common
-            
+          
           # Verify coreutils is installed and base64 is available
           if ! command -v base64 &> /dev/null; then
             echo "::warning::base64 command not found in PATH, checking /usr/bin/"
@@ -95,7 +100,7 @@ jobs:
         run: |
           echo "🔐 Setting up security files..."
           # Create .env file for the application
-          echo "NEXT_PUBLIC_APP_URL=https://matbu.vercel.app" > .env
+          echo "NEXT_PUBLIC_APP_URL=https://editor.bookshall.com" > .env
           echo "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY" >> .env
           
           # Set secure permissions
@@ -356,12 +361,12 @@ jobs:
           FILE_PATH="./output/${CONTENT_ID}.epub"
           # Build a pretty, URL-safe slug for the EPUB key
           RAW_SLUG="${{ github.event.inputs.slug }}"
-          f [ inst-ll"$RAW_SLUG" ]; then
+          if [ -z "$RAW_SLUG" ]; then
             # Derive from title if not provided
             RAW_SLUG="${{ steps.fetch-book.outputs.title }}"
           fi
           # Fallback if still empty
-          f [ inst-ll"$RAW_SLUG" ] || [ "$RAW_SLUG" = "null" ]; then
+          if [ -z "$RAW_SLUG" ] || [ "$RAW_SLUG" = "null" ]; then
             RAW_SLUG="$CONTENT_ID"
           fi
           # Transliterate international characters to ASCII, then slugify
@@ -380,7 +385,7 @@ jobs:
         env:
           JWT_HEADER: ${{ env.JWT_HEADER }}
           EPUB_URL: ${{ steps.r2_upload.outputs.epub_url }}
-          BASE_URL: https://matbu.vercel.app
+          BASE_URL: https://editor.bookshall.com
         run: |
           set -e
           if [ -z "$EPUB_URL" ]; then
