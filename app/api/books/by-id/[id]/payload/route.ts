@@ -81,20 +81,36 @@ function flattenChapterTree(chapters: ChapterWithChildren[], bookSlug: string, b
 
 // Check if request is authenticated via GitHub OIDC
 async function isGithubOidcAuthenticated(headers: Headers) {
-  const authHeader = headers.get('authorization');
-  
-  if (!authHeader?.startsWith('Bearer ')) {
-    return false;
-  }
-
-  const token = authHeader.split(' ')[1];
-  
   try {
-    await verifyGithubOidc(token, {
+    const authHeader = headers.get('authorization');
+    
+    if (!authHeader?.startsWith('Bearer ')) {
+      console.log('No Bearer token found in Authorization header');
+      return false;
+    }
+
+    const token = authHeader.split(' ')[1];
+    
+    if (!token) {
+      console.log('No token found after Bearer');
+      return false;
+    }
+    
+    console.log('Verifying GitHub OIDC token...');
+    const claims = await verifyGithubOidc(token, {
       audience: process.env.GHA_OIDC_AUDIENCE,
       allowedRepo: process.env.GHA_ALLOWED_REPO,
       allowedRef: process.env.GHA_ALLOWED_REF,
     });
+    
+    console.log('GitHub OIDC token verified successfully:', {
+      repository: claims.repository,
+      ref: claims.ref,
+      workflow: claims.workflow,
+      actor: claims.actor,
+      runId: claims.run_id
+    });
+    
     return true;
   } catch (error) {
     console.error('GitHub OIDC verification failed:', error);

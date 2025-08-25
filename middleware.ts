@@ -62,23 +62,40 @@ async function handleGithubOidcAuth(req: Request) {
   const authHeader = req.headers.get('authorization');
   
   if (!authHeader?.startsWith('Bearer ')) {
+    console.log('No Bearer token found in Authorization header');
     return null;
   }
 
   const token = authHeader.split(' ')[1];
   
+  if (!token) {
+    console.log('No token found after Bearer');
+    return null;
+  }
+  
   try {
+    console.log('Verifying GitHub OIDC token...');
     const claims = await verifyGithubOidc(token, {
       audience: process.env.GHA_OIDC_AUDIENCE,
       allowedRepo: process.env.GHA_ALLOWED_REPO,
       allowedRef: process.env.GHA_ALLOWED_REF,
     });
     
+    console.log('GitHub OIDC token verified successfully:', {
+      repository: claims.repository,
+      ref: claims.ref,
+      workflow: claims.workflow,
+      actor: claims.actor,
+      runId: claims.run_id
+    });
+    
     // Add claims to request headers for API routes
     const headers = new Headers(req.headers);
-    headers.set('x-github-oidc-repo', claims.repository || '');
-    headers.set('x-github-oidc-ref', claims.ref || '');
-    headers.set('x-github-oidc-workflow', claims.workflow || '');
+    if (claims.repository) headers.set('x-github-oidc-repo', String(claims.repository));
+    if (claims.ref) headers.set('x-github-oidc-ref', String(claims.ref));
+    if (claims.workflow) headers.set('x-github-oidc-workflow', String(claims.workflow));
+    if (claims.actor) headers.set('x-github-oidc-actor', String(claims.actor));
+    if (claims.run_id) headers.set('x-github-oidc-run-id', String(claims.run_id));
     
     return headers;
   } catch (error) {
