@@ -42,13 +42,28 @@ export async function GET(
             repository: claims.repository,
             ref: claims.ref,
             workflow: claims.workflow,
+            audience: claims.aud,
+            issuer: claims.iss,
+            subject: claims.sub
           });
+          
+          // Verify the token audience matches our expected API audience
+          if (claims.aud !== process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
+            console.error('Invalid audience in OIDC token for imprint:', claims.aud);
+            return new NextResponse('Invalid token audience', { status: 403 });
+          }
         }
       } catch (e) {
+        console.error('OIDC verification error for imprint:', e);
         if (e instanceof OidcAuthError) {
-          console.warn('OIDC verification failed for imprint:', e.code);
+          console.warn('OIDC verification failed for imprint:', e.code, e.message);
+          return new NextResponse(`OIDC verification failed: ${e.message}`, { 
+            status: 401,
+            headers: { 'Content-Type': 'application/json' }
+          });
         } else {
-          console.warn('OIDC verification error for imprint, falling back to headers flag');
+          console.warn('Unexpected OIDC verification error for imprint:', e);
+          return new NextResponse('Internal server error during authentication', { status: 500 });
         }
       }
     }
