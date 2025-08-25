@@ -12,8 +12,8 @@ on:
         required: false
         type: string
       format:
-        description: 'Output format (only epub is supported)'
-        required: false
+        description: 'Output format (epub, mobi, pdf, html, docx)'
+        required: true
         default: 'epub'
         type: string
       metadata:
@@ -55,11 +55,22 @@ jobs:
           node-version: '20.x'
           cache: 'npm'
 
-      - name: Install system dependencies
+      - name: Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            nano \
+          # Ensure we're using the correct Node.js version
+          node --version
+          npm --version
+          
+          # Install dependencies
+          npm install --legacy-peer-deps
+
+      - name: Install system tools
+        run: |
+          echo "🔄 Updating package lists..."
+          sudo apt-get update -qq
+          
+          echo "📦 Installing required tools..."
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             coreutils \
             pandoc \
             texlive-xetex \
@@ -72,7 +83,7 @@ jobs:
             ca-certificates \
             gnupg \
             software-properties-common
-          
+            
           # Verify coreutils is installed and base64 is available
           if ! command -v base64 &> /dev/null; then
             echo "::warning::base64 command not found in PATH, checking /usr/bin/"
@@ -100,7 +111,7 @@ jobs:
         run: |
           echo "🔐 Setting up security files..."
           # Create .env file for the application
-          echo "NEXT_PUBLIC_APP_URL=https://editor.bookshall.com" > .env
+          echo "NEXT_PUBLIC_APP_URL=https://matbu.vercel.app" > .env
           echo "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY" >> .env
           
           # Set secure permissions
@@ -356,7 +367,7 @@ jobs:
         run: |
           set -e
           # Install AWS SDK for JavaScript v3
-          npm install -D @aws-sdk/client-s3
+          pnpm add -D @aws-sdk/client-s3
           CONTENT_ID="${{ github.event.inputs.content_id }}"
           FILE_PATH="./output/${CONTENT_ID}.epub"
           # Build a pretty, URL-safe slug for the EPUB key
