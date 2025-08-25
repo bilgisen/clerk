@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import dynamic from 'next/dynamic';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { useAuth } from '@clerk/nextjs';
@@ -256,16 +255,21 @@ export default function GenerateEbookPage() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authToken}`
         },
         body: JSON.stringify({
           content_id: book.id,
-          format,
           metadata: {
+            format,
             book_id: book.id,
             slug: book.slug,
             title: book.title,
-            options: { format, generateToc, includeImprint, includeCover, style, tocDepth }
-          },
+            generateToc,
+            includeImprint,
+            includeCover,
+            style,
+            tocDepth
+          }
         }),
       });
       
