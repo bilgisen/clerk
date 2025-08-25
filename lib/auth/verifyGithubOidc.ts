@@ -1,4 +1,6 @@
 import { createRemoteJWKSet, jwtVerify, JWTPayload } from 'jose'
+import * as nodeFetch from 'node-fetch'
+import https from 'https'
 
 // GitHub OIDC constants
 const DEFAULT_ISSUER = 'https://token.actions.githubusercontent.com'
@@ -7,52 +9,90 @@ const DEFAULT_JWKS_URL = 'https://token.actions.githubusercontent.com/.well-know
 // Cached JWKS instance
 let jwks: ReturnType<typeof createRemoteJWKSet> | null = null;
 
-// Helper to create a proper JWKS client
-async function createCustomJWKSClient(url: string): Promise<ReturnType<typeof createRemoteJWKSet>> {
-  const baseClient = createRemoteJWKSet(new URL(url), {
-    cooldownDuration: 60_000,
+// Helper to create a proper JWKS client for GitHub OIDC
+async function createCustomJWKSClient(): Promise<ReturnType<typeof createRemoteJWKSet>> {
+  const jwksUrl = 'https://token.actions.githubusercontent.com/.well-known/jwks';
+  
+  // Create a custom JWKS client with more permissive settings
+  const client = createRemoteJWKSet(new URL(jwksUrl), {
+    cooldownDuration: 0, // Disable cooldown to always check for fresh keys
     timeoutDuration: 10_000,
   });
+  
+  // Set up HTTPS agent for fetch operations
+  const httpsAgent = new https.Agent({ 
+    keepAlive: true,
+    rejectUnauthorized: true,
+  });
+  
+  // Using node-fetch's RequestInit which includes agent support
 
-  // Create a wrapper function that adds our custom key selection logic
-  const client = async (protectedHeader: any, token: any): Promise<CryptoKey> => {
+  // Create a wrapper that handles the key selection more flexibly
+  const handler = async (protectedHeader: any, token: any): Promise<CryptoKey> => {
     try {
-      // First try to find a key using the kid from the token header
-      if (protectedHeader?.kid) {
-        try {
-          // Fetch all keys
-          const response = await fetch(url);
-          const { keys } = await response.json();
-          
-          // Find a key that matches our criteria
-          const matchingKey = keys.find((k: any) => 
-            k.kid === protectedHeader.kid &&
-            k.kty === 'RSA' &&
-            k.alg === 'RS256' &&
-            k.use === 'sig'
-          );
-
-          if (matchingKey) {
-            // Create a new header with only the matching key ID
-            const specificHeader = { ...protectedHeader, kid: matchingKey.kid };
-            return baseClient(specificHeader, token);
-          }
-        } catch (error) {
-          console.error('Error in custom key selection:', error);
-          // Fall through to default behavior
-        }
-      }
+      console.log('Attempting to verify token with header:', JSON.stringify(protectedHeader, null, 2));
       
-      // Fall back to default behavior if no matching key found or if there was an error
-      return baseClient(protectedHeader, token);
+      // First try with the original handler
+      try {
+        return await (client as any)(protectedHeader, token);
+      } catch (firstError) {
+        console.warn('First verification attempt failed, trying alternative approach:', firstError);
+        
+        // If that fails, try fetching the keys directly with our custom agent
+        const fetchOptions: nodeFetch.RequestInit = {
+          agent: httpsAgent,
+          headers: {
+            'Accept': 'application/json',
+            'User-Agent': 'clerko/1.0.0'
+          }
+        };
+        
+        const response = await nodeFetch.default(jwksUrl, fetchOptions);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch JWKS: ${response.status} ${response.statusText}`);
+        }
+        
+        const { keys } = await response.json();
+        
+        console.log(`Fetched ${keys.length} keys from JWKS endpoint`);
+        
+        // Try each key that matches our criteria
+        const matchingKeys = keys.filter((k: any) => 
+          k.kty === 'RSA' && 
+          k.alg === 'RS256' &&
+          k.use === 'sig' &&
+          (!protectedHeader?.kid || k.kid === protectedHeader.kid)
+        );
+        
+        console.log(`Found ${matchingKeys.length} matching keys`);
+        
+        if (matchingKeys.length === 0) {
+          throw new Error('No matching keys found in JWKS set');
+        }
+        
+        // Try each matching key
+        for (const key of matchingKeys) {
+          try {
+            console.log(`Trying key with kid: ${key.kid}`);
+            const result = await (client as any)({ ...protectedHeader, kid: key.kid }, token);
+            console.log('Successfully verified with key:', key.kid);
+            return result;
+          } catch (keyError) {
+            console.warn(`Failed to verify with key ${key.kid}:`, (keyError as Error).message);
+            // Continue to next key
+          }
+        }
+        
+        throw new Error('All key verification attempts failed');
+      }
     } catch (error) {
-      console.error('Error in JWKS client:', error);
+      console.error('Error in JWKS verification:', error);
       throw error;
     }
   };
-
-  // Copy all properties from baseClient to our client
-  return Object.assign(client, baseClient);
+  
+  // Copy all properties from the original client
+  return Object.assign(handler, client);
 }
 
 export type OidcVerificationOptions = {
@@ -88,21 +128,21 @@ function getEnv(name: string, fallback?: string): string | undefined {
 
 async function getJwks(): Promise<ReturnType<typeof createRemoteJWKSet>> {
   if (!jwks) {
-    // Always use the production GitHub OIDC JWKS endpoint
-    const jwksUrl = 'https://token.actions.githubusercontent.com/.well-known/jwks';
-    console.log('Initializing JWKS client with URL:', jwksUrl);
-    
     try {
-      jwks = await createCustomJWKSClient(jwksUrl);
-      console.log('JWKS client initialized successfully');
+      jwks = await createCustomJWKSClient();
+      console.log('GitHub OIDC JWKS client initialized successfully');
     } catch (error) {
-      console.error('Failed to initialize JWKS client:', error);
-      throw new OidcAuthError(500, 'jwks_init_failed', 'Failed to initialize JWKS client');
+      console.error('Failed to initialize GitHub OIDC JWKS client:', error);
+      throw new OidcAuthError(
+        500, 
+        'jwks_init_failed', 
+        'Failed to initialize GitHub OIDC JWKS client: ' + (error as Error).message
+      );
     }
   }
   
   if (!jwks) {
-    throw new OidcAuthError(500, 'jwks_not_initialized', 'JWKS client not initialized');
+    throw new OidcAuthError(500, 'jwks_not_initialized', 'GitHub OIDC JWKS client not initialized');
   }
   
   return jwks;
@@ -110,74 +150,117 @@ async function getJwks(): Promise<ReturnType<typeof createRemoteJWKSet>> {
 
 export async function verifyGithubOidc(token: string, opts?: OidcVerificationOptions): Promise<GithubOidcClaims> {
   if (!token) {
-    throw new OidcAuthError(401, 'missing_token', 'Authorization token is required')
+    throw new OidcAuthError(401, 'missing_token', 'Authorization token is required');
   }
 
-  // Always use the production GitHub OIDC issuer for token verification
-  const issuer = 'https://token.actions.githubusercontent.com';
-  const audience = opts?.audience ?? getEnv('GHA_OIDC_AUDIENCE');
+  // Get the JWKS client
+  const jwks = await getJwks();
   
+  // Get issuer from environment or use default
+  const issuer = getEnv('GITHUB_OIDC_ISSUER', DEFAULT_ISSUER);
+  const audience = opts?.audience || getEnv('GITHUB_OIDC_AUDIENCE');
+
   if (!audience) {
-    throw new OidcAuthError(500, 'server_config', 'GHA_OIDC_AUDIENCE is not configured')
+    throw new OidcAuthError(401, 'missing_audience', 'Audience is required');
   }
 
   try {
-    // Get the JWKS client
-    const jwksClient = await getJwks();
+    console.log(`Verifying GitHub OIDC token with issuer: ${issuer}, audience: ${audience}`);
     
     // Verify the token with the JWKS client
-    const { payload, protectedHeader } = await jwtVerify(token, jwksClient, {
+    const { payload, protectedHeader } = await jwtVerify(token, jwks, {
       issuer,
-      audience,
+      audience: [audience], // Support array of audiences
       algorithms: ['RS256'],
       clockTolerance: opts?.clockToleranceSec ?? 60, // small skew
-    })
+    });
+
+    console.log('Token verified successfully, protected header:', JSON.stringify(protectedHeader, null, 2));
 
     if (!protectedHeader.kid) {
-      throw new OidcAuthError(401, 'missing_kid', 'Token header missing kid')
+      throw new OidcAuthError(401, 'missing_kid', 'Token header missing kid');
     }
 
-    const claims = payload as GithubOidcClaims
+    // Type assertion to access custom claims
+    const claims = payload as GithubOidcClaims;
+    console.log('Token claims:', JSON.stringify(claims, null, 2));
 
-    // Strict allowlist checks
-    const allowedRepo = opts?.allowedRepo ?? getEnv('GHA_ALLOWED_REPO')
-    if (allowedRepo && claims.repository !== allowedRepo) {
-      throw new OidcAuthError(403, 'repo_denied', `Repository not allowed: ${claims.repository}`)
+    // Validate repository if specified
+    if (opts?.allowedRepo) {
+      const [owner, repo] = opts.allowedRepo.split('/');
+      if (claims.repository_owner !== owner || claims.repository !== repo) {
+        throw new OidcAuthError(
+          403, 
+          'invalid_repository', 
+          `Repository ${claims.repository_owner}/${claims.repository} does not match allowed repository ${opts.allowedRepo}`
+        );
+      }
     }
 
-    const allowedRef = opts?.allowedRef ?? getEnv('GHA_ALLOWED_REF')
-    if (allowedRef && claims.ref !== allowedRef) {
-      throw new OidcAuthError(403, 'ref_denied', `Ref not allowed: ${claims.ref}`)
+    // Validate ref if specified
+    if (opts?.allowedRef) {
+      const ref = `refs/heads/${opts.allowedRef}`;
+      if (claims.ref !== ref) {
+        throw new OidcAuthError(
+          403, 
+          'invalid_ref', 
+          `Ref ${claims.ref} does not match allowed ref ${ref}`
+        );
+      }
     }
 
-    const allowedWorkflow = opts?.allowedWorkflow ?? getEnv('GHA_ALLOWED_WORKFLOW')
-    if (allowedWorkflow && claims.workflow !== allowedWorkflow) {
-      throw new OidcAuthError(403, 'workflow_denied', `Workflow not allowed: ${claims.workflow}`)
+    // Validate workflow if specified
+    if (opts?.allowedWorkflow && claims.workflow !== opts.allowedWorkflow) {
+      throw new OidcAuthError(
+        403, 
+        'invalid_workflow', 
+        `Workflow ${claims.workflow} does not match allowed workflow ${opts.allowedWorkflow}`
+      );
     }
 
-    return claims
-  } catch (err: any) {
-    console.error('OIDC verification failed:', {
-      name: err?.name,
-      message: err?.message,
-      code: err?.code,
-      stack: err?.stack,
-    });
+    return claims;
+  } catch (error) {
+    console.error('GitHub OIDC verification failed:', error);
     
-    if (err instanceof OidcAuthError) throw err;
-    
-    // Map jose errors to HTTP-friendly ones
-    const msg = typeof err?.message === 'string' ? err.message : 'verification failed';
-    
-    // More specific error handling
-    let status = 403;
-    if (msg.includes('no applicable key found in the JSON Web Key Set')) {
-      status = 401;
-      console.error('JWKS key not found - this usually means the token was issued by a different identity provider');
-    } else if (/audience|issuer|signature|expired|not active/i.test(msg)) {
-      status = 401;
+    if (error instanceof OidcAuthError) {
+      throw error;
     }
     
-    throw new OidcAuthError(status, 'invalid_token', msg);
+    // Handle specific JWT errors
+    if (error instanceof Error) {
+      if ('code' in error) {
+        const code = (error as any).code;
+        if (code === 'ERR_JWKS_NO_MATCHING_KEY') {
+          console.error('JWKS key not found - this usually means the token was issued by a different identity provider');
+          throw new OidcAuthError(
+            401, 
+            'invalid_token', 
+            'No matching key found in the JSON Web Key Set. The token might be from a different identity provider.'
+          );
+        } else if (code === 'ERR_JWT_EXPIRED') {
+          throw new OidcAuthError(401, 'token_expired', 'Token has expired');
+        } else if (code === 'ERR_JWT_CLAIM_VALIDATION_FAILED') {
+          throw new OidcAuthError(401, 'invalid_claims', 'Invalid token claims');
+        } else if (code === 'ERR_JWS_SIGNATURE_VERIFICATION_FAILED') {
+          throw new OidcAuthError(401, 'invalid_signature', 'Invalid token signature');
+        }
+      }
+      
+      // Fallback error handling
+      if (error.message.includes('JWTExpired')) {
+        throw new OidcAuthError(401, 'token_expired', 'Token has expired');
+      }
+      
+      if (error.message.includes('JWSInvalid') || error.message.includes('JWSSignatureVerificationFailed')) {
+        throw new OidcAuthError(401, 'invalid_signature', 'Invalid token signature');
+      }
+    }
+
+    // Default error
+    throw new OidcAuthError(
+      401, 
+      'invalid_token', 
+      `Token verification failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+    );
   }
 }
