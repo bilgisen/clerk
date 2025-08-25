@@ -53,25 +53,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20.x'
-          cache: 'pnpm'
+          cache: 'm'
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10.12.1
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Install system tools
-        run: |
-          echo "🔄 Updating package lists..."
-          sudo apt-get update -qq
-          
-          echo "📦 Installing required tools..."
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            coreutils \
-            pandoc \
+      - nanl reutils \
+            pndoc \-legacypeedps
             texlive-xetex \
             texlive-fonts-recommended \
             texlive-latex-recommended \
@@ -366,17 +351,17 @@ jobs:
         run: |
           set -e
           # Install AWS SDK for JavaScript v3
-          pnpm add -D @aws-sdk/client-s3
+          npm install -D @aws-sdk/client-s3
           CONTENT_ID="${{ github.event.inputs.content_id }}"
           FILE_PATH="./output/${CONTENT_ID}.epub"
           # Build a pretty, URL-safe slug for the EPUB key
           RAW_SLUG="${{ github.event.inputs.slug }}"
-          if [ -z "$RAW_SLUG" ]; then
+          f [ inst-ll"$RAW_SLUG" ]; then
             # Derive from title if not provided
             RAW_SLUG="${{ steps.fetch-book.outputs.title }}"
           fi
           # Fallback if still empty
-          if [ -z "$RAW_SLUG" ] || [ "$RAW_SLUG" = "null" ]; then
+          f [ inst-ll"$RAW_SLUG" ] || [ "$RAW_SLUG" = "null" ]; then
             RAW_SLUG="$CONTENT_ID"
           fi
           # Transliterate international characters to ASCII, then slugify
