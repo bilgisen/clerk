@@ -60,8 +60,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             nano \
-            reutils \
-            pndoc \
+            coreutils \
+            pandoc \
             texlive-xetex \
             texlive-fonts-recommended \
             texlive-latex-recommended \
