@@ -23,11 +23,7 @@ env:
 
 jobs:
   build-epub:
-    name: Build EPUB
     runs-on: ubuntu-latest
-    container:
-      image: pandoc/core:3.2
-
     permissions:
       id-token: write
       contents: read
@@ -36,33 +32,30 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Generate OIDC Token
-        id: generate_token
-        run: |
-          echo "🔑 Requesting OIDC token with audience: $GHA_OIDC_AUDIENCE"
-          OIDC_TOKEN=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=$GHA_OIDC_AUDIENCE" | jq -r '.value')
-          if [ -z "$OIDC_TOKEN" ] || [ "$OIDC_TOKEN" = "null" ]; then
-            echo "::error::Failed to obtain OIDC token"
-            exit 1
-          fi
-          echo "token=$OIDC_TOKEN" >> $GITHUB_OUTPUT
-          echo "audience=$GHA_OIDC_AUDIENCE" >> $GITHUB_OUTPUT
+      - name: Get OIDC token
+        id: get-oidc
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const audience = process.env.GHA_OIDC_AUDIENCE;
+            const { data } = await github.rest.actions.getOidcToken({
+              repository: context.repo.owner + "/" + context.repo.repo,
+              audience
+            });
+            core.setOutput("token", data.value);
 
       - name: Fetch Book Content
         env:
           CONTENT_ID: ${{ github.event.inputs.content_id }}
-          JWT_TOKEN: ${{ steps.generate_token.outputs.token }}
+          JWT_TOKEN: ${{ steps.get-oidc.outputs.token }}
           API_BASE_URL: ${{ env.API_BASE_URL }}
         run: |
           set -e
-          echo "🔐 Using JWT with audience: ${{ steps.generate_token.outputs.audience }}"
+          echo "🔐 Using JWT with audience: ${{ env.GHA_OIDC_AUDIENCE }}"
           export JWT_HEADER="Bearer $JWT_TOKEN"
-          export CONTENT_ID
-          mkdir -p ./book-content
+          mkdir -p ./book-content ./output
           chmod +x ./scripts/fetch-book.sh
           ./scripts/fetch-book.sh
-          mkdir -p ./output
 
       - name: Generate EPUB
         run: |
@@ -101,10 +94,7 @@ jobs:
           echo "📖 Building EPUB..."
           "${PANDOC_CMD[@]}"
 
-          ls -lh ./output
-
       - name: Upload EPUB to Cloudflare R2
-        id: r2_upload
         run: |
           CONTENT_ID="${{ github.event.inputs.content_id }}"
           FILE_PATH="./output/${CONTENT_ID}.epub"
