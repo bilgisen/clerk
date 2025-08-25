@@ -5,7 +5,55 @@ const DEFAULT_ISSUER = 'https://token.actions.githubusercontent.com'
 const DEFAULT_JWKS_URL = 'https://token.actions.githubusercontent.com/.well-known/jwks'
 
 // Cached JWKS instance
-let jwks: ReturnType<typeof createRemoteJWKSet> | null = null
+let jwks: ReturnType<typeof createRemoteJWKSet> | null = null;
+
+// Helper to create a proper JWKS client
+async function createCustomJWKSClient(url: string): Promise<ReturnType<typeof createRemoteJWKSet>> {
+  const baseClient = createRemoteJWKSet(new URL(url), {
+    cooldownDuration: 60_000,
+    timeoutDuration: 10_000,
+  });
+
+  // Create a wrapper function that adds our custom key selection logic
+  const client = async (protectedHeader: any, token: any): Promise<CryptoKey> => {
+    try {
+      // First try to find a key using the kid from the token header
+      if (protectedHeader?.kid) {
+        try {
+          // Fetch all keys
+          const response = await fetch(url);
+          const { keys } = await response.json();
+          
+          // Find a key that matches our criteria
+          const matchingKey = keys.find((k: any) => 
+            k.kid === protectedHeader.kid &&
+            k.kty === 'RSA' &&
+            k.alg === 'RS256' &&
+            k.use === 'sig'
+          );
+
+          if (matchingKey) {
+            // Create a new header with only the matching key ID
+            const specificHeader = { ...protectedHeader, kid: matchingKey.kid };
+            return baseClient(specificHeader, token);
+          }
+        } catch (error) {
+          console.error('Error in custom key selection:', error);
+          // Fall through to default behavior
+        }
+      }
+      
+      // Fall back to default behavior if no matching key found or if there was an error
+      return baseClient(protectedHeader, token);
+    } catch (error) {
+      console.error('Error in JWKS client:', error);
+      throw error;
+    }
+  };
+
+  // Copy all properties from baseClient to our client
+  return Object.assign(client, baseClient);
+}
 
 export type OidcVerificationOptions = {
   audience?: string
@@ -38,30 +86,25 @@ function getEnv(name: string, fallback?: string): string | undefined {
   return v && v.length > 0 ? v : fallback
 }
 
-function getJwks(): ReturnType<typeof createRemoteJWKSet> {
+async function getJwks(): Promise<ReturnType<typeof createRemoteJWKSet>> {
   if (!jwks) {
     // Always use the production GitHub OIDC JWKS endpoint
-    const url = new URL('https://token.actions.githubusercontent.com/.well-known/jwks');
+    const jwksUrl = 'https://token.actions.githubusercontent.com/.well-known/jwks';
+    console.log('Initializing JWKS client with URL:', jwksUrl);
     
-    console.log('Initializing JWKS client with URL:', url.toString());
-    
-    jwks = createRemoteJWKSet(url, {
-      cooldownDuration: 60_000, // 60s
-      timeoutDuration: 10_000, // Increased timeout to 10s
-    });
-    
-    // Test the JWKS fetch immediately with proper typing
-    const testKey = jwks({ alg: 'RS256' }, {} as any);
-    if (testKey instanceof Promise) {
-      testKey
-        .then(() => {
-          console.log('Successfully fetched JWKS keys');
-        })
-        .catch((err: Error) => {
-          console.error('Failed to fetch JWKS keys:', err);
-        });
+    try {
+      jwks = await createCustomJWKSClient(jwksUrl);
+      console.log('JWKS client initialized successfully');
+    } catch (error) {
+      console.error('Failed to initialize JWKS client:', error);
+      throw new OidcAuthError(500, 'jwks_init_failed', 'Failed to initialize JWKS client');
     }
   }
+  
+  if (!jwks) {
+    throw new OidcAuthError(500, 'jwks_not_initialized', 'JWKS client not initialized');
+  }
+  
   return jwks;
 }
 
@@ -79,7 +122,11 @@ export async function verifyGithubOidc(token: string, opts?: OidcVerificationOpt
   }
 
   try {
-    const { payload, protectedHeader } = await jwtVerify(token, getJwks(), {
+    // Get the JWKS client
+    const jwksClient = await getJwks();
+    
+    // Verify the token with the JWKS client
+    const { payload, protectedHeader } = await jwtVerify(token, jwksClient, {
       issuer,
       audience,
       algorithms: ['RS256'],
