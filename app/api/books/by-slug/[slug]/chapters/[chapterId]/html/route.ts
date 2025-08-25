@@ -1,10 +1,11 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, NextRequest } from 'next/server';
 import { headers } from 'next/headers';
 import { db } from '@/db/drizzle';
-import { books, chapters } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import { books, chapters, users } from '@/db/schema';
+import { eq, and } from 'drizzle-orm';
 import { generateChapterHTML, generateCompleteDocumentHTML } from '@/lib/generateChapterHTML';
 import { verifyGithubOidc } from '@/lib/auth/verifyGithubOidc';
+import { getAuth } from '@clerk/nextjs/server';
 
 export const dynamic = 'force-dynamic';
 export const dynamicParams = true;
@@ -17,15 +18,55 @@ interface BookWithChapters extends Book {
   chapters?: Chapter[];
 }
 
-// Verify GitHub OIDC token and return claims if valid
-async function verifyRequest(headers: Headers) {
-  const authHeader = headers.get('authorization') || headers.get('Authorization') || '';
+type AuthResult = {
+  type: 'github' | 'clerk';
+  userId?: string;
+  repository?: string;
+  ref?: string;
+  workflow?: string;
+  actor?: string;
+  run_id?: string;
+};
+
+// Verify authentication (either Clerk or GitHub OIDC)
+async function verifyRequest(headers: Headers, request: NextRequest): Promise<AuthResult> {
+  // Check for Clerk token first (from Clerk-Authorization header)
+  const clerkAuthHeader = headers.get('clerk-authorization') || headers.get('Clerk-Authorization') || '';
   
-  if (!authHeader?.startsWith('Bearer ')) {
+  if (clerkAuthHeader?.startsWith('Bearer ')) {
+    try {
+      // Remove the Clerk-Authorization header to prevent conflicts with getAuth()
+      const modifiedRequest = new NextRequest(request);
+      modifiedRequest.headers.delete('authorization');
+      modifiedRequest.headers.delete('Authorization');
+      
+      const authObj = getAuth(modifiedRequest);
+      if (authObj.userId) {
+        console.log('Authenticated via Clerk');
+        return { 
+          type: 'clerk', 
+          userId: authObj.userId,
+          // Add empty GitHub specific fields to satisfy TypeScript
+          repository: '',
+          ref: '',
+          workflow: '',
+          actor: '',
+          run_id: ''
+        };
+      }
+    } catch (clerkError) {
+      console.log('Clerk authentication failed:', clerkError);
+    }
+  }
+  
+  // If no Clerk token or Clerk auth failed, try GitHub OIDC
+  const githubAuthHeader = headers.get('authorization') || headers.get('Authorization') || '';
+  
+  if (!githubAuthHeader.startsWith('Bearer ')) {
     throw new Error('Missing or invalid Authorization header');
   }
 
-  const token = authHeader.split(' ')[1];
+  const token = githubAuthHeader.split(' ')[1];
   
   if (!token) {
     throw new Error('Missing token in Authorization header');
@@ -38,23 +79,71 @@ async function verifyRequest(headers: Headers) {
       allowedRef: process.env.GHA_ALLOWED_REF,
     });
     
-    return claims;
-  } catch (error) {
-    console.error('GitHub OIDC verification failed:', error);
-    throw new Error('Invalid or expired token');
+    console.log('Authenticated via GitHub OIDC');
+    // Type assertion for GitHub claims
+    const githubClaims = claims as {
+      repository?: string;
+      ref?: string;
+      workflow?: string;
+      actor?: string;
+      run_id?: string;
+    };
+    
+    return { 
+      type: 'github', 
+      repository: githubClaims.repository || '',
+      ref: githubClaims.ref || '',
+      workflow: githubClaims.workflow || '',
+      actor: githubClaims.actor || '',
+      run_id: githubClaims.run_id || ''
+    };
+  } catch (githubError) {
+    console.error('GitHub OIDC verification failed:', githubError);
+    throw new Error('No valid authentication found');
   }
 }
 
 export async function GET(
-  request: Request,
+  request: NextRequest,
   { params }: { params: { slug: string; chapterId: string } }
 ) {
   try {
     const { slug, chapterId } = params;
     
     // Verify GitHub OIDC token
-    const headersList = await headers();
-    const claims = await verifyRequest(new Headers(headersList));
+    const authHeader = await headers();
+    const headersObj = Object.fromEntries(Array.from(authHeader.entries()));
+    const claims = await verifyRequest(new Headers(headersObj), request);
+    
+    console.log('Authentication successful:', {
+      type: claims.type,
+      userId: claims.userId,
+      repository: claims.repository,
+      ref: claims.ref,
+      workflow: claims.workflow,
+      actor: claims.actor,
+      run_id: claims.run_id
+    });
+    
+    // For Clerk auth, verify the user owns the book
+    if (claims.type === 'clerk' && claims.userId) {
+      const bookResult = await db.select()
+        .from(books)
+        .innerJoin(users, eq(books.userId, users.id))
+        .where(and(
+          eq(users.clerkId, claims.userId),
+          eq(books.slug, params.slug)
+        ))
+        .limit(1);
+        
+      if (!bookResult.length) {
+        console.error(`Access denied: User ${claims.userId} does not own book ${params.slug}`);
+        return new NextResponse(
+          JSON.stringify({ error: 'Access denied' }), 
+          { status: 403, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+    }
     
     console.log('GitHub OIDC token verified successfully for chapter HTML:', {
       repository: claims.repository,
