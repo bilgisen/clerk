@@ -27,7 +27,7 @@ env:
   NODE_ENV: development  # Development mode for Clerk integration
   
   # OIDC Audience used when fetching the GitHub OIDC token
-  GITHUB_OIDC_AUDIENCE: 'https://api.clerko.com/ci'
+  GITHUB_OIDC_AUDIENCE: 'https://editor.bookshall.com/api/ci'
   
   # Repository information
   GITHUB_REPO_OWNER: bilgisen
@@ -117,7 +117,7 @@ jobs:
       - name: Get GitHub OIDC token
         id: oidc
         env:
-          AUDIENCE: ${{ env.GITHUB_OIDC_AUDIENCE || 'https://api.clerko.com/ci' }}
+          AUDIENCE: ${{ env.GITHUB_OIDC_AUDIENCE || 'https://editor.bookshall.com/api/ci' }}
         run: |
           set -e
           echo "🔑 Requesting GitHub OIDC token (audience=$AUDIENCE)"
@@ -137,67 +137,49 @@ jobs:
         timeout-minutes: 30
         env:
           CONTENT_ID: ${{ github.event.inputs.content_id }}
-          BASE_URL: 'https://matbu.vercel.app'
-          GITHUB_REPO_OWNER: ${{ env.GITHUB_REPO_OWNER }}
-          GITHUB_REPO_NAME: ${{ env.GITHUB_REPO_NAME }}
-          GITHUB_REF: ${{ github.ref }}
-          JWT_HEADER: ${{ env.JWT_HEADER }}
-          JWT_TOKEN: ${{ env.JWT_TOKEN }}
-          DOWNLOAD_TIMEOUT: ${{ env.DOWNLOAD_TIMEOUT }}
-          # Add verbose logging
-          CURL_VERBOSE: "1"
-          DEBUG: "*"
+          BASE_URL: 'https://editor.bookshall.com'
         run: |
           set -e
           echo "📚 Starting book content fetch for ID: $CONTENT_ID"
           
-          # Debug environment variables (excluding sensitive data)
-          echo "[INFO] 🔧 Environment variables:"
-          printenv | grep -v -E 'SECRET|TOKEN|PASSWORD|KEY' | sort
+          # Get GitHub OIDC token
+          echo "🔑 Requesting GitHub OIDC token..."
+          TOKEN=$(curl -sLS "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${GITHUB_OIDC_AUDIENCE}" \
+            -H "User-Agent: actions/oidc-client" \
+            -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" | jq -r '.value')
           
-          # Validate JWT token
-          if [ -z "$JWT_TOKEN" ]; then
-            echo "::error::JWT_TOKEN is empty"
+          if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
+            echo "::error::Failed to obtain OIDC token"
             exit 1
           fi
           
-          # Create output directory
-          mkdir -p ./book-content
+          echo "✅ OIDC token acquired"
           
-          # Make the script executable
-          chmod +x scripts/fetch-book.sh
-          
-          # Debug: Print token info
-          echo "[DEBUG] 🔑 JWT token acquired (length only)"
-          echo "- Token length: ${#JWT_TOKEN} characters"
-          
-          # Debug: Make a test request to the OIDC-protected CI endpoint
-          echo "[DEBUG] 🧪 Testing CI endpoint access..."
-          IDEM_KEY="${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}"
-          curl -v -s -f \
-            -H "Accept: application/json" \
-            -H "Authorization: $JWT_HEADER" \
-            -H "Idempotency-Key: ${IDEM_KEY}" \
+          # Make the API call
+          echo "🚀 Calling API endpoint..."
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            -X POST \
+            -H "Authorization: Bearer ${TOKEN}" \
             -H "Content-Type: application/json" \
-            -d "{\"contentId\":\"$CONTENT_ID\",\"mode\":\"${{ github.event.inputs.format }}\"}" \
-            "$BASE_URL/api/ci/process" \
-            -o /dev/null \
-            -w "\nResponse Code: %{http_code}\n" \
-            --max-time 30 || true
-          
-          # Set executable permissions and run the fetch script with timeout
-          echo "[INFO] 🚀 Starting fetch-book.sh..."
-          chmod +x ./scripts/fetch-book.sh
-          
-          # Execute the script with the token
-          if ! timeout $DOWNLOAD_TIMEOUT ./scripts/fetch-book.sh; then
-            echo "::error::Book content fetch failed"
+            -d "{\"contentId\":\"${CONTENT_ID}\",\"mode\":\"${{ github.event.inputs.format }}\"}" \
+            "${BASE_URL}/api/ci/process")
             
-            # Check for any error logs
-            if [ -f "./curl-debug.log" ]; then
-              echo "=== cURL Debug Log ==="
-              cat ./curl-debug.log
-            fi
+          # Extract status code and response body
+          HTTP_STATUS=$(echo "$RESPONSE" | tail -n1)
+          RESPONSE_BODY=$(echo "$RESPONSE" | sed '$d')
+          
+          echo "🔍 API Response Status: $HTTP_STATUS"
+          echo "📄 Response Body: $RESPONSE_BODY"
+          
+          if [ "$HTTP_STATUS" -ge 400 ]; then
+            echo "::error::API request failed with status $HTTP_STATUS"
+            exit 1
+          fi
+          
+          echo "✅ Successfully triggered content processing"
+          
+          # Create output directory for any subsequent steps
+          mkdir -p ./book-content
             
             if [ -f "./headers.txt" ]; then
               echo "=== Response Headers ==="
@@ -383,7 +365,7 @@ jobs:
         env:
           JWT_HEADER: ${{ env.JWT_HEADER }}
           EPUB_URL: ${{ steps.r2_upload.outputs.epub_url }}
-          BASE_URL: https://matbu.vercel.app
+          BASE_URL: https://editor.bookshall.com
         run: |
           set -e
           if [ -z "$EPUB_URL" ]; then
