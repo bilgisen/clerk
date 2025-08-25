@@ -161,11 +161,27 @@ download_with_retry() {
   for ((i=1; i<=max_retries; i++)); do
     echo "   Attempt $i of $max_retries..."
     
+    # Set headers based on content type
+    local headers=(
+      "-H" "Authorization: Bearer $JWT_TOKEN"
+      "-H" "X-Auth-Method: oidc"
+      "-H" "X-Auth-Audience: $JWT_AUDIENCE"
+    )
+    
+    # Add Accept header based on URL
+    if [[ "$url" == *"/html" ]]; then
+      headers+=("-H" "Accept: text/html")
+    else
+      headers+=("-H" "Accept: application/json")
+    fi
+    
     if curl -v --connect-timeout $timeout_seconds --max-time $((timeout_seconds * 2)) \
-       -H "Authorization: $JWT_HEADER" \
-       -H "Accept: text/html" \
-       -o "$output_file" \
+       "${headers[@]}" \
+       -o "$output_file.tmp" \
        "$url" 2>> "${output_file}.debug.log"; then
+      
+      # Only move the file if download was successful
+      mv "${output_file}.tmp" "$output_file"
       
       echo "✅ Download successful"
       return 0
@@ -194,17 +210,6 @@ download_with_retry() {
   
   return 1
 }
-
-# Ensure the book-content directory exists
-mkdir -p ./book-content
-
-# Set the API base URL from environment or use default
-BASE_API_URL=${API_BASE_URL:-'https://editor.bookshall.com'}
-PAYLOAD_URL="${BASE_API_URL}/api/books/by-id/${CONTENT_ID}/payload"
-
-# Debug output
-echo "🔍 Making authenticated request to: $PAYLOAD_URL"
-echo "🔑 Using JWT with audience: ${JWT_AUDIENCE}"
 
 # Make the request with verbose output and save debug info
 set -x
@@ -308,9 +313,16 @@ if [ -n "$STYLESHEET_URL" ]; then
   download_with_retry "$STYLESHEET_URL" "./book-content/styles/epub.css" || echo "⚠️ Warning: Failed to download stylesheet"
 fi
 
-# Extract chapter list
+# Extract book slug from the payload
+BOOK_SLUG=$(jq -r '.book.slug // empty' ./book-content/payload.json)
+if [ -z "$BOOK_SLUG" ]; then
+  echo "::error::❌ Book slug not found in payload"
+  exit 2
+fi
+
+# Extract chapter list with IDs
 echo "📄 Extracting chapters..."
-if ! jq -r '.book.chapters[] | "\(.order) \(.url)"' ./book-content/payload.json > ./book-content/chapters-list.txt; then
+if ! jq -r '.book.chapters[] | "\(.order) \(.id)"' ./book-content/payload.json > ./book-content/chapters-list.txt; then
   echo "::error::❌ Failed to parse chapter list"
   exit 2
 fi
@@ -318,16 +330,8 @@ fi
 CHAPTER_COUNT=$(wc -l < ./book-content/chapters-list.txt)
 echo "✅ Found $CHAPTER_COUNT chapters"
 
-# Extract base URL from the first chapter URL to ensure we have the correct domain
-FIRST_CHAPTER_URL=$(head -n 1 ./book-content/chapters-list.txt | cut -d' ' -f2)
-if [[ "$FIRST_CHAPTER_URL" =~ ^https?:// ]]; then
-  # If it's a full URL, extract the base
-  BASE_API_URL=$(echo "$FIRST_CHAPTER_URL" | grep -o '^https\?://[^/]*')
-else
-  # Otherwise, use the provided API base URL
-  BASE_API_URL=${API_BASE_URL}
-fi
-echo "🌐 Using API base URL: $BASE_API_URL"
+# Set base API URL
+BASE_API_URL="${API_BASE_URL:-https://editor.bookshall.com}"
 
 # Download chapters in batch
 BATCH_SIZE=5
@@ -335,14 +339,15 @@ for ((i=0; i<CHAPTER_COUNT; i+=BATCH_SIZE)); do
   echo "📥 Processing chapters $((i+1))-$((i+BATCH_SIZE))"
   tail -n +$((i+1)) ./book-content/chapters-list.txt | head -n $BATCH_SIZE | while read -r ORDER URL; do
     echo "🔸 Downloading chapter $ORDER..."
-    # Ensure we're using the full URL with the correct base
-    FULL_URL="$URL"
-    if [[ ! "$URL" =~ ^https?:// ]]; then
-      FULL_URL="${BASE_API_URL}${URL}"
-    fi
+    # Construct the chapter URL using the book slug and chapter ID
+    FULL_URL="${BASE_API_URL}/api/books/by-slug/${BOOK_SLUG}/chapters/${URL}/html"
     
     # Add debug output
+    echo "   Chapter ID: $URL"
     echo "   URL: $FULL_URL"
+    
+    # Create chapters directory if it doesn't exist
+    mkdir -p "./book-content/chapters"
     
     if ! download_with_retry "$FULL_URL" "./book-content/chapters/chapter-${ORDER}.xhtml"; then
       
@@ -361,10 +366,17 @@ done
 
 # Download imprint if needed
 if [ "$(jq -r '.options.include_imprint // false' ./book-content/payload.json)" = "true" ]; then
-  IMPRINT_URL=$(jq -r '.book.imprint.url // empty' ./book-content/payload.json)
-  if [ -n "$IMPRINT_URL" ]; then
-    echo "⬇️ Downloading imprint..."
-    
+  echo "⬇️ Downloading imprint..."
+  # Construct the imprint URL using the book slug
+  IMPRINT_URL="${BASE_API_URL}/api/books/by-slug/${BOOK_SLUG}/imprint"
+  echo "   Imprint URL: $IMPRINT_URL"
+  
+  if ! download_with_retry "$IMPRINT_URL" "./book-content/imprint.xhtml"; then
+    echo "::warning::⚠️ Failed to download imprint"
+  else
+    echo "✅ Successfully downloaded imprint"
+  fi
+fi
     # Ensure we're using the full URL with the correct base
     FULL_IMPRINT_URL="$IMPRINT_URL"
     if [[ ! "$IMPRINT_URL" =~ ^https?:// ]]; then

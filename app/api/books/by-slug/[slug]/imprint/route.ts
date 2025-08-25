@@ -48,8 +48,14 @@ export async function GET(
           });
           
           // Verify the token audience matches our expected API audience
-          if (claims.aud !== process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
-            console.error('Invalid audience in OIDC token for imprint:', claims.aud);
+          const expectedAudience = process.env.GHA_OIDC_AUDIENCE;
+          if (claims.aud !== expectedAudience) {
+            console.error('Invalid audience in OIDC token for imprint:', {
+              received: claims.aud,
+              expected: expectedAudience,
+              issuer: claims.iss,
+              repository: claims.repository
+            });
             return new NextResponse('Invalid token audience', { status: 403 });
           }
         }
