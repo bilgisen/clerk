@@ -195,11 +195,23 @@ download_with_retry() {
   return 1
 }
 
+# Ensure the book-content directory exists
+mkdir -p ./book-content
+
+# Set the API base URL from environment or use default
+BASE_API_URL=${API_BASE_URL:-'https://editor.bookshall.com'}
+PAYLOAD_URL="${BASE_API_URL}/api/books/by-id/${CONTENT_ID}/payload"
+
+# Debug output
+echo "🔍 Making authenticated request to: $PAYLOAD_URL"
+echo "🔑 Using JWT with audience: ${JWT_AUDIENCE}"
+
 # Make the request with verbose output and save debug info
 set -x
 curl -v -s -f -D ./headers.txt -o ./book-content/payload.json \
   -H "Accept: application/json" \
   -H "Authorization: $JWT_HEADER" \
+  -H "X-Auth-Method: oidc" \
   "$PAYLOAD_URL" 2> ./curl-debug.log || {
     CURL_EXIT_CODE=$?
     set +x
@@ -308,7 +320,14 @@ echo "✅ Found $CHAPTER_COUNT chapters"
 
 # Extract base URL from the first chapter URL to ensure we have the correct domain
 FIRST_CHAPTER_URL=$(head -n 1 ./book-content/chapters-list.txt | cut -d' ' -f2)
-BASE_API_URL=$(echo "$FIRST_CHAPTER_URL" | grep -o '^https\?://[^/]*')
+if [[ "$FIRST_CHAPTER_URL" =~ ^https?:// ]]; then
+  # If it's a full URL, extract the base
+  BASE_API_URL=$(echo "$FIRST_CHAPTER_URL" | grep -o '^https\?://[^/]*')
+else
+  # Otherwise, use the provided API base URL
+  BASE_API_URL=${API_BASE_URL}
+fi
+echo "🌐 Using API base URL: $BASE_API_URL"
 
 # Download chapters in batch
 BATCH_SIZE=5

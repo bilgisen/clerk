@@ -16,6 +16,7 @@ env:
   NODE_ENV: production
   API_BASE_URL: 'https://editor.bookshall.com'
   GHA_OIDC_AUDIENCE: 'https://editor.bookshall.com/api/ci'
+  CLERK_PUBLISHABLE_KEY: 'pk_test_c3VubnktZG9nZmlzaC0xNC5jbGVyay5hY2NvdW50cy5kZXYk'
 
 jobs:
   build-epub:
@@ -35,22 +36,30 @@ jobs:
       - name: Generate OIDC Token
         id: generate_token
         run: |
-          echo "🔑 Requesting OIDC token with audience: $GHA_OIDC_AUDIENCE"
+          # Use the Clerk publishable key as the audience
+          AUDIENCE="${{ env.CLERK_PUBLISHABLE_KEY }}"
+          echo "🔑 Requesting OIDC token with audience: $AUDIENCE"
           OIDC_TOKEN=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=$GHA_OIDC_AUDIENCE" | jq -r '.value')
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=$AUDIENCE" | jq -r '.value')
           if [ -z "$OIDC_TOKEN" ] || [ "$OIDC_TOKEN" = "null" ]; then
             echo "::error::Failed to obtain OIDC token"
             exit 1
           fi
           echo "token=$OIDC_TOKEN" >> $GITHUB_OUTPUT
+          echo "audience=$AUDIENCE" >> $GITHUB_OUTPUT
 
       - name: Fetch Book Content
         env:
           CONTENT_ID: ${{ github.event.inputs.content_id }}
           JWT_TOKEN: ${{ steps.generate_token.outputs.token }}
+          JWT_AUDIENCE: ${{ steps.generate_token.outputs.audience }}
+          API_BASE_URL: ${{ env.API_BASE_URL }}
         run: |
           set -e
+          echo "🔐 Using JWT with audience: $JWT_AUDIENCE"
           export JWT_HEADER="Bearer $JWT_TOKEN"
+          export JWT_AUDIENCE
+          export API_BASE_URL
           chmod +x ./scripts/fetch-book.sh
           ./scripts/fetch-book.sh
           mkdir -p ./output
