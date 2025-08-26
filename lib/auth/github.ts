@@ -1,3 +1,4 @@
+// lib/auth/github.ts
 import { jwtVerify, createRemoteJWKSet } from 'jose';
 import { AuthError, ConfigurationError, TokenValidationError } from './errors';
 
