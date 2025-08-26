@@ -1,35 +1,61 @@
-// middleware.ts
-import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from 'next/server';
+import { verifySecretToken } from '@/lib/auth/verifySecret';
 
-const isProtectedRoute = createRouteMatcher([
-  "/dashboard(.*)",
-  "/api/:path*", // tüm API'leri kapsa
-]);
+// Routes that allow secret token authentication
+const SECRET_TOKEN_ROUTES = [
+  '/api/books/by-id/(.*)/payload',
+  '/api/books/by-slug/(.*)/imprint',
+  '/api/books/by-slug/(.*)/chapters/(.*)/html',
+  '/api/books/by-slug/(.*)/chapters/(.*)/content',
+  '/api/debug/(.*)',
+];
 
-export default clerkMiddleware((auth, req) => {
-  const { pathname } = req.nextUrl;
+// Public routes that don't require authentication
+const PUBLIC_ROUTES = [
+  '/api/public/(.*)',
+  '/api/trpc/(.*)',
+  '/_next/(.*)',
+  '/favicon.ico',
+];
 
-  // İstisnalar → auth devre dışı
-  if (pathname.startsWith("/api/ci")) {
+// Check if path matches any of the patterns
+const isPathMatching = (path: string, patterns: string[]): boolean => {
+  return patterns.some(pattern => {
+    const regex = new RegExp(`^${pattern.replace(/\*/g, '.*')}$`);
+    return regex.test(path);
+  });
+};
+
+export default function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+
+  // Skip auth for public routes
+  if (isPathMatching(pathname, PUBLIC_ROUTES)) {
     return NextResponse.next();
   }
-  if (/^\/api\/books\/[^/]+\/payload$/.test(pathname)) {
-    return NextResponse.next();
+
+  // Check for secret token on allowed routes
+  if (isPathMatching(pathname, SECRET_TOKEN_ROUTES)) {
+    return verifySecretToken(request).then(isValid => {
+      if (isValid) {
+        return NextResponse.next();
+      }
+      return new NextResponse(
+        JSON.stringify({ error: 'Unauthorized', message: 'Invalid or missing secret token' }),
+        { status: 401, headers: { 'Content-Type': 'application/json' } }
+      );
+    });
   }
 
-  // Korumalı route
-  if (isProtectedRoute(req)) {
-    auth.protect();
-  }
-
-  return NextResponse.next();
-});
+  // For all other routes, redirect to sign-in
+  const signInUrl = new URL('/sign-in', request.url);
+  signInUrl.searchParams.set('redirect_url', request.url);
+  return NextResponse.redirect(signInUrl);
+}
 
 export const config = {
   matcher: [
-    // tüm route’lar (next/image, static ve favicon hariç)
-    "/((?!_next/static|_next/image|favicon.ico).*)",
-    "/trpc/(.*)",
+    '/((?!_next/static|_next/image|favicon.ico|sign-in).*)',
+    '/trpc/(.*)',
   ],
 };

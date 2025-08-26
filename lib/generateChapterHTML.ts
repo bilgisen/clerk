@@ -1,6 +1,66 @@
 import type { Book, Chapter } from '@/db/schema';
 
 /**
+ * Converts Lexical editor state to HTML
+ */
+function convertLexicalToHTML(lexicalState: any): string {
+  try {
+    if (!lexicalState?.root?.children) return '';
+    
+    const processNode = (node: any): string => {
+      // Handle text nodes
+      if (node.text) {
+        let text = node.text;
+        
+        // Apply text formatting
+        if (node.format & 1) text = `<strong>${text}</strong>`; // Bold
+        if (node.format & 2) text = `<em>${text}</em>`; // Italic
+        if (node.format & 4) text = `<u>${text}</u>`; // Underline
+        if (node.format & 8) text = `<code>${text}</code>`; // Code
+        if (node.format & 16) text = `<s>${text}</s>`; // Strikethrough
+        
+        return text;
+      }
+      
+      // Handle element nodes
+      if (node.children) {
+        const childrenHTML = node.children.map((child: any) => processNode(child)).join('');
+        
+        switch (node.type) {
+          case 'paragraph':
+            return `<p>${childrenHTML}</p>`;
+          case 'heading':
+            const level = node.tag?.match(/h([1-6])/)?.[1] || '2';
+            return `<h${level}>${childrenHTML}</h${level}>`;
+          case 'list':
+            const listTag = node.tag === 'ol' ? 'ol' : 'ul';
+            return `<${listTag}>${childrenHTML}</${listTag}>`;
+          case 'listitem':
+            return `<li>${childrenHTML}</li>`;
+          case 'quote':
+            return `<blockquote>${childrenHTML}</blockquote>`;
+          case 'link':
+            return `<a href="${node.url || '#'}"${node.rel ? ` rel="${node.rel}"` : ''}${node.target ? ` target="${node.target}"` : ''}>${childrenHTML}</a>`;
+          case 'image':
+            return `<figure><img src="${node.src}" alt="${node.altText || ''}"${node.width ? ` width="${node.width}"` : ''}${node.height ? ` height="${node.height}"` : ''} /><figcaption>${node.caption || ''}</figcaption></figure>`;
+          default:
+            return childrenHTML;
+        }
+      }
+      
+      return '';
+    };
+    
+    return lexicalState.root.children
+      .map((child: any) => processNode(child))
+      .join('\n');
+  } catch (error) {
+    console.error('Error converting Lexical to HTML:', error);
+    return '<p>Error rendering content</p>';
+  }
+}
+
+/**
  * Interface for book metadata used in imprint generation
  */
 interface BookImprintData {
@@ -45,12 +105,34 @@ export function generateChapterHTML(chapter: Chapter, children: Chapter[] = [], 
     title: title || 'Untitled Chapter'
   };
   
+  // Parse the content if it's a stringified JSON
+  let contentHtml = '';
+  if (typeof content === 'string') {
+    try {
+      const parsedContent = JSON.parse(content);
+      // If the content has a root property with children, it's Lexical editor state
+      if (parsedContent?.root?.children) {
+        // Convert Lexical state to HTML
+        contentHtml = convertLexicalToHTML(parsedContent);
+      } else {
+        // If it's a simple string, wrap it in a paragraph
+        contentHtml = `<p>${content}</p>`;
+      }
+    } catch (e) {
+      // If parsing fails, use the content as a simple string
+      contentHtml = `<p>${content}</p>`;
+    }
+  } else if (content) {
+    // If content is already an object, try to render it
+    contentHtml = convertLexicalToHTML(content) || '<p>No content available</p>';
+  }
+
   // Generate the chapter content with proper heading
   let html = `
     <section id="${chapterId}" class="chapter" data-chapter-id="${id}" data-level="${level || 1}">
       <h${headingLevel} id="${chapterId}" class="chapter-title">${title}</h${headingLevel}>
       <div class="chapter-content">
-        ${content || ''}
+        ${contentHtml}
       </div>
   `;
 

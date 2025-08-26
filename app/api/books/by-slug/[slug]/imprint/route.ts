@@ -1,13 +1,15 @@
-import { NextResponse, NextRequest } from 'next/server';
+import { type NextRequest, NextResponse } from 'next/server';
 import { db } from '@/db/drizzle';
 import { books } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 import { generateImprintHTML } from '@/lib/generateChapterHTML';
-import { verifyRequest } from '@/lib/verify-jwt';
 
+// Configuration
 export const dynamic = 'force-dynamic';
 export const dynamicParams = true;
+export const runtime = 'nodejs';
 
+// Types
 type Book = typeof books.$inferSelect;
 
 export async function GET(
@@ -16,48 +18,57 @@ export async function GET(
 ) {
   const requestStart = Date.now();
   
-  try {
-    // Verify authentication
-    const auth = await verifyRequest(request);
-    const { searchParams } = new URL(request.url);
-    const format = searchParams.get('format') || 'html';
+  // Authentication is handled by middleware
+  const { searchParams } = new URL(request.url);
+  const format = searchParams.get('format') || 'html';
 
-    if (format !== 'html' && format !== 'json') {
-      return NextResponse.json(
-        { error: 'Invalid format. Must be html or json' },
-        { status: 400 }
-      );
-    }
-
-    // Get the book with user details
-    const book = await db.query.books.findFirst({
-      where: (books, { eq }) => eq(books.slug, params.slug),
-      with: {
-        user: {
-          columns: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-          },
-        },
+  if (format !== 'html' && format !== 'json') {
+    return NextResponse.json(
+      { 
+        error: 'Invalid format',
+        message: 'Format must be either html or json',
+        status: 400
       },
-    });
+      { status: 400, headers: { 'Content-Type': 'application/json' } }
+    );
+  }
 
-    if (!book) {
-      return NextResponse.json(
-        { error: 'Book not found' },
-        { status: 404 }
+  try {
+    // Get the book by slug with proper error handling
+    let book: Book | undefined;
+    try {
+      [book] = await db
+        .select()
+        .from(books)
+        .where(eq(books.slug, params.slug))
+        .limit(1);
+
+      if (!book) {
+        console.error(`Book not found: ${params.slug}`);
+        return new NextResponse(
+          JSON.stringify({ 
+            error: 'Book not found',
+            message: `No book found with slug: ${params.slug}`,
+            status: 404
+          }), 
+          { status: 404, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+    } catch (error) {
+      console.error('Error fetching book:', error);
+      return new NextResponse(
+        JSON.stringify({ 
+          error: 'Internal server error',
+          message: 'An error occurred while fetching the book',
+          status: 500
+        }), 
+        { status: 500, headers: { 'Content-Type': 'application/json' } }
       );
     }
 
-    // For Clerk users, verify they own the book
-    if (auth.type === 'clerk' && book.userId !== auth.userId) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 403 }
-      );
-    }
+    // Get the current year for the copyright notice
+    const currentYear = new Date().getFullYear();
+    const publishYear = book.publishYear || currentYear;
 
     console.log(`Generating imprint for book: ${book.id}`);
 
@@ -65,13 +76,13 @@ export async function GET(
     const imprintHTML = generateImprintHTML({
       title: book.title,
       author: book.author || 'Unknown Author',
-      publisher: book.publisher,
-      publisherWebsite: book.publisherWebsite,
-      publishYear: book.publishYear ? parseInt(book.publishYear.toString()) : null,
-      isbn: book.isbn,
-      language: book.language || 'en',
-      description: book.description,
-      coverImageUrl: book.coverImageUrl
+      publisher: book.publisher || '',
+      publisherWebsite: book.publisherWebsite || '',
+      publishYear: book.publishYear || new Date().getFullYear(),
+      isbn: book.isbn || '',
+      language: book.language || 'tr',
+      description: book.description || '',
+      coverImageUrl: book.coverImageUrl || ''
     });
 
     console.log(`Successfully generated imprint for book ${book.id} in ${Date.now() - requestStart}ms`);

@@ -1,18 +1,19 @@
 import { type NextRequest, NextResponse } from 'next/server';
 import { db } from '@/db/drizzle';
 import { books, chapters } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
 import { generateChapterHTML, generateCompleteDocumentHTML } from '@/lib/generateChapterHTML';
-import { withAuth } from '@/lib/middleware/withAuth';
-import type { AuthContext, ClerkAuth } from '@/lib/auth/types';
+import { verifySecretToken } from '@/lib/auth/verifySecret';
 
+// Configuration
 export const dynamic = 'force-dynamic';
 export const dynamicParams = true;
+export const runtime = 'nodejs';
 
+// Types
 type Chapter = typeof chapters.$inferSelect;
 type Book = typeof books.$inferSelect;
 
-// Match the BookWithChapters interface from generateChapterHTML
 interface BookWithChapters extends Book {
   chapters?: Chapter[];
 }
@@ -24,110 +25,147 @@ interface RouteParams {
   };
 }
 
-async function handler(
+export async function GET(
   request: NextRequest,
-  context: RouteParams & { auth: AuthContext }
+  { params }: { params: { slug: string; chapterId: string } }
 ) {
-  const { params, auth } = context;
   try {
     const { slug, chapterId } = params;
     const requestStart = Date.now();
     
-    console.log('Authentication context:', {
-      type: auth.type,
-      userId: auth.userId,
-      repository: auth.repository,
-      ref: auth.ref,
-      workflow: auth.workflow,
-      actor: auth.actor,
-      runId: auth.runId,
-      permissions: auth.permissions
-    });
-    
-    // For Clerk auth, verify the user owns the book
-    if (auth.type === 'clerk' && auth.userId) {
-      const clerkAuth = auth as unknown as ClerkAuth;
-      const [book] = await db
-        .select()
-        .from(books)
-        .where(eq(books.slug, slug));
-        
-      if (!book || book.userId !== auth.userId) {
-        console.error(`Access denied: User ${auth.userId} does not have access to book ${slug}`);
-        return new NextResponse(
-          JSON.stringify({ 
-            error: 'Access denied',
-            message: 'You do not have permission to access this resource'
-          }), 
-          { 
-            status: 403, 
-            headers: { 
-              'Content-Type': 'application/json',
-              'WWW-Authenticate': 'Bearer error="insufficient_permissions"'
-            } 
-          }
-        );
-      }
-    }
-    
     console.log(`[${new Date().toISOString()}] Request for book: ${slug}, chapter: ${chapterId}`);
 
-    // Get the book
-    const [book] = await db
-      .select()
-      .from(books)
-      .where(eq(books.slug, slug))
-      .limit(1);
+    // Get the book with proper error handling
+    let book: BookWithChapters | undefined;
+    try {
+      const result = await db.execute(
+        sql`SELECT * FROM books WHERE slug = ${slug} LIMIT 1`
+      );
+      book = result.rows[0] as BookWithChapters | undefined;
 
-    if (!book) {
-      console.error(`Book not found: ${slug}`);
-      return new NextResponse('Book not found', { status: 404 });
+      if (!book) {
+        console.error(`Book not found: ${slug}`);
+        return new NextResponse(
+          JSON.stringify({ error: 'Book not found' }), 
+          { status: 404, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+    } catch (error) {
+      console.error('Error fetching book:', error);
+      return new NextResponse(
+        JSON.stringify({ error: 'Internal server error' }), 
+        { status: 500, headers: { 'Content-Type': 'application/json' } }
+      );
     }
 
-    // Get all chapters for the book in a single query
-    const allChapters = await db
-      .select()
-      .from(chapters)
-      .where(eq(chapters.bookId, book.id))
-      .orderBy(chapters.order, chapters.createdAt);
+    // Get all chapters for the book in a single query using direct SQL
+    let allChapters: Chapter[] = [];
+    try {
+      // Check if request is using secret token
+      const isUsingSecretToken = await verifySecretToken(request);
+      
+      let query = `SELECT * FROM chapters WHERE book_id = $1 `;
+      const params: (string | boolean)[] = [book.id];
+      
+      // Only filter out drafts if not using secret token
+      if (!isUsingSecretToken) {
+        query += `AND is_draft = false `;
+      }
+      
+      query += `ORDER BY "order" ASC`;
+      
+      // Build the query with parameters directly in the SQL string
+      const result = await db.execute(
+        sql.raw(query.replace('$1', `'${book.id}'`))
+      );
+      allChapters = result.rows as Chapter[];
+    } catch (error) {
+      console.error('Error fetching chapters:', error);
+      return new NextResponse(
+        JSON.stringify({ error: 'Error fetching chapters' }), 
+        { status: 500, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
 
-    // Find the requested chapter
-    const chapter = allChapters.find(c => c.id === chapterId);
+    // Debug: Log all chapter IDs and the one we're looking for
+    console.log('All chapter IDs:', allChapters.map(c => c.id));
+    console.log('Looking for chapter ID:', chapterId);
+    console.log('All chapters:', JSON.stringify(allChapters, null, 2));
+    
+    // Find the requested chapter with case-insensitive comparison
+    const chapter = allChapters.find(c => c.id.toLowerCase() === chapterId.toLowerCase());
+    
+    console.log('Found chapter:', chapter);
+    
     if (!chapter) {
-      console.error('Chapter not found:', { chapterId, bookId: book.id });
-      return new NextResponse('Chapter not found', { status: 404 });
+      console.error('Chapter not found:', { 
+        chapterId, 
+        bookId: book.id,
+        availableChapters: allChapters.map(c => ({ id: c.id, title: c.title }))
+      });
+      return new NextResponse(
+        JSON.stringify({ 
+          error: 'Chapter not found',
+          chapterId,
+          availableChapters: allChapters.map(c => ({ id: c.id, title: c.title }))
+        }), 
+        { 
+          status: 404, 
+          headers: { 'Content-Type': 'application/json' } 
+        }
+      );
     }
 
-    // Get direct child chapters
-    const childChapters = allChapters.filter(c => c.parentChapterId === chapter.id);
+    // Get direct child chapters with case-insensitive comparison
+    const childChapters = allChapters.filter(c => 
+      c.parentChapterId && c.parentChapterId.toLowerCase() === chapter.id.toLowerCase()
+    );
+    
+    console.log('Child chapters:', childChapters);
     
     // Prepare book data for the template
     const bookWithChapters: BookWithChapters = {
       ...book,
       chapters: allChapters,
     };
+    
+    console.log('Book with chapters prepared');
 
-    // Generate the HTML content
-    const chapterHTML = generateChapterHTML(chapter, childChapters, bookWithChapters);
-    const completeHTML = generateCompleteDocumentHTML(
-      `${book.title || 'Untitled Book'} - ${chapter.title || 'Untitled Chapter'}`,
-      chapterHTML
-    );
+    try {
+      // Generate the HTML content
+      console.log('Generating chapter HTML...');
+      const chapterHTML = generateChapterHTML(chapter, childChapters, bookWithChapters);
+      console.log('Generated chapter HTML, creating complete document...');
+      
+      const completeHTML = generateCompleteDocumentHTML(
+        `${book.title || 'Untitled Book'} - ${chapter.title || 'Untitled Chapter'}`,
+        chapterHTML
+      );
 
-    // Log successful response
-    console.log(`Successfully generated HTML for chapter ${chapterId} in book ${book.id} [${Date.now() - requestStart}ms]`);
+      // Log successful response
+      console.log(`Successfully generated HTML for chapter ${chapterId} in book ${book.id} [${Date.now() - requestStart}ms]`);
 
-    return new NextResponse(completeHTML, {
-      headers: {
-        'Content-Type': 'text/html; charset=utf-8',
-        'Cache-Control': 'public, max-age=300, s-maxage=3600, stale-while-revalidate=86400',
-        'X-Content-Type-Options': 'nosniff',
-        'X-Frame-Options': 'DENY',
-        'X-XSS-Protection': '1; mode=block',
-        'Referrer-Policy': 'strict-origin-when-cross-origin',
-        'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
-      },
-    });
+      return new NextResponse(completeHTML, {
+        headers: {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': 'public, max-age=300, s-maxage=3600, stale-while-revalidate=86400',
+          'X-Content-Type-Options': 'nosniff',
+          'X-Frame-Options': 'DENY',
+          'X-XSS-Protection': '1; mode=block',
+          'Referrer-Policy': 'strict-origin-when-cross-origin',
+          'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+        },
+      });
+    } catch (error) {
+      console.error('Error generating HTML:', error);
+      return new NextResponse(
+        JSON.stringify({ 
+          error: 'Failed to generate HTML',
+          details: error instanceof Error ? error.message : 'Unknown error'
+        }), 
+        { status: 500, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     const statusCode = errorMessage.includes('authentication') ? 401 : 
@@ -156,5 +194,4 @@ async function handler(
   }
 }
 
-// Export the wrapped handler with authentication
-export const GET = withAuth(handler as any); // Temporary type assertion to fix Next.js route handler typing
+// Authentication is handled by middleware

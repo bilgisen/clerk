@@ -1,9 +1,8 @@
 // app/api/books/by-id/[id]/payload/route.ts
-import { NextResponse, NextRequest } from 'next/server';
+import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/db/drizzle';
 import { books, chapters } from '@/db/schema';
 import { and, eq } from 'drizzle-orm';
-import { verifyRequest } from '@/lib/verify-jwt';
 import { z } from 'zod';
 
 // Schema for query parameters
@@ -184,9 +183,6 @@ export async function GET(
     const baseUrl = getBaseUrl(request);
     const bookId = params.id;
 
-    // Verify authentication
-    const auth = await verifyRequest(request);
-    
     // Fetch the book and its chapters in a transaction
     const [bookResult, chapterResults] = await db.transaction(async (tx) => {
       const bookQuery = await tx
@@ -216,14 +212,6 @@ export async function GET(
     
     const book = bookResult[0];
     
-    // Check authorization
-    if (auth.type === 'clerk' && book.userId !== auth.userId) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 403 }
-      );
-    }
-    
     // Build chapter tree and flatten for payload
     const chapterTree = buildChapterTree(chapterResults);
     const flattenedChapters = flattenChapterTree(chapterTree, book.slug, baseUrl);
@@ -251,8 +239,7 @@ export async function GET(
       },
       metadata: {
         generated_at: new Date().toISOString(),
-        generated_by: auth.type === 'github' ? `github:${auth.actor}` : `user:${auth.userId}`,
-        ...(auth.type === 'github' && { workflow_run_id: auth.runId }),
+        generated_by: 'api',
       },
     };
     
@@ -261,29 +248,14 @@ export async function GET(
   } catch (error) {
     console.error('Error generating payload:', error);
     
-    let status = 500;
-    let message = 'Internal server error';
-    
-    if (error instanceof z.ZodError) {
-      status = 400;
-      message = error.issues.map(issue => 
-        `${issue.path.join('.')}: ${issue.message}`
-      ).join(', ');
-    } else if (error instanceof Error) {
-      message = error.message;
-      
-      if (message.includes('No authorization token provided')) {
-        status = 401;
-      } else if (message.includes('Authentication failed')) {
-        status = 403;
-      } else if (message.includes('not found')) {
-        status = 404;
-      }
-    }
+    const status = error instanceof z.ZodError ? 400 : 500;
+    const message = error instanceof Error ? error.message : 'Internal server error';
     
     return NextResponse.json(
       { error: message },
       { status }
     );
   }
-}
+};
+
+// Authentication is handled by middleware

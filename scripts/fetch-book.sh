@@ -39,14 +39,13 @@ debug_print_env() {
   done
 }
 
-# Validate GitHub OIDC token
-validate_github_token() {
-  local token=$1
-  if [[ -z "$token" ]]; then
-    log_error "GitHub OIDC token is empty"
+# Validate secret token
+validate_secret_token() {
+  if [[ -z "$GT_PAYLOAD_SECRET" ]]; then
+    log_error "GT_PAYLOAD_SECRET is not set"
     return 1
   fi
-  log_info "GitHub OIDC token validation successful"
+  log_info "Secret token validation successful"
   return 0
 }
 
@@ -72,7 +71,7 @@ check_commands
 debug_print_env
 
 # Required environment variables
-REQUIRED_VARS=("CONTENT_ID" "GITHUB_TOKEN")
+REQUIRED_VARS=("CONTENT_ID" "GT_PAYLOAD_SECRET")
 for var in "${REQUIRED_VARS[@]}"; do
   if [ -z "${!var}" ]; then
     log_error "Missing required environment variable: $var"
@@ -80,12 +79,12 @@ for var in "${REQUIRED_VARS[@]}"; do
   fi
 done
 
-# Set JWT_HEADER for GitHub OIDC token
-JWT_HEADER="Bearer $GITHUB_TOKEN"
+# Set JWT_HEADER for secret token
+JWT_HEADER="Bearer $GT_PAYLOAD_SECRET"
 export JWT_HEADER
 
 # Set JWT_TOKEN for backward compatibility
-JWT_TOKEN="$GITHUB_TOKEN"
+JWT_TOKEN="$GT_PAYLOAD_SECRET"
 export JWT_TOKEN
 
 # Set BASE_URL if not provided
@@ -103,9 +102,9 @@ if [[ -z "$JWT_TOKEN" && -n "$JWT_HEADER" ]]; then
   fi
 fi
 
-# Validate GitHub token
-if ! validate_github_token "$GITHUB_TOKEN"; then
-  log_error "GitHub token validation failed"
+# Validate secret token
+if ! validate_secret_token; then
+  log_error "Secret token validation failed"
   exit 1
 fi
 
@@ -117,15 +116,12 @@ mkdir -p ./book-content/chapters
 PAYLOAD_URL="$BASE_URL/api/books/by-id/$CONTENT_ID/payload"
 log_info "🌐 Attempting to fetch payload from: $PAYLOAD_URL"
 
-# Debug information for GitHub token
+# Debug information for secret token
 if [ "${CURL_VERBOSE}" = "1" ]; then
-  log_info "🔑 GitHub Token Info:"
-  {
-    echo "Token length: ${#GITHUB_TOKEN} characters"
-    echo "First 10 chars: ${GITHUB_TOKEN:0:10}..."
-    echo "Last 10 chars: ...${GITHUB_TOKEN: -10}"
-  } > ./token-debug.txt
-  cat ./token-debug.txt
+  log_info "🔑 Secret Token Info:"
+  echo "Token length: ${#GT_PAYLOAD_SECRET} characters"
+  echo "First 5 chars: ${GT_PAYLOAD_SECRET:0:5}..."
+  echo "Last 5 chars: ...${GT_PAYLOAD_SECRET: -5}"
 fi
 
 # Function to download with retries and timeouts
@@ -144,7 +140,6 @@ download_with_retry() {
     # Set headers based on content type
     local headers=(
       "-H" "Authorization: $JWT_HEADER"
-      "-H" "X-GitHub-Token: $GITHUB_TOKEN"
       "-H" "Accept: application/vnd.github.v3+json"
     )
     
@@ -195,9 +190,7 @@ download_with_retry() {
 set -x
 curl -v -s -f -D ./headers.txt -o ./book-content/payload.json \
   -H "Accept: application/json" \
-  -H "Authorization: Bearer $GITHUB_OIDC_TOKEN" \
-  -H "Accept: application/vnd.github+json" \
-  -H "X-GitHub-Api-Version: 2022-11-28" \
+  -H "Authorization: Bearer $GT_PAYLOAD_SECRET" \
   "$PAYLOAD_URL" 2> ./curl-debug.log || {
     CURL_EXIT_CODE=$?
     set +x
@@ -208,17 +201,11 @@ curl -v -s -f -D ./headers.txt -o ./book-content/payload.json \
     echo "\n🔍 Curl debug log:"
     cat ./curl-debug.log
     
-    # Try to decode the JWT for debugging
-    if [ -n "$JWT_TOKEN" ]; then
-      echo "\n🔑 JWT Token Analysis:"
-      echo "- Token length: ${#JWT_TOKEN} characters"
-      
-      # Try to decode the JWT payload
-      if command -v jq &> /dev/null; then
-        echo -n "- Payload: "
-        echo "$JWT_TOKEN" | cut -d'.' -f2 | base64 -d 2>/dev/null | jq -c '{iss, aud, sub, iat, exp}' || echo "Failed to decode JWT payload"
-      fi
-    fi
+    # Debug information
+    echo "\n🔑 Request Details:"
+    echo "- URL: $PAYLOAD_URL"
+    echo "- Method: GET"
+    echo "- Token length: ${#GT_PAYLOAD_SECRET} characters"
     
     exit 1
 }
@@ -364,37 +351,26 @@ if [ "$(jq -r '.options.include_imprint // false' ./book-content/payload.json)" 
   echo "⬇️ Downloading imprint..."
   # Construct the imprint URL using the book slug
   IMPRINT_URL="${BASE_API_URL}/api/books/by-slug/${BOOK_SLUG}/imprint"
-  echo "   Imprint URL: $IMPRINT_URL"
   
-  if ! download_with_retry "$IMPRINT_URL" "./book-content/imprint.xhtml"; then
+  # Ensure we're using the full URL with the correct base
+  FULL_IMPRINT_URL="$IMPRINT_URL"
+  if [[ ! "$IMPRINT_URL" =~ ^https?:// ]]; then
+    FULL_IMPRINT_URL="${BASE_API_URL}${IMPRINT_URL}"
+  fi
+  
+  echo "   URL: $FULL_IMPRINT_URL"
+  
+  if ! download_with_retry "$FULL_IMPRINT_URL" "./book-content/imprint.xhtml"; then
     echo "::warning::⚠️ Failed to download imprint"
+    echo "=== Debug Info for Imprint ==="
+    echo "URL: $FULL_IMPRINT_URL"
+    echo "=== Response Headers ==="
+    grep -i '^< HTTP' "./imprint-debug.log" 2>/dev/null || echo "No response headers"
+    echo "=== Response Body (first 200 chars) ==="
+    head -c 200 "./book-content/imprint.xhtml" 2>/dev/null || echo "No response body"
+    echo -e "\n..."
   else
     echo "✅ Successfully downloaded imprint"
-  fi
-fi
-    # Ensure we're using the full URL with the correct base
-    FULL_IMPRINT_URL="$IMPRINT_URL"
-    if [[ ! "$IMPRINT_URL" =~ ^https?:// ]]; then
-      FULL_IMPRINT_URL="${BASE_API_URL}${IMPRINT_URL}"
-    fi
-    
-    echo "   URL: $FULL_IMPRINT_URL"
-    
-    if ! download_with_retry "$FULL_IMPRINT_URL" "./book-content/imprint.xhtml"; then
-      
-      echo "::warning::⚠️ Failed to download imprint"
-      echo "=== Debug Info for Imprint ==="
-      echo "URL: $FULL_IMPRINT_URL"
-      echo "=== Response Headers ==="
-      grep -i '^< HTTP' "./imprint-debug.log" || echo "No response headers"
-      echo "=== Response Body (first 200 chars) ==="
-      head -c 200 "./book-content/imprint.xhtml" 2>/dev/null || echo "No response body"
-      echo -e "\n..."
-    else
-      echo "✅ Successfully downloaded imprint"
-    fi
-  else
-    echo "ℹ️ No imprint URL found in payload"
   fi
 else
   echo "ℹ️ Imprint download is disabled in options"
