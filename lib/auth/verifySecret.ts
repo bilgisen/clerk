@@ -1,63 +1,38 @@
 import { NextRequest } from 'next/server';
-
-// Hardcoded to match the new token format without special characters
-const HARDCODED_SECRET = 'PAYLOAD_71y15GYgRYGMe16a4';
+import { auth } from '@clerk/nextjs/server';
 
 /**
- * Verifies the request using the secret token
+ * Verifies the request using either Clerk authentication or GitHub Workflow secret
  * @param req Next.js request object
  * @returns boolean indicating if the request is authenticated
  */
 export async function verifySecretToken(req: NextRequest): Promise<boolean> {
-  console.log('Using hardcoded secret for verification');
-  
-  if (!HARDCODED_SECRET) {
-    console.error('Secret token is not configured');
-    return false;
-  }
-
-  // Get the Authorization header
-  const authHeader = req.headers.get('authorization');
-  
-  if (!authHeader) {
-    console.error('No Authorization header found');
-    return false;
-  }
-  
-  if (!authHeader.startsWith('Bearer ')) {
-    console.error('Authorization header does not start with Bearer');
-    return false;
-  }
-
   try {
-    const token = authHeader.split(' ')[1]?.trim();
-    if (!token) {
-      console.error('No token found in Authorization header');
-      return false;
-    }
-
-    // Check if token starts with PAYLOAD_
-    if (!token.startsWith('PAYLOAD_')) {
-      console.error('Token does not start with PAYLOAD_ prefix');
-      return false;
-    }
+    // 1. First try GitHub Workflow secret verification
+    const authHeader = req.headers.get('authorization');
     
-    // Simple comparison with the hardcoded secret
-    const isValid = token === HARDCODED_SECRET;
-    
-    if (!isValid) {
-      console.error('Token does not match');
-      console.log('Token lengths - provided:', token.length, 'expected:', HARDCODED_SECRET.length);
-      console.log('Token char codes:');
-      console.log('Provided:', [...token].map(c => c.charCodeAt(0)));
-      console.log('Expected:', [...HARDCODED_SECRET].map(c => c.charCodeAt(0)));
-      return false;
+    if (authHeader?.startsWith('Bearer ')) {
+      const token = authHeader.split(' ')[1]?.trim();
+      const secret = process.env.GT_PAYLOAD_SECRET;
+      
+      if (token && secret && token === secret) {
+        console.log('✅ GitHub Workflow authentication successful');
+        return true;
+      }
     }
     
-    console.log('Token is valid');
-    return true;
+    // 2. If GitHub Workflow auth fails, try Clerk auth
+    const session = await auth();
+    if (session?.userId) {
+      console.log('✅ Clerk authentication successful for user:', session.userId);
+      return true;
+    }
+    
+    console.error('❌ Authentication failed: No valid authentication method found');
+    return false;
+    
   } catch (error) {
-    console.error('Error verifying secret token:', error);
+    console.error('❌ Error during authentication:', error);
     return false;
   }
 }
