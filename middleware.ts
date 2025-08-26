@@ -4,11 +4,21 @@ import { NextResponse } from "next/server";
 
 const isProtectedRoute = createRouteMatcher([
   "/dashboard(.*)",
-  // sadece Clerk ile korunacak API'leri yaz
-  "/api/(?!ci)(?!books/.*/payload)(.*)",
+  "/api/:path*", // tüm API'leri kapsa
 ]);
 
 export default clerkMiddleware((auth, req) => {
+  const { pathname } = req.nextUrl;
+
+  // İstisnalar → auth devre dışı
+  if (pathname.startsWith("/api/ci")) {
+    return NextResponse.next();
+  }
+  if (/^\/api\/books\/[^/]+\/payload$/.test(pathname)) {
+    return NextResponse.next();
+  }
+
+  // Korumalı route
   if (isProtectedRoute(req)) {
     auth.protect();
   }
@@ -18,6 +28,7 @@ export default clerkMiddleware((auth, req) => {
 
 export const config = {
   matcher: [
+    // tüm route’lar (next/image, static ve favicon hariç)
     "/((?!_next/static|_next/image|favicon.ico).*)",
     "/trpc/(.*)",
   ],
