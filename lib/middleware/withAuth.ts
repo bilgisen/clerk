@@ -1,3 +1,4 @@
+// lib/middleware/withAuth.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyGitHubToken, type GitHubAuthContext } from '@/lib/auth/github';
 import { verifyClerkToken, type ClerkAuthContext } from '@/lib/auth/clerk';
@@ -96,8 +97,21 @@ export function withAuth(
         throw new AuthError('No authentication token provided', 'MISSING_TOKEN', 401);
       }
 
-      // Try Clerk authentication first if allowed
-      if (allowClerk ?? true) {
+      // Parse token header to determine token type
+      const [header] = token.split('.');
+      let headerData;
+      try {
+        headerData = JSON.parse(Buffer.from(header, 'base64').toString());
+      } catch {
+        throw new AuthError('Invalid token format', 'INVALID_TOKEN', 401);
+      }
+
+      // Determine token type
+      const isClerkToken = headerData?.kid?.startsWith('ins_');
+      const isGitHubToken = headerData?.kid && !headerData.kid.startsWith('ins_');
+
+      // Try Clerk token first if allowed
+      if (isClerkToken && (allowClerk ?? true)) {
         try {
           const clerkAuth = await verifyClerkToken(token);
           authContext = {
@@ -106,21 +120,13 @@ export function withAuth(
             userId: clerkAuth.userId,
             email: clerkAuth.email,
           };
-          
-          // Skip GitHub OIDC if Clerk auth succeeded
-          return await handler(req, context, authContext);
-        } catch (clerkError) {
-          console.error('Clerk token verification failed:', clerkError);
-          // Only throw if GitHub OIDC is not allowed
-          if (!allowGitHubOidc) {
-            throw clerkError;
-          }
-          console.debug('Clerk authentication failed, falling back to GitHub OIDC');
+        } catch (error) {
+          console.error('Clerk verification failed:', error);
+          throw new AuthError('Clerk authentication failed', 'CLERK_AUTH_FAILED', 401);
         }
       }
-
-      // Try GitHub OIDC if not authenticated yet and allowed
-      if (!authContext && allowGitHubOidc && token) {
+      // Try GitHub token if allowed
+      else if (isGitHubToken && allowGitHubOidc) {
         try {
           const githubContext = await verifyGitHubToken(token, {
             audience: process.env.GITHUB_OIDC_AUDIENCE,
@@ -136,34 +142,17 @@ export function withAuth(
             email: githubContext.claims.email as string | undefined,
           };
         } catch (error) {
-          if (requireAuth) {
-            throw error;
-          }
-          console.debug('GitHub OIDC verification failed');
+          console.error('GitHub verification failed:', error);
+          throw new AuthError('GitHub OIDC authentication failed', 'GITHUB_AUTH_FAILED', 401);
         }
       }
-
-      // Try Clerk authentication if GitHub failed or not attempted
-      if (allowClerk && !authContext) {
-        try {
-          const clerkContext = await verifyClerkToken();
-          authContext = {
-            ...clerkContext,
-            type: 'clerk',
-            userId: clerkContext.userId,
-            email: clerkContext.email,
-          };
-        } catch (error) {
-          if (requireAuth) {
-            console.warn('Clerk authentication failed:', error);
-            throw error;
-          }
-          console.debug('Clerk authentication not required, continuing');
-        }
+      // No valid token type found
+      else {
+        throw new AuthError('Unsupported token type', 'UNSUPPORTED_TOKEN', 401);
       }
 
-      // If no auth context and auth is required, return 401
-      if (requireAuth && !authContext) {
+      // At this point, we've either authenticated or thrown an error
+      if (!authContext) {
         throw new AuthError(
           'Authentication required',
           'AUTHENTICATION_REQUIRED',
