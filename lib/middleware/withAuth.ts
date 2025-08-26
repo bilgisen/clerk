@@ -86,38 +86,41 @@ export function withAuth(
       const authHeader = req.headers.get('authorization');
       let authContext: AuthContext | null = null;
 
-      // Extract token if present
-      const token = authHeader?.startsWith('Bearer ') ? authHeader.substring('Bearer '.length).trim() : null;
-      
-      // Check if this is a Clerk token (starts with 'ins_' in the kid header)
-      const isLikelyClerkToken = token && (
-        // Check if token has a header that indicates it's from Clerk
-        token.split('.')[0]?.includes('ins_') ||
-        // Or if it's a JWT with a Clerk-style kid
-        (token.split('.').length === 3 && 
-         JSON.parse(Buffer.from(token.split('.')[0], 'base64').toString()).kid?.startsWith?.('ins_'))
-      );
+      if (!authHeader) {
+        throw new AuthError('No authentication token provided', 'MISSING_TOKEN', 401);
+      }
 
-      // Try Clerk authentication first if this looks like a Clerk token or if GitHub OIDC is disabled
-      if (allowClerk && (isLikelyClerkToken || !allowGitHubOidc)) {
+      const token = authHeader.startsWith('Bearer ') ? authHeader.substring('Bearer '.length).trim() : null;
+
+      if (!token) {
+        throw new AuthError('No authentication token provided', 'MISSING_TOKEN', 401);
+      }
+
+      // Try Clerk authentication first if allowed
+      if (allowClerk ?? true) {
         try {
-          const clerkContext = await verifyClerkToken();
+          const clerkAuth = await verifyClerkToken(token);
           authContext = {
-            ...clerkContext,
+            ...clerkAuth,
             type: 'clerk',
-            userId: clerkContext.userId,
-            email: clerkContext.email,
+            userId: clerkAuth.userId,
+            email: clerkAuth.email,
           };
-        } catch (error) {
-          if (requireAuth && !allowGitHubOidc) {
-            throw error; // Only throw if GitHub OIDC is not allowed as fallback
+          
+          // Skip GitHub OIDC if Clerk auth succeeded
+          return await handler(req, context, authContext);
+        } catch (clerkError) {
+          console.error('Clerk token verification failed:', clerkError);
+          // Only throw if GitHub OIDC is not allowed
+          if (!allowGitHubOidc) {
+            throw clerkError;
           }
           console.debug('Clerk authentication failed, falling back to GitHub OIDC');
         }
       }
 
       // Try GitHub OIDC if not authenticated yet and allowed
-      if (!authContext && allowGitHubOidc && token && !isLikelyClerkToken) {
+      if (!authContext && allowGitHubOidc && token) {
         try {
           const githubContext = await verifyGitHubToken(token, {
             audience: process.env.GITHUB_OIDC_AUDIENCE,

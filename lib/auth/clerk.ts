@@ -1,6 +1,32 @@
 import { auth, currentUser } from '@clerk/nextjs/server';
 import { AuthError } from './errors';
 
+// Define types for Clerk objects
+interface ClerkEmailAddress {
+  id: string;
+  emailAddress: string;
+}
+
+interface ClerkUser {
+  id: string;
+  emailAddresses: ClerkEmailAddress[];
+  primaryEmailAddressId: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  imageUrl: string | null;
+  username: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+interface ClerkSession {
+  userId: string;
+  sessionClaims?: {
+    sid?: string;
+    [key: string]: unknown;
+  };
+}
+
 export interface ClerkAuthContext {
   type: 'clerk';
   userId: string;
@@ -14,11 +40,79 @@ export interface ClerkAuthContext {
 
 /**
  * Verifies a Clerk session and returns the authentication context
+ * @param token Optional JWT token to verify. If not provided, uses the current session.
  */
-export async function verifyClerkToken(): Promise<ClerkAuthContext> {
+export async function verifyClerkToken(token?: string): Promise<ClerkAuthContext> {
   try {
-    // Get the session
-    const session = await auth();
+    let session;
+    
+    if (token) {
+      try {
+        // Get the current user session
+        const session = await auth() as unknown as ClerkSession;
+        
+        if (!session?.userId) {
+          throw new AuthError(
+            'No active session found',
+            'UNAUTHORIZED',
+            401
+          );
+        }
+        
+        // Get the current user with proper typing
+        const user = await currentUser() as unknown as ClerkUser | null;
+        
+        if (!user) {
+          throw new AuthError(
+            'User not found',
+            'USER_NOT_FOUND',
+            404
+          );
+        }
+        
+        // Get the primary email with proper type checking
+        const primaryEmail = user.emailAddresses?.find(
+          (email: { id: string; emailAddress: string }) => 
+            email.id === user.primaryEmailAddressId
+        )?.emailAddress || undefined;
+        
+        // Get the session ID from the session claims
+        const sessionId = session.sessionClaims?.sid as string | undefined;
+        
+        return {
+          type: 'clerk',
+          userId: user.id,
+          email: primaryEmail || undefined,
+          firstName: user.firstName || undefined,
+          lastName: user.lastName || undefined,
+          imageUrl: user.imageUrl || undefined,
+          sessionId: sessionId,
+          sessionClaims: {
+            id: user.id,
+            email: primaryEmail,
+            firstName: user.firstName,
+            lastName: user.lastName,
+            imageUrl: user.imageUrl,
+            username: user.username,
+            createdAt: user.createdAt,
+            updatedAt: user.updatedAt,
+            sid: sessionId
+          }
+        };
+        
+      } catch (error: any) {
+        console.error('Clerk token verification error:', error);
+        throw new AuthError(
+          'Failed to verify Clerk token: ' + (error.message || 'Unknown error'),
+          'TOKEN_VERIFICATION_FAILED',
+          401,
+          { cause: error }
+        );
+      }
+    } else {
+      // Get the current session
+      session = await auth();
+    }
     
     if (!session?.userId) {
       throw new AuthError(
@@ -28,8 +122,9 @@ export async function verifyClerkToken(): Promise<ClerkAuthContext> {
       );
     }
 
-    // Get user details
-    const user = await currentUser();
+    // Get user details with proper typing
+    const user = await currentUser() as unknown as ClerkUser | null;
+      
     if (!user) {
       throw new AuthError(
         'User not found in Clerk',
@@ -38,9 +133,10 @@ export async function verifyClerkToken(): Promise<ClerkAuthContext> {
       );
     }
 
-    // Get the primary email
+    // Get the primary email with proper type checking
     const email = user.emailAddresses.find(
-      email => email.id === user.primaryEmailAddressId
+      (email: ClerkEmailAddress) => 
+        email.id === user.primaryEmailAddressId
     )?.emailAddress;
 
     // Get the active session ID
@@ -52,7 +148,7 @@ export async function verifyClerkToken(): Promise<ClerkAuthContext> {
       email,
       firstName: user.firstName || undefined,
       lastName: user.lastName || undefined,
-      imageUrl: user.imageUrl,
+      imageUrl: user.imageUrl || undefined,
       sessionId,
       sessionClaims: session.sessionClaims as Record<string, unknown> | undefined
     };
