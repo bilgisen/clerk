@@ -1,9 +1,9 @@
-import { NextResponse } from 'next/server';
-import { withGithubOidc, AuthedRequest } from '@/lib/middleware/withGithubOidc';
+import { NextResponse, NextRequest } from 'next/server';
 import { db } from '@/db';
 import { books } from '@/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { z } from 'zod';
+import { verifySecretToken } from '@/lib/auth/verifySecret';
 
 // Schema for request body validation
 const UpdateEpubSchema = z.object({
@@ -11,14 +11,25 @@ const UpdateEpubSchema = z.object({
 });
 
 // POST /api/books/by-id/[id]/epub
-// Protected by GitHub OIDC. Called by CI after uploading EPUB to R2.
+// Protected by secret token. Called by CI after uploading EPUB to R2.
+// Headers: { Authorization: 'Bearer PAYLOAD_71y15GYgRYGMe16a4' }
 // Body: { epubUrl: string }
-export const POST = withGithubOidc(async (req: AuthedRequest) => {
+export async function POST(
+  req: NextRequest,
+  { params }: { params: { id: string } }
+) {
   try {
-    // Extract book ID from URL
-    const url = new URL(req.url);
-    const pathSegments = url.pathname.split('/').filter(Boolean);
-    const id = pathSegments[pathSegments.length - 2]; // Get the ID before 'epub'
+    // Verify secret token
+    const isAuthenticated = await verifySecretToken(req);
+    if (!isAuthenticated) {
+      return NextResponse.json(
+        { error: 'unauthorized', message: 'Invalid or missing authentication token' },
+        { status: 401 }
+      );
+    }
+
+    // Extract book ID from params
+    const { id } = params;
 
     // Validate book ID format (should be a valid UUID)
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -108,4 +119,4 @@ export const POST = withGithubOidc(async (req: AuthedRequest) => {
       { status: 500 }
     );
   }
-});
+}

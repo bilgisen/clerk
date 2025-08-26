@@ -73,7 +73,6 @@ export async function GET(
         parentChapterId: true,
         order: true,
         level: true,
-        isDraft: true,
         wordCount: true,
         readingTime: true,
         createdAt: true,
@@ -175,7 +174,6 @@ export async function POST(
       parentChapterId: parentChapterId || null,
       order: order ?? 0,
       level: level,
-      isDraft: true,
       wordCount: 0,
       createdAt: new Date(),
       updatedAt: new Date()

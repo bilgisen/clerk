@@ -75,15 +75,14 @@ export async function PATCH(
     if (!book) return NextResponse.json({ error: 'Book not found' }, { status: 404 });
 
     const body = await request.json();
-    const { title, content, parentChapterId, order, level, isDraft } = body;
+    const { title, content, parentChapterId, order, level } = body;
 
     if (
       !title &&
       content === undefined &&
       parentChapterId === undefined &&
       order === undefined &&
-      level === undefined &&
-      isDraft === undefined
+      level === undefined
     ) {
       return NextResponse.json({ error: 'At least one field must be updated' }, { status: 400 });
     }
@@ -99,7 +98,6 @@ export async function PATCH(
     if (parentChapterId !== undefined) updateData.parentChapterId = parentChapterId;
     if (order !== undefined) updateData.order = order;
     if (level !== undefined) updateData.level = level;
-    if (isDraft !== undefined) updateData.isDraft = isDraft;
 
     const [updatedChapter] = await db
       .update(chapters)

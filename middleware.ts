@@ -7,6 +7,8 @@ const SECRET_TOKEN_ROUTES = [
   '/api/books/by-slug/(.*)/imprint',
   '/api/books/by-slug/(.*)/chapters/(.*)/html',
   '/api/books/by-slug/(.*)/chapters/(.*)/content',
+  '/api/books/by-id/(.*)/epub',
+  '/api/ci/process',
   '/api/debug/(.*)',
 ];
 

@@ -19,14 +19,12 @@ on:
 env:
   NODE_ENV: production
   API_BASE_URL: 'https://editor.bookshall.com'
-  GITHUB_OIDC_AUDIENCE: 'https://editor.bookshall.com/api/ci'
   GHA_ALLOWED_REPO: '${{ github.repository }}'  # Only allow from this repository
 
 jobs:
   build-epub:
     runs-on: ubuntu-latest
     permissions:
-      id-token: write  # Required for OIDC token
       contents: read   # Required for checking out code
       actions: read    # Required for workflow run information
       
@@ -34,8 +32,6 @@ jobs:
     env:
       NODE_ENV: production
       API_BASE_URL: 'https://editor.bookshall.com'
-      GITHUB_OIDC_AUDIENCE: 'https://editor.bookshall.com/api/ci'
-      GHA_ALLOWED_REPO: ${{ github.repository }}
       GITHUB_REF_NAME: ${{ github.ref_name }}
       GITHUB_RUN_ID: ${{ github.run_id }}
 
@@ -47,31 +43,6 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y curl jq
-
-      - name: Get OIDC token
-        id: get-oidc
-        run: |
-          echo "🔑 Requesting OIDC token..."
-          TOKEN_RESPONSE=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=$GITHUB_OIDC_AUDIENCE")
-          
-          if [ $? -ne 0 ]; then
-            echo "::error::Failed to request OIDC token"
-            exit 1
-          fi
-          
-          TOKEN=$(echo "$TOKEN_RESPONSE" | jq -r '.value')
-          
-          if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
-            echo "::error::Failed to obtain OIDC token"
-            echo "Response: $TOKEN_RESPONSE"
-            exit 1
-          fi
-          
-          echo "token=$TOKEN" >> $GITHUB_OUTPUT
-          
-          # Debug: Print token info (without exposing the full token)
-          echo "Token obtained successfully (length: ${#TOKEN} chars)"
 
       - name: Fetch book content
         env:
@@ -148,5 +119,26 @@ jobs:
           [ -z "$SLUG" ] && SLUG="$CONTENT_ID"
           KEY="books/${SLUG}-${CONTENT_ID}.epub"
 
-          echo "🚀 Uploading to R2 as $KEY"
-          npx --yes @aws-sdk/client-s3 node ./scripts/upload-epub-to-r2.mjs --file "$FILE_PATH" --key "$KEY"
+          # Upload to R2
+          echo "📤 Uploading EPUB to R2..."
+          curl -X PUT "${R2_ENDPOINT}/${R2_BUCKET}/${KEY}" \
+            -H "Authorization: Bearer ${R2_ACCESS_KEY_ID}:${R2_SECRET_ACCESS_KEY}" \
+            -H "Content-Type: application/epub+zip" \
+            --upload-file "$FILE_PATH"
+
+          # Update the book with the new EPUB URL
+          EPUB_URL="${R2_PUBLIC_URL}/${R2_BUCKET}/${KEY}"
+          echo "🔄 Updating book with new EPUB URL: $EPUB_URL"
+          
+          curl -X POST "${API_BASE_URL}/api/books/by-id/${CONTENT_ID}/epub" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${GT_PAYLOAD_SECRET}" \
+            -d "{\"epubUrl\":\"${EPUB_URL}\"}"
+        env:
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_PUBLIC_URL: ${{ secrets.R2_PUBLIC_URL }}
+          GT_PAYLOAD_SECRET: ${{ secrets.GT_PAYLOAD_SECRET }}
+          API_BASE_URL: ${{ env.API_BASE_URL }}
