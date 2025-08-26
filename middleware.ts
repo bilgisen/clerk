@@ -1,16 +1,16 @@
-// middleware.ts - ALTERNATİF VERSİYON
+// middleware.ts - DAHA BASİT YÖNTEM
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 
 const isProtectedRoute = createRouteMatcher([
   '/dashboard(.*)',
-  '/api/books/(?!by-id/.*/payload)(.*)', // payload hariç tüm books API
-  '/api/(?!ci/)(.*)', // ci hariç tüm API
+  '/api/(.*)',
 ]);
 
 export default clerkMiddleware((auth, req) => {
+  // Doğrudan protect() çağrısı - Clerk bunu doğru şekilde işler
   if (isProtectedRoute(req)) {
-    auth.protect(); // direkt protect() çağrısı
+    auth.protect();
   }
   
   return NextResponse.next();
@@ -18,8 +18,7 @@ export default clerkMiddleware((auth, req) => {
 
 export const config = {
   matcher: [
-    // Clerk uygulanacak route'lar
-    '/((?!_next|api/ci|api/books/.*/payload|static|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|css|js|woff2?|ttf|eot|json|xml|txt|csv|docx?|xlsx?|zip|webmanifest)).*)',
-    '/trpc/:path*',
+    '/((?!_next/static|_next/image|favicon.ico|api/ci|api/books/.*/payload).*)',
+    '/trpc/(.*)',
   ],
 };
