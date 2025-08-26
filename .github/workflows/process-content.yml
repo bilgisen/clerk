@@ -1,4 +1,4 @@
-name: Build EPUB
+name: Process Book Content
 
 on:
   workflow_dispatch:
@@ -19,14 +19,25 @@ on:
 env:
   NODE_ENV: production
   API_BASE_URL: 'https://editor.bookshall.com'
-  GHA_OIDC_AUDIENCE: 'https://editor.bookshall.com/api/ci'
+  GITHUB_OIDC_AUDIENCE: 'https://editor.bookshall.com/api/ci'
+  GHA_ALLOWED_REPO: '${{ github.repository }}'  # Only allow from this repository
 
 jobs:
   build-epub:
     runs-on: ubuntu-latest
     permissions:
-      id-token: write
-      contents: read
+      id-token: write  # Required for OIDC token
+      contents: read   # Required for checking out code
+      actions: read    # Required for workflow run information
+      
+    # Environment variables for the job
+    env:
+      NODE_ENV: production
+      API_BASE_URL: 'https://editor.bookshall.com'
+      GITHUB_OIDC_AUDIENCE: 'https://editor.bookshall.com/api/ci'
+      GHA_ALLOWED_REPO: ${{ github.repository }}
+      GITHUB_REF_NAME: ${{ github.ref_name }}
+      GITHUB_RUN_ID: ${{ github.run_id }}
 
     steps:
       - name: Checkout code
@@ -41,25 +52,59 @@ jobs:
         id: get-oidc
         run: |
           echo "🔑 Requesting OIDC token..."
-          TOKEN=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=$GHA_OIDC_AUDIENCE" | jq -r '.value')
-          if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
-            echo "::error::Failed to obtain OIDC token"
+          TOKEN_RESPONSE=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=$GITHUB_OIDC_AUDIENCE")
+          
+          if [ $? -ne 0 ]; then
+            echo "::error::Failed to request OIDC token"
             exit 1
           fi
+          
+          TOKEN=$(echo "$TOKEN_RESPONSE" | jq -r '.value')
+          
+          if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
+            echo "::error::Failed to obtain OIDC token"
+            echo "Response: $TOKEN_RESPONSE"
+            exit 1
+          fi
+          
           echo "token=$TOKEN" >> $GITHUB_OUTPUT
+          
+          # Debug: Print token info (without exposing the full token)
+          echo "Token obtained successfully (length: ${#TOKEN} chars)"
 
       - name: Fetch Book Content
         env:
+          # Required for the script
           CONTENT_ID: ${{ github.event.inputs.content_id }}
-          JWT_TOKEN: ${{ steps.get-oidc.outputs.token }}
-          API_BASE_URL: ${{ env.API_BASE_URL }}
+          GITHUB_TOKEN: ${{ steps.get-oidc.outputs.token }}
+          
+          # Base URL for API requests
+          BASE_URL: ${{ env.API_BASE_URL }}
+          
+          # Security context for token validation
+          GITHUB_ACTIONS_OIDC_AUDIENCE: ${{ env.GITHUB_OIDC_AUDIENCE }}
+          GHA_ALLOWED_REF: "refs/heads/${{ env.GITHUB_REF_NAME }}"
+          GITHUB_REPOSITORY: ${{ env.GHA_ALLOWED_REPO }}
+          GITHUB_RUN_ID: ${{ env.GITHUB_RUN_ID }}
         run: |
           set -e
-          echo "🔐 Using JWT with audience: $GHA_OIDC_AUDIENCE"
-          export JWT_HEADER="Bearer $JWT_TOKEN"
+          echo "🔐 Using GitHub OIDC token"
+          echo "Repository: $GITHUB_REPOSITORY"
+          echo "Ref: $GHA_ALLOWED_REF"
+          echo "Run ID: $GITHUB_RUN_ID"
+          
+          # Debug: Print environment (without secrets)
+          env | grep -v -E 'TOKEN|SECRET|PASSWORD|KEY' | sort
+          
           mkdir -p ./book-content ./output
           chmod +x ./scripts/fetch-book.sh
+          
+          # Enable debug output if needed
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            export CURL_VERBOSE=1
+          fi
+          
           ./scripts/fetch-book.sh
 
       - name: Generate EPUB

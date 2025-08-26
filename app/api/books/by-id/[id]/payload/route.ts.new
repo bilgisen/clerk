@@ -1,9 +1,8 @@
-// app/api/books/by-id/[id]/payload/route.ts
-import { NextResponse, NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/db/drizzle';
 import { books, chapters } from '@/db/schema';
 import { and, eq } from 'drizzle-orm';
-import { verifyRequest } from '@/lib/verify-jwt';
+import { withAuth, checkResourceOwnership } from '@/lib/auth';
 import { z } from 'zod';
 
 // Schema for query parameters
@@ -156,7 +155,9 @@ function flattenChapterTree(
     result.push(payloadChapter);
 
     if (chapter.children.length > 0) {
-      result.push(...flattenChapterTree(chapter.children, bookSlug, baseUrl, level + 1, chapter.id));
+      result.push(
+        ...flattenChapterTree(chapter.children, bookSlug, baseUrl, level + 1, chapter.id)
+      );
     }
   }
 
@@ -170,23 +171,21 @@ function getBaseUrl(request: NextRequest): string {
   return `${protocol}://${host}`;
 }
 
-export async function GET(
+// Main route handler with auth middleware
+export const GET = withAuth(async (
   request: NextRequest,
-  { params }: { params: { id: string } }
-) {
+  { params },
+  auth
+) => {
   try {
     // Parse and validate query parameters
     const searchParams = Object.fromEntries(request.nextUrl.searchParams);
     const { format, generate_toc, include_imprint, style, toc_depth, language } = 
       queryParamsSchema.parse(searchParams);
 
-    // Get the base URL for generating absolute URLs
     const baseUrl = getBaseUrl(request);
     const bookId = params.id;
 
-    // Verify authentication
-    const auth = await verifyRequest(request);
-    
     // Fetch the book and its chapters in a transaction
     const [bookResult, chapterResults] = await db.transaction(async (tx) => {
       const bookQuery = await tx
@@ -194,7 +193,7 @@ export async function GET(
         .from(books)
         .where(eq(books.id, bookId))
         .limit(1);
-        
+
       const chaptersQuery = await tx
         .select()
         .from(chapters)
@@ -203,31 +202,36 @@ export async function GET(
           eq(chapters.isDraft, false)
         ))
         .orderBy(chapters.order);
-        
+
       return [bookQuery, chaptersQuery];
     });
-    
+
     if (!bookResult || bookResult.length === 0) {
       return NextResponse.json(
         { error: 'Book not found' },
         { status: 404 }
       );
     }
-    
+
     const book = bookResult[0];
-    
+
     // Check authorization
-    if (auth.type === 'clerk' && book.userId !== auth.userId) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 403 }
-      );
+    if (auth.type === 'clerk') {
+      const isOwner = await checkResourceOwnership(auth, book.userId);
+      if (!isOwner) {
+        return NextResponse.json(
+          { error: 'Forbidden' },
+          { status: 403 }
+        );
+      }
     }
-    
+    // For GitHub OIDC, we might want to add additional checks here
+    // For example, verify the repository matches expected values
+
     // Build chapter tree and flatten for payload
     const chapterTree = buildChapterTree(chapterResults);
     const flattenedChapters = flattenChapterTree(chapterTree, book.slug, baseUrl);
-    
+
     // Prepare the payload
     const payload: EbookPayload = {
       book: {
@@ -236,7 +240,9 @@ export async function GET(
         author: book.author,
         language: language || book.language || DEFAULT_LANGUAGE,
         output_filename: `${book.slug}.${format}`,
-        cover_url: book.coverImageUrl ? new URL(book.coverImageUrl, baseUrl).toString() : '',
+        cover_url: book.coverImageUrl 
+          ? new URL(book.coverImageUrl, baseUrl).toString() 
+          : '',
         stylesheet_url: `${baseUrl}/styles/ebook-${style}.css`,
         ...(book.subtitle && { subtitle: book.subtitle }),
         ...(book.description && { description: book.description }),
@@ -251,39 +257,36 @@ export async function GET(
       },
       metadata: {
         generated_at: new Date().toISOString(),
-        generated_by: auth.type === 'github' ? `github:${auth.actor}` : `user:${auth.userId}`,
-        ...(auth.type === 'github' && { workflow_run_id: auth.runId }),
+        generated_by: auth.type === 'github' 
+          ? `github:${auth.actor}` 
+          : `user:${auth.userId}`,
+        ...(auth.type === 'github' && { 
+          workflow_run_id: auth.workflowRunId 
+        }),
       },
     };
-    
+
     return NextResponse.json(payload);
-    
   } catch (error) {
     console.error('Error generating payload:', error);
     
-    let status = 500;
-    let message = 'Internal server error';
-    
     if (error instanceof z.ZodError) {
-      status = 400;
-      message = error.issues.map(issue => 
-        `${issue.path.join('.')}: ${issue.message}`
-      ).join(', ');
-    } else if (error instanceof Error) {
-      message = error.message;
-      
-      if (message.includes('No authorization token provided')) {
-        status = 401;
-      } else if (message.includes('Authentication failed')) {
-        status = 403;
-      } else if (message.includes('not found')) {
-        status = 404;
-      }
+      return NextResponse.json(
+        { 
+          error: 'Validation error',
+          issues: error.issues 
+        },
+        { status: 400 }
+      );
     }
+
+    // Handle other errors
+    const status = error.status || 500;
+    const message = error.message || 'Internal server error';
     
     return NextResponse.json(
       { error: message },
       { status }
     );
   }
-}
+});

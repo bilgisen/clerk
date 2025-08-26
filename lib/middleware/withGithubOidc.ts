@@ -1,3 +1,4 @@
+// lib/middleware/withGithubOidc.ts
 import { NextResponse } from 'next/server'
 import { verifyGithubOidc, OidcAuthError, GithubOidcClaims } from '../auth/verifyGithubOidc'
 

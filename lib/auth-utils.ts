@@ -1,3 +1,4 @@
+// lib/auth-utils.ts
 import { auth, currentUser } from '@clerk/nextjs/server';
 import { db } from '@/db/drizzle';
 import { users } from '@/db/schema';

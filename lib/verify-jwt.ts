@@ -1,53 +1,44 @@
-import jwt from "jsonwebtoken";
-import jwksClient from "jwks-rsa";
+import { auth } from '@clerk/nextjs/server';
+import jwt, { JwtPayload as BaseJwtPayload } from 'jsonwebtoken';
+import jwksClient from 'jwks-rsa';
 
 export type TokenType = 'github' | 'clerk';
 
+// Constants
 export const GITHUB_ISSUER = 'https://token.actions.githubusercontent.com';
-export const CLERK_ISSUER = process.env.CLERK_JWT_ISSUER || 'clerk.clerko.v1';
+const CLERK_ISSUER = process.env.CLERK_JWT_ISSUER || 'clerk.clerko.v1';
+const GITHUB_JWKS_URI = `${GITHUB_ISSUER}/.well-known/jwks`;
 
-export interface BaseJwtPayload extends jwt.JwtPayload {
-  // Common fields
-  sub: string;
-  iss: string;
-  aud: string | string[];
-  exp: number;
-  iat: number;
-  // Token type (added by us)
-  tokenType?: TokenType;
-}
-
-export interface GitHubJwtPayload extends BaseJwtPayload {
-  tokenType: 'github';
+// Interfaces
+export interface GitHubTokenPayload extends jwt.JwtPayload {
   repository?: string;
   repository_owner?: string;
-  repository_owner_id?: string;
   job_workflow_ref?: string;
   ref?: string;
-  sha?: string;
   workflow?: string;
   actor?: string;
   run_id?: string;
-  run_number?: string;
-  run_attempt?: string;
-  head_ref?: string;
-  base_ref?: string;
   event_name?: string;
-  ref_type?: string;
 }
 
-export interface ClerkJwtPayload extends BaseJwtPayload {
-  tokenType: 'clerk';
-  userId: string;
-  email?: string;
-  firstName?: string;
-  lastName?: string;
-  username?: string;
-  phoneNumber?: string;
-  imageUrl?: string;
+export interface VerifyRequestResult {
+  type: TokenType;
+  userId?: string;
+  repository?: string;
+  workflow?: string;
+  runId?: string;
+  actor?: string;
+  ref?: string;
 }
 
-export type JwtPayload = GitHubJwtPayload | ClerkJwtPayload;
+// Configure GitHub JWKS client
+const githubJwksClient = jwksClient({
+  jwksUri: GITHUB_JWKS_URI,
+  cache: true,
+  rateLimit: true,
+  jwksRequestsPerMinute: 10,
+  timeout: 10000, // 10 seconds
+});
 
 // Configure JWKS clients with caching and rate limiting
 const clients = {
@@ -69,6 +60,21 @@ const clients = {
 
 // Cache for public keys to reduce JWKS lookups
 const keyCache = new Map<string, string>();
+
+// Extend base JwtPayload with our custom fields
+export interface JwtPayload extends BaseJwtPayload {
+  tokenType: TokenType;
+  // GitHub specific fields
+  repository?: string;
+  repository_owner?: string;
+  job_workflow_ref?: string;
+  workflow?: string;
+  actor?: string;
+  run_id?: string;
+  ref?: string;
+  // Clerk specific fields
+  userId?: string;
+}
 
 async function getKey(header: jwt.JwtHeader, tokenType: TokenType): Promise<string> {
   if (!header.kid) {
@@ -208,18 +214,34 @@ export async function verifyRequest(request: Request): Promise<VerifyRequestResu
     const payload = await verifyJwt(token);
     
     if (payload.tokenType === 'github') {
+      // Type assertion for GitHub token
+      const githubPayload = payload as JwtPayload & {
+        repository?: string;
+        repository_owner?: string;
+        job_workflow_ref?: string;
+        workflow?: string;
+        actor?: string;
+        run_id?: string;
+        ref?: string;
+      };
+
       return {
         type: 'github',
-        repository: payload.repository || payload.repository_owner,
-        workflow: payload.workflow || payload.job_workflow_ref,
-        runId: payload.run_id,
-        actor: payload.actor,
-        ref: payload.ref,
+        repository: githubPayload.repository || githubPayload.repository_owner,
+        workflow: githubPayload.workflow || githubPayload.job_workflow_ref,
+        runId: githubPayload.run_id,
+        actor: githubPayload.actor,
+        ref: githubPayload.ref,
       };
     } else {
+      // Type assertion for Clerk token
+      const clerkPayload = payload as JwtPayload & { userId?: string };
+      if (!clerkPayload.userId) {
+        throw new Error('Clerk token is missing required userId claim');
+      }
       return {
         type: 'clerk',
-        userId: payload.userId,
+        userId: clerkPayload.userId,
       };
     }
   } catch (error) {

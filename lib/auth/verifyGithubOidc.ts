@@ -1,3 +1,4 @@
+// lib/auth/verifyGithubOidc.ts
 import { createRemoteJWKSet, jwtVerify, JWTPayload } from 'jose'
 
 // Check if we're running in an Edge Runtime environment

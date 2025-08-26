@@ -39,30 +39,17 @@ debug_print_env() {
   done
 }
 
-# Validate JWT token structure
-validate_jwt() {
+# Validate GitHub token format
+validate_github_token() {
   local token=$1
-  local parts
-  IFS='.' read -ra parts <<< "$token"
   
-  if [ ${#parts[@]} -ne 3 ]; then
-    log_error "Invalid JWT token format: expected 3 parts, got ${#parts[@]}"
+  # GitHub tokens typically start with ghs_ for GitHub Apps
+  if [[ ! "$token" =~ ^ghs_[a-zA-Z0-9_]+$ ]]; then
+    log_error "Invalid GitHub token format. Expected token to start with 'ghs_'"
     return 1
   fi
   
-  # Verify header
-  if ! echo "${parts[0]}" | base64 -d 2>/dev/null | jq -e '.typ == "JWT"' >/dev/null; then
-    log_error "Invalid JWT header"
-    return 1
-  fi
-  
-  # Verify payload
-  if ! echo "${parts[1]}" | base64 -d 2>/dev/null | jq -e '.exp' >/dev/null; then
-    log_error "Invalid JWT payload"
-    return 1
-  fi
-  
-  log_info "JWT token structure is valid"
+  log_info "GitHub token format is valid"
   return 0
 }
 
@@ -88,7 +75,7 @@ check_commands
 debug_print_env
 
 # Required environment variables
-REQUIRED_VARS=("CONTENT_ID" "JWT_TOKEN")
+REQUIRED_VARS=("CONTENT_ID" "GITHUB_TOKEN")
 for var in "${REQUIRED_VARS[@]}"; do
   if [ -z "${!var}" ]; then
     log_error "Missing required environment variable: $var"
@@ -96,11 +83,13 @@ for var in "${REQUIRED_VARS[@]}"; do
   fi
 done
 
-# Set JWT_HEADER if not provided
-if [ -z "$JWT_HEADER" ] && [ -n "$JWT_TOKEN" ]; then
-  JWT_HEADER="Bearer $JWT_TOKEN"
-  export JWT_HEADER
-fi
+# Set JWT_HEADER for GitHub OIDC token
+JWT_HEADER="Bearer $GITHUB_TOKEN"
+export JWT_HEADER
+
+# Set JWT_TOKEN for backward compatibility
+JWT_TOKEN="$GITHUB_TOKEN"
+export JWT_TOKEN
 
 # Set BASE_URL if not provided
 if [ -z "$BASE_URL" ]; then
@@ -117,15 +106,9 @@ if [[ -z "$JWT_TOKEN" && -n "$JWT_HEADER" ]]; then
   fi
 fi
 
-# Validate JWT token
-if ! validate_jwt "$JWT_TOKEN"; then
-  log_error "JWT token validation failed"
-  exit 1
-fi
-
-# Ensure we have a valid token
-if [ -z "$JWT_TOKEN" ]; then
-  log_error "No JWT token provided"
+# Validate GitHub token
+if ! validate_github_token "$GITHUB_TOKEN"; then
+  log_error "GitHub token validation failed"
   exit 1
 fi
 
@@ -137,15 +120,15 @@ mkdir -p ./book-content/chapters
 PAYLOAD_URL="$BASE_URL/api/books/by-id/$CONTENT_ID/payload"
 log_info "🌐 Attempting to fetch payload from: $PAYLOAD_URL"
 
-# Optional JWT inspection (disabled by default). Enable with CURL_VERBOSE=1
+# Debug information for GitHub token
 if [ "${CURL_VERBOSE}" = "1" ]; then
-  log_info "🔑 JWT Token Analysis (limited):"
+  log_info "🔑 GitHub Token Info:"
   {
-    echo "Header (alg, kid only):"
-    echo "$JWT_TOKEN" | cut -d'.' -f1 | base64 -d 2>/dev/null | jq '{alg, kid}' || echo "Failed to decode JWT header"
-    echo "\nPayload (selected claims):"
-    echo "$JWT_TOKEN" | cut -d'.' -f2 | base64 -d 2>/dev/null | jq '{iss, aud, repository, ref, workflow, iat, exp}' || echo "Failed to decode JWT payload"
-  } > ./jwt-debug.json
+    echo "Token length: ${#GITHUB_TOKEN} characters"
+    echo "First 10 chars: ${GITHUB_TOKEN:0:10}..."
+    echo "Last 10 chars: ...${GITHUB_TOKEN: -10}"
+  } > ./token-debug.txt
+  cat ./token-debug.txt
 fi
 
 # Function to download with retries and timeouts
@@ -163,9 +146,9 @@ download_with_retry() {
     
     # Set headers based on content type
     local headers=(
-      "-H" "Authorization: Bearer $JWT_TOKEN"
-      "-H" "X-Auth-Method: oidc"
-      "-H" "X-Auth-Audience: $JWT_AUDIENCE"
+      "-H" "Authorization: $JWT_HEADER"
+      "-H" "X-GitHub-Token: $GITHUB_TOKEN"
+      "-H" "Accept: application/vnd.github.v3+json"
     )
     
     # Add Accept header based on URL
@@ -216,7 +199,7 @@ set -x
 curl -v -s -f -D ./headers.txt -o ./book-content/payload.json \
   -H "Accept: application/json" \
   -H "Authorization: $JWT_HEADER" \
-  -H "X-Auth-Method: oidc" \
+  -H "X-GitHub-Token: $GITHUB_TOKEN" \
   "$PAYLOAD_URL" 2> ./curl-debug.log || {
     CURL_EXIT_CODE=$?
     set +x
@@ -276,14 +259,26 @@ if [ ! -s "./book-content/payload.json" ]; then
   exit 1
 fi
 
-# Check for redirect in response
+# Check for API rate limiting or authentication issues
 echo -e "\n✅ Payload received. Checking content..."
-if grep -q "redirect" ./book-content/payload.json; then
-  echo "::error::🔁 Redirect detected - authentication may have failed"
+if grep -qi "rate limit" ./book-content/payload.json || grep -qi "API rate limit" ./book-content/payload.json; then
+  echo "::error::⏱️  GitHub API rate limit exceeded"
   echo "=== Response Content ==="
   cat ./book-content/payload.json
-  echo -e "\n=== Response Headers ==="
-  cat ./response_headers.txt 2>/dev/null || echo "No response headers"
+  exit 5
+fi
+
+if grep -qi "bad credentials" ./book-content/payload.json || grep -qi "invalid token" ./book-content/payload.json; then
+  echo "::error::🔑 Authentication failed - invalid or expired token"
+  echo "=== Response Content ==="
+  cat ./book-content/payload.json
+  exit 5
+fi
+
+if grep -qi "not found" ./book-content/payload.json; then
+  echo "::error::🔍 Resource not found - check CONTENT_ID and permissions"
+  echo "=== Response Content ==="
+  cat ./book-content/payload.json
   exit 5
 fi
 
@@ -317,6 +312,8 @@ fi
 BOOK_SLUG=$(jq -r '.book.slug // empty' ./book-content/payload.json)
 if [ -z "$BOOK_SLUG" ]; then
   echo "::error::❌ Book slug not found in payload"
+  echo "=== Payload Content ==="
+  cat ./book-content/payload.json
   exit 2
 fi
 

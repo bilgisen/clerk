@@ -1,3 +1,4 @@
+// lib/auth.ts
 import { auth } from '@clerk/nextjs/server';
 
 const LOG_PREFIX = '[Auth]';
