@@ -155,7 +155,24 @@ export async function verifyGitHubToken(
   options: VerifyGitHubTokenOptions = {}
 ): Promise<GitHubAuthContext> {
   try {
-    // Get the JWKS client
+    // First, check if this is a Clerk token (starts with 'ey' and has a specific format)
+    if (token.startsWith('ey') && token.split('.').length === 3) {
+      const [header] = token.split('.');
+      try {
+        const headerData = JSON.parse(Buffer.from(header, 'base64').toString());
+        if (headerData.kid && headerData.kid.startsWith('ins_')) {
+          throw new AuthError(
+            'Clerk token provided instead of GitHub OIDC token',
+            'INVALID_TOKEN_TYPE',
+            401
+          );
+        }
+      } catch (e) {
+        // If we can't parse the header, continue with GitHub OIDC verification
+      }
+    }
+
+    // Get the JWKS client for GitHub OIDC
     const jwksClient = await getJwksClient();
     
     // Get the audience(s) to verify against
@@ -169,14 +186,19 @@ export async function verifyGitHubToken(
       );
     }
 
+    // Log the verification attempt
+    console.log('Verifying GitHub OIDC token with audience:', audiences);
+
     try {
-      // Verify the JWT
-      const { payload } = await jwtVerify(token, jwksClient, {
+      // Verify the JWT with GitHub's public keys
+      const { payload, protectedHeader } = await jwtVerify(token, jwksClient, {
         issuer: GITHUB_ISSUER,
         audience: audiences,
         algorithms: ['RS256'],
         clockTolerance: options.clockToleranceSec || 60,
       });
+
+      console.log('Successfully verified GitHub OIDC token with header:', protectedHeader);
 
       // Type assertion for the payload
       const claims = payload as unknown as GitHubOidcClaims;
@@ -196,9 +218,20 @@ export async function verifyGitHubToken(
         userId: claims.sub, // Using the GitHub OIDC subject as userId
         email: claims.actor ? `${claims.actor}@users.noreply.github.com` : undefined,
       };
-    } catch (jwtError) {
+    } catch (error) {
+      // Type guard for error
+      const jwtError = error as Error & { code?: string; expiredAt?: Date };
+      
+      // Log the error for debugging
+      console.error('JWT verification error:', {
+        name: jwtError.name,
+        message: jwtError.message,
+        stack: jwtError.stack,
+        code: jwtError.code,
+      });
+
       // Convert JWT verification errors to our error types
-      if (jwtError instanceof Error) {
+      if (jwtError) {
         if (jwtError.name === 'JWTExpired') {
           throw new TokenValidationError(
             'GitHub OIDC token has expired',
@@ -214,8 +247,24 @@ export async function verifyGitHubToken(
             { reason: jwtError.message }
           );
         }
+
+        // Handle missing key error specifically
+        if (jwtError.code === 'ERR_JWKS_NO_MATCHING_KEY') {
+          throw new AuthError(
+            'No matching key found in GitHub OIDC JWKS. The token might be from a different issuer or the JWKS cache needs to be refreshed.',
+            'INVALID_TOKEN_SIGNATURE',
+            401
+          );
+        }
       }
-      throw jwtError; // Re-throw if we can't handle it
+      
+      // Re-throw with more context
+      throw new AuthError(
+        `GitHub OIDC token verification failed: ${jwtError?.message || 'Unknown error'}`,
+        'TOKEN_VERIFICATION_FAILED',
+        401,
+        { cause: jwtError }
+      );
     }
   } catch (error) {
     // Re-throw our custom errors as-is
