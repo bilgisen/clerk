@@ -45,17 +45,35 @@ export interface ClerkAuthContext {
  */
 export async function verifyClerkToken(token?: string): Promise<ClerkAuthContext> {
   try {
-    let session;
-    
+    // If token is provided, verify it using Clerk's API
     if (token) {
       try {
-        // Get the current user session
-        const session = await auth() as unknown as ClerkSession;
+        // Verify the token using Clerk's API
+        const response = await fetch('https://api.clerk.dev/v1/tokens/verify', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${process.env.CLERK_SECRET_KEY}`
+          },
+          body: JSON.stringify({
+            token,
+            audience: getJwtAudience(),
+            issuer: getJwtIssuer()
+          })
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.message || 'Failed to verify token');
+        }
+
+        const { session: sessionData } = await response.json();
+        const session = sessionData as unknown as ClerkSession;
         
         if (!session?.userId) {
           throw new AuthError(
-            'No active session found',
-            'UNAUTHORIZED',
+            'Invalid Clerk token',
+            'INVALID_TOKEN',
             401
           );
         }
@@ -83,21 +101,18 @@ export async function verifyClerkToken(token?: string): Promise<ClerkAuthContext
         return {
           type: 'clerk',
           userId: user.id,
-          email: primaryEmail || undefined,
+          email: primaryEmail,
           firstName: user.firstName || undefined,
           lastName: user.lastName || undefined,
           imageUrl: user.imageUrl || undefined,
           sessionId: sessionId,
           sessionClaims: {
-            id: user.id,
+            ...session.sessionClaims,
             email: primaryEmail,
             firstName: user.firstName,
             lastName: user.lastName,
             imageUrl: user.imageUrl,
-            username: user.username,
-            createdAt: user.createdAt,
-            updatedAt: user.updatedAt,
-            sid: sessionId
+            username: user.username
           }
         };
         
@@ -110,10 +125,10 @@ export async function verifyClerkToken(token?: string): Promise<ClerkAuthContext
           { cause: error }
         );
       }
-    } else {
-      // Get the current session
-      session = await auth();
     }
+    
+    // If no token is provided, use the current session
+    const session = await auth();
     
     if (!session?.userId) {
       throw new AuthError(
@@ -123,36 +138,53 @@ export async function verifyClerkToken(token?: string): Promise<ClerkAuthContext
       );
     }
 
-    // Get user details with proper typing
-    const user = await currentUser() as unknown as ClerkUser | null;
+    try {
+      // Get user details with proper typing
+      const user = await currentUser() as unknown as ClerkUser | null;
       
-    if (!user) {
+      if (!user) {
+        throw new AuthError(
+          'User not found in Clerk',
+          'USER_NOT_FOUND',
+          404
+        );
+      }
+
+      // Get the primary email with proper type checking
+      const email = user.emailAddresses.find(
+        (email: ClerkEmailAddress) => 
+          email.id === user.primaryEmailAddressId
+      )?.emailAddress;
+
+      // Get the active session ID
+      const sessionId = session.sessionClaims?.sid as string | undefined;
+
+      return {
+        type: 'clerk',
+        userId: session.userId,
+        email,
+        firstName: user.firstName || undefined,
+        lastName: user.lastName || undefined,
+        imageUrl: user.imageUrl || undefined,
+        sessionId,
+        sessionClaims: {
+          ...session.sessionClaims,
+          email,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          imageUrl: user.imageUrl,
+          username: user.username
+        }
+      };
+    } catch (error: any) {
+      console.error('Failed to get user details:', error);
       throw new AuthError(
-        'User not found in Clerk',
-        'USER_NOT_FOUND',
-        404
+        'Failed to get user details: ' + (error.message || 'Unknown error'),
+        'USER_DETAILS_ERROR',
+        500,
+        { cause: error }
       );
     }
-
-    // Get the primary email with proper type checking
-    const email = user.emailAddresses.find(
-      (email: ClerkEmailAddress) => 
-        email.id === user.primaryEmailAddressId
-    )?.emailAddress;
-
-    // Get the active session ID
-    const sessionId = session.sessionClaims?.sid as string | undefined;
-
-    return {
-      type: 'clerk',
-      userId: session.userId,
-      email,
-      firstName: user.firstName || undefined,
-      lastName: user.lastName || undefined,
-      imageUrl: user.imageUrl || undefined,
-      sessionId,
-      sessionClaims: session.sessionClaims as Record<string, unknown> | undefined
-    };
   } catch (error) {
     if (error instanceof AuthError) throw error;
     

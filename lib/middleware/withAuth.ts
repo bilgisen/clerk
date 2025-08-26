@@ -106,12 +106,13 @@ export function withAuth(
         throw new AuthError('Invalid token format', 'INVALID_TOKEN', 401);
       }
 
-      // Determine token type
+      // Check if it's a Clerk token
       const isClerkToken = headerData?.kid?.startsWith('ins_');
-      const isGitHubToken = headerData?.kid && !headerData.kid.startsWith('ins_');
+      console.log('Token type detected:', isClerkToken ? 'Clerk' : 'GitHub');
 
-      // Try Clerk token first if allowed
-      if (isClerkToken && (allowClerk ?? true)) {
+      // Use the appropriate verification method based on token type
+      if (isClerkToken && allowClerk) {
+        console.log('Verifying as Clerk token...');
         try {
           const clerkAuth = await verifyClerkToken(token);
           authContext = {
@@ -120,13 +121,14 @@ export function withAuth(
             userId: clerkAuth.userId,
             email: clerkAuth.email,
           };
+          console.log('Clerk authentication successful');
         } catch (error) {
           console.error('Clerk verification failed:', error);
           throw new AuthError('Clerk authentication failed', 'CLERK_AUTH_FAILED', 401);
         }
-      }
-      // Try GitHub token if allowed
-      else if (isGitHubToken && allowGitHubOidc) {
+      } 
+      else if (!isClerkToken && allowGitHubOidc) {
+        console.log('Verifying as GitHub OIDC token...');
         try {
           const githubContext = await verifyGitHubToken(token, {
             audience: process.env.GITHUB_OIDC_AUDIENCE,
@@ -141,14 +143,13 @@ export function withAuth(
             userId: githubContext.claims.sub,
             email: githubContext.claims.email as string | undefined,
           };
+          console.log('GitHub authentication successful');
         } catch (error) {
           console.error('GitHub verification failed:', error);
           throw new AuthError('GitHub OIDC authentication failed', 'GITHUB_AUTH_FAILED', 401);
         }
-      }
-      // No valid token type found
-      else {
-        throw new AuthError('Unsupported token type', 'UNSUPPORTED_TOKEN', 401);
+      } else {
+        throw new AuthError('Unsupported token type or auth method not allowed', 'UNSUPPORTED_TOKEN', 401);
       }
 
       // At this point, we've either authenticated or thrown an error
