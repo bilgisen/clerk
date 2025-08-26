@@ -3,7 +3,7 @@ import { headers } from 'next/headers';
 import { db } from '@/db/drizzle';
 import { books, chapters, users } from '@/db/schema';
 import { eq, and } from 'drizzle-orm';
-import { verifyGithubOidc } from '@/lib/auth/verifyGithubOidc';
+import { verifyGithubOidc, OidcAuthError } from '@/lib/auth/verifyGithubOidc';
 import { getAuth } from '@clerk/nextjs/server';
 import { InferSelectModel } from 'drizzle-orm';
 
@@ -121,16 +121,56 @@ function flattenChapterTree(chapters: ChapterWithChildren[], bookSlug: string, b
 
 // Verify authentication (either Clerk or GitHub OIDC)
 async function verifyRequest(headers: Headers, request: NextRequest): Promise<AuthResult> {
-  // Check for Clerk token first (from Clerk-Authorization header)
+  // First check for GitHub OIDC token in standard Authorization header
+  const authHeader = headers.get('authorization') || headers.get('Authorization') || '';
+  
+  if (authHeader?.startsWith('Bearer ')) {
+    const token = authHeader.split(' ')[1];
+    if (token) {
+      try {
+        // Try to verify as GitHub OIDC token first
+        const claims = await verifyGithubOidc(token, {
+          audience: process.env.GHA_OIDC_AUDIENCE,
+          allowedRepo: process.env.GHA_ALLOWED_REPO,
+          allowedRef: process.env.GHA_ALLOWED_REF,
+        });
+        
+        console.log('Authenticated via GitHub OIDC');
+        // Ensure all properties are strings
+        const result = { 
+          type: 'github' as const, 
+          repository: String(claims.repository ?? ''),
+          ref: String(claims.ref ?? ''),
+          workflow: String(claims.workflow ?? ''),
+          actor: String(claims.actor ?? ''),
+          run_id: String(claims.run_id ?? '')
+        };
+        
+        return result;
+      } catch (error) {
+        const githubError = error as Error;
+        // If it's a GitHub-specific error, rethrow
+        if (githubError instanceof OidcAuthError) {
+          console.error('GitHub OIDC verification failed:', githubError.message);
+          throw githubError;
+        }
+        // If it's not a GitHub token, continue to check for Clerk token
+        console.log('Not a GitHub OIDC token, checking for Clerk token...');
+      }
+    }
+  }
+  
+  // Check for Clerk token in Clerk-Authorization header
   const clerkAuthHeader = headers.get('clerk-authorization') || headers.get('Clerk-Authorization') || '';
   
   if (clerkAuthHeader?.startsWith('Bearer ')) {
     try {
-      // Remove the Clerk-Authorization header to prevent conflicts with getAuth()
+      // Create a new request without the Authorization header to avoid conflicts
       const modifiedRequest = new NextRequest(request);
       modifiedRequest.headers.delete('authorization');
       modifiedRequest.headers.delete('Authorization');
       
+      // Get Clerk auth
       const authObj = getAuth(modifiedRequest);
       if (authObj.userId) {
         console.log('Authenticated via Clerk');
@@ -146,52 +186,13 @@ async function verifyRequest(headers: Headers, request: NextRequest): Promise<Au
         };
       }
     } catch (clerkError) {
-      console.log('Clerk authentication failed:', clerkError);
+      console.error('Clerk authentication failed:', clerkError);
+      throw new Error('Clerk authentication failed');
     }
   }
   
-  // If no Clerk token or Clerk auth failed, try GitHub OIDC
-  const githubAuthHeader = headers.get('authorization') || headers.get('Authorization') || '';
-  
-  if (!githubAuthHeader.startsWith('Bearer ')) {
-    throw new Error('Missing or invalid Authorization header');
-  }
-
-  const token = githubAuthHeader.split(' ')[1];
-  
-  if (!token) {
-    throw new Error('Missing token in Authorization header');
-  }
-  
-  try {
-    const claims = await verifyGithubOidc(token, {
-      audience: process.env.GHA_OIDC_AUDIENCE,
-      allowedRepo: process.env.GHA_ALLOWED_REPO,
-      allowedRef: process.env.GHA_ALLOWED_REF,
-    });
-    
-    console.log('Authenticated via GitHub OIDC');
-    // Type assertion for GitHub claims
-    const githubClaims = claims as {
-      repository?: string;
-      ref?: string;
-      workflow?: string;
-      actor?: string;
-      run_id?: string;
-    };
-    
-    return { 
-      type: 'github' as const, 
-      repository: githubClaims.repository || '',
-      ref: githubClaims.ref || '',
-      workflow: githubClaims.workflow || '',
-      actor: githubClaims.actor || '',
-      run_id: githubClaims.run_id || ''
-    };
-  } catch (githubError) {
-    console.error('GitHub OIDC verification failed:', githubError);
-    throw new Error('No valid authentication found');
-  }
+  // If we get here, no valid authentication was found
+  throw new Error('No valid authentication found. Either a valid Clerk or GitHub OIDC token is required.');
 }
 
 export async function GET(

@@ -111,12 +111,12 @@ async function createCustomJWKSClient(): Promise<ReturnType<typeof createRemoteJ
   return Object.assign(handler, client);
 }
 
-export type OidcVerificationOptions = {
-  audience?: string
-  allowedRepo?: string
-  allowedRef?: string
-  allowedWorkflow?: string
-  clockToleranceSec?: number
+export interface VerifyGithubOidcOptions {
+  audience?: string | string[];
+  allowedRepo?: string | RegExp;
+  allowedRef?: string | RegExp;
+  allowedWorkflow?: string | RegExp;
+  clockToleranceSec?: number;
 }
 
 export type GithubOidcClaims = JWTPayload & {
@@ -164,9 +164,29 @@ async function getJwks(): Promise<ReturnType<typeof createRemoteJWKSet>> {
   return jwks;
 }
 
-export async function verifyGithubOidc(token: string, opts: OidcVerificationOptions = {}): Promise<GithubOidcClaims> {
+// Function to check if a token is likely a GitHub OIDC token
+function isGitHubOidcToken(token: string): boolean {
+  try {
+    // GitHub OIDC tokens are JWTs with a specific structure
+    const parts = token.split('.'); 
+    if (parts.length !== 3) return false;
+    
+    const header = JSON.parse(Buffer.from(parts[0], 'base64').toString());
+    // GitHub OIDC tokens use RS256
+    return header.alg === 'RS256' && header.typ === 'JWT';
+  } catch {
+    return false;
+  }
+}
+
+export async function verifyGithubOidc(token: string, opts: VerifyGithubOidcOptions = {}): Promise<GithubOidcClaims> {
   if (!token) {
     throw new OidcAuthError(401, 'missing_token', 'Authorization token is required');
+  }
+
+  // First check if this looks like a GitHub OIDC token
+  if (!isGitHubOidcToken(token)) {
+    throw new OidcAuthError(401, 'INVALID_TOKEN_FORMAT', 'Invalid token format - not a GitHub OIDC token');
   }
 
   // Get the JWKS client
@@ -207,24 +227,26 @@ export async function verifyGithubOidc(token: string, opts: OidcVerificationOpti
       
       // Validate repository if specified
       if (opts.allowedRepo) {
-        const [owner, repo] = opts.allowedRepo.split('/');
-        if (claims.repository_owner !== owner || claims.repository !== repo) {
+        const repo = typeof opts.allowedRepo === 'string' ? opts.allowedRepo : opts.allowedRepo.toString();
+        const [owner, repoName] = repo.split('/');
+        if (claims.repository_owner !== owner || claims.repository !== repoName) {
           throw new OidcAuthError(
             403, 
             'invalid_repository', 
-            `Repository ${claims.repository_owner}/${claims.repository} does not match allowed repository ${opts.allowedRepo}`
+            `Repository ${claims.repository_owner}/${claims.repository} does not match allowed repository ${repo}`
           );
         }
       }
       
       // Validate ref if specified
       if (opts.allowedRef) {
-        const ref = `refs/heads/${opts.allowedRef}`;
-        if (claims.ref !== ref) {
+        const ref = typeof opts.allowedRef === 'string' ? opts.allowedRef : opts.allowedRef.toString();
+        const expectedRef = `refs/heads/${ref}`;
+        if (claims.ref !== expectedRef) {
           throw new OidcAuthError(
             403, 
             'invalid_ref', 
-            `Ref ${claims.ref} does not match allowed ref ${ref}`
+            `Ref ${claims.ref} does not match allowed ref ${expectedRef}`
           );
         }
       }
@@ -245,51 +267,53 @@ export async function verifyGithubOidc(token: string, opts: OidcVerificationOpti
     }
   }
   
-  // First, try with the cached JWKS client
   try {
+    // First try with the cached JWKS client
     return await validateTokenWithJwks(jwksClient);
-  } catch (error) {
-    console.error('Initial JWT verification failed:', error);
-    
-    // If verification failed, try to fetch fresh JWKS and retry
-    console.log('Attempting to refresh JWKS and retry verification...');
-    
-    try {
-      const freshJwks = await createCustomJWKSClient();
-      return await validateTokenWithJwks(freshJwks);
-    } catch (retryError) {
-      console.error('Retry verification failed:', retryError);
-      
-      if (retryError instanceof Error) {
-        if ('code' in retryError) {
-          const code = (retryError as any).code;
-          if (code === 'ERR_JWKS_NO_MATCHING_KEY') {
-            console.error('JWKS key not found - this usually means the token was issued by a different identity provider');
-            throw new OidcAuthError(
-              401, 
-              'invalid_token', 
-              'No matching key found in the JSON Web Key Set. The token might be from a different identity provider.'
-            );
-          } else if (code === 'ERR_JWT_EXPIRED') {
-            throw new OidcAuthError(401, 'token_expired', 'Token has expired');
-          } else if (code === 'ERR_JWT_CLAIM_VALIDATION_FAILED') {
-            throw new OidcAuthError(401, 'invalid_claims', 'Invalid token claims');
-          } else if (code === 'ERR_JWS_SIGNATURE_VERIFICATION_FAILED') {
-            throw new OidcAuthError(401, 'invalid_signature', 'Invalid token signature');
-          }
+  } catch (firstError: any) {
+    // If verification fails, try refreshing the JWKS once
+    if (firstError.code === 'ERR_JWKS_NO_MATCHING_KEY' || 
+        firstError.code === 'ERR_JWKS_MULTIPLE_MATCHING_KEYS') {
+      console.log('Key not found in cached JWKS, refreshing...');
+      const freshClient = await createCustomJWKSClient();
+      try {
+        return await validateTokenWithJwks(freshClient);
+      } catch (secondError: any) {
+        console.error('Token verification failed after JWKS refresh:', secondError);
+        
+        // Handle specific JWT verification errors
+        if (secondError.code === 'ERR_JWS_INVALID' || 
+            secondError.message?.includes('JWSInvalid') || 
+            secondError.message?.includes('JWSSignatureVerificationFailed')) {
+          throw new OidcAuthError(
+            401,
+            'INVALID_SIGNATURE',
+            'Invalid token signature - this appears to be a Clerk token, not a GitHub OIDC token'
+          );
+        } else if (secondError.code === 'ERR_JWT_EXPIRED' || secondError.message?.includes('JWTExpired')) {
+          throw new OidcAuthError(401, 'TOKEN_EXPIRED', 'Token has expired');
+        } else if (secondError.code === 'ERR_JWT_CLAIM_VALIDATION_FAILED') {
+          throw new OidcAuthError(401, 'INVALID_CLAIMS', 'Invalid token claims');
+        } else if (secondError.code === 'ERR_JWKS_NO_MATCHING_KEY') {
+          throw new OidcAuthError(
+            401,
+            'INVALID_TOKEN',
+            'No matching key found in the JSON Web Key Set. The token might be from a different identity provider.'
+          );
+        } else if (secondError.code === 'ERR_JWS_SIGNATURE_VERIFICATION_FAILED') {
+          throw new OidcAuthError(401, 'INVALID_SIGNATURE', 'Invalid token signature');
         }
         
-        // Fallback error handling
-        if (retryError.message.includes('JWTExpired')) {
-          throw new OidcAuthError(401, 'token_expired', 'Token has expired');
-        }
-        
-        if (retryError.message.includes('JWSInvalid') || retryError.message.includes('JWSSignatureVerificationFailed')) {
-          throw new OidcAuthError(401, 'invalid_signature', 'Invalid token signature');
-        }
+        // For any other error, rethrow with a generic message
+        throw new OidcAuthError(
+          401,
+          'TOKEN_VERIFICATION_FAILED',
+          'Failed to verify token: ' + (secondError.message || 'Unknown error')
+        );
       }
-      
-      throw new OidcAuthError(401, 'invalid_token', 'Token verification failed');
+    } else {
+      // If the error wasn't a key mismatch, rethrow the original error
+      throw firstError;
     }
   }
 }
