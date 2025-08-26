@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { verifySecretToken } from '@/lib/auth/verifySecret';
+import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
 
 // Routes that allow secret token authentication
 const SECRET_TOKEN_ROUTES = [
@@ -14,10 +15,13 @@ const SECRET_TOKEN_ROUTES = [
 
 // Public routes that don't require authentication
 const PUBLIC_ROUTES = [
+  '/',
   '/api/public/(.*)',
   '/api/trpc/(.*)',
   '/_next/(.*)',
   '/favicon.ico',
+  '/sign-in(.*)',
+  '/sign-up(.*)',
 ];
 
 // Check if path matches any of the patterns
@@ -28,36 +32,59 @@ const isPathMatching = (path: string, patterns: string[]): boolean => {
   });
 };
 
-export default function middleware(request: NextRequest) {
-  const { pathname } = request.nextUrl;
+// Create a matcher for protected routes
+const isProtectedRoute = createRouteMatcher([
+  '/((?!_next/static|_next/image|favicon.ico|sign-in|sign-up).*)',
+  '/(api|trpc)(.*)',
+]);
+
+// Handle secret token authentication for API routes
+async function handleApiAuth(request: NextRequest) {
+  if (isPathMatching(request.nextUrl.pathname, SECRET_TOKEN_ROUTES)) {
+    const isValid = await verifySecretToken(request);
+    if (!isValid) {
+      return new NextResponse(
+        JSON.stringify({ error: 'Unauthorized', message: 'Invalid or missing secret token' }),
+        { status: 401, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+    return NextResponse.next();
+  }
+  return null;
+}
+
+export default clerkMiddleware(async (auth, req) => {
+  const { pathname } = req.nextUrl;
+
+  // Handle API routes with secret token authentication
+  if (pathname.startsWith('/api/')) {
+    const response = await handleApiAuth(req);
+    if (response) return response;
+  }
 
   // Skip auth for public routes
   if (isPathMatching(pathname, PUBLIC_ROUTES)) {
     return NextResponse.next();
   }
 
-  // Check for secret token on allowed routes
-  if (isPathMatching(pathname, SECRET_TOKEN_ROUTES)) {
-    return verifySecretToken(request).then(isValid => {
-      if (isValid) {
-        return NextResponse.next();
-      }
-      return new NextResponse(
-        JSON.stringify({ error: 'Unauthorized', message: 'Invalid or missing secret token' }),
-        { status: 401, headers: { 'Content-Type': 'application/json' } }
-      );
-    });
+  // Check if the route is protected
+  if (isProtectedRoute(req)) {
+    // Get auth state and check if user is authenticated
+    const session = await auth();
+    if (!session?.userId) {
+      const signInUrl = new URL('/sign-in', req.url);
+      signInUrl.searchParams.set('redirect_url', req.url);
+      return NextResponse.redirect(signInUrl);
+    }
   }
 
-  // For all other routes, redirect to sign-in
-  const signInUrl = new URL('/sign-in', request.url);
-  signInUrl.searchParams.set('redirect_url', request.url);
-  return NextResponse.redirect(signInUrl);
-}
+  return NextResponse.next();
+});
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|sign-in).*)',
-    '/trpc/(.*)',
+    '/((?!_next/static|_next/image|favicon.ico|sign-in|sign-up).*)',
+    '/',
+    '/(api|trpc)(.*)',
   ],
 };
