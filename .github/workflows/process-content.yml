@@ -1,4 +1,4 @@
-name: Process Book Content
+name: Build E-Book
 
 on:
   workflow_dispatch:

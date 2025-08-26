@@ -8,7 +8,7 @@ readonly YELLOW='\033[1;33m'
 readonly NC='\033[0m' # No Color
 
 # Set default values
-BASE_URL=${BASE_URL:-'https://editor.bookshall.com'}
+BASE_URL="${BASE_URL:-https://editor.bookshall.com}"
 
 # Logging functions
 log_info() {
@@ -39,17 +39,14 @@ debug_print_env() {
   done
 }
 
-# Validate GitHub token format
+# Validate GitHub OIDC token
 validate_github_token() {
   local token=$1
-  
-  # GitHub tokens typically start with ghs_ for GitHub Apps
-  if [[ ! "$token" =~ ^ghs_[a-zA-Z0-9_]+$ ]]; then
-    log_error "Invalid GitHub token format. Expected token to start with 'ghs_'"
+  if [[ -z "$token" ]]; then
+    log_error "GitHub OIDC token is empty"
     return 1
   fi
-  
-  log_info "GitHub token format is valid"
+  log_info "GitHub OIDC token validation successful"
   return 0
 }
 
@@ -198,8 +195,9 @@ download_with_retry() {
 set -x
 curl -v -s -f -D ./headers.txt -o ./book-content/payload.json \
   -H "Accept: application/json" \
-  -H "Authorization: $JWT_HEADER" \
-  -H "X-GitHub-Token: $GITHUB_TOKEN" \
+  -H "Authorization: Bearer $GITHUB_OIDC_TOKEN" \
+  -H "Accept: application/vnd.github+json" \
+  -H "X-GitHub-Api-Version: 2022-11-28" \
   "$PAYLOAD_URL" 2> ./curl-debug.log || {
     CURL_EXIT_CODE=$?
     set +x
