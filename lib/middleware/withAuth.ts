@@ -86,30 +86,57 @@ export function withAuth(
       const authHeader = req.headers.get('authorization');
       let authContext: AuthContext | null = null;
 
-      // Try to authenticate with GitHub OIDC if allowed
-      if (allowGitHubOidc && authHeader?.startsWith('Bearer ')) {
-        const token = authHeader.substring('Bearer '.length).trim();
-        if (token) {
-          try {
-            const githubContext = await verifyGitHubToken(token, {
-              audience: process.env.GITHUB_OIDC_AUDIENCE,
-              allowedRepo: process.env.GHA_ALLOWED_REPO,
-              allowedRef: process.env.GHA_ALLOWED_REF,
-              requireWorkflowFromSameRepo: true,
-            });
-            
-            authContext = {
-              ...githubContext,
-              type: 'github',
-              userId: githubContext.claims.sub, // Use the GitHub OIDC subject as user ID
-              email: githubContext.claims.email as string | undefined,
-            };
-          } catch (error) {
-            if (requireAuth && !allowClerk) {
-              throw error; // Re-throw if Clerk is not allowed as fallback
-            }
-            console.debug('GitHub OIDC verification failed, falling back to Clerk');
+      // Extract token if present
+      const token = authHeader?.startsWith('Bearer ') ? authHeader.substring('Bearer '.length).trim() : null;
+      
+      // Check if this is a Clerk token (starts with 'ins_' in the kid header)
+      const isLikelyClerkToken = token && (
+        // Check if token has a header that indicates it's from Clerk
+        token.split('.')[0]?.includes('ins_') ||
+        // Or if it's a JWT with a Clerk-style kid
+        (token.split('.').length === 3 && 
+         JSON.parse(Buffer.from(token.split('.')[0], 'base64').toString()).kid?.startsWith?.('ins_'))
+      );
+
+      // Try Clerk authentication first if this looks like a Clerk token or if GitHub OIDC is disabled
+      if (allowClerk && (isLikelyClerkToken || !allowGitHubOidc)) {
+        try {
+          const clerkContext = await verifyClerkToken();
+          authContext = {
+            ...clerkContext,
+            type: 'clerk',
+            userId: clerkContext.userId,
+            email: clerkContext.email,
+          };
+        } catch (error) {
+          if (requireAuth && !allowGitHubOidc) {
+            throw error; // Only throw if GitHub OIDC is not allowed as fallback
           }
+          console.debug('Clerk authentication failed, falling back to GitHub OIDC');
+        }
+      }
+
+      // Try GitHub OIDC if not authenticated yet and allowed
+      if (!authContext && allowGitHubOidc && token && !isLikelyClerkToken) {
+        try {
+          const githubContext = await verifyGitHubToken(token, {
+            audience: process.env.GITHUB_OIDC_AUDIENCE,
+            allowedRepo: process.env.GHA_ALLOWED_REPO,
+            allowedRef: process.env.GHA_ALLOWED_REF,
+            requireWorkflowFromSameRepo: true,
+          });
+          
+          authContext = {
+            ...githubContext,
+            type: 'github',
+            userId: githubContext.claims.sub,
+            email: githubContext.claims.email as string | undefined,
+          };
+        } catch (error) {
+          if (requireAuth) {
+            throw error;
+          }
+          console.debug('GitHub OIDC verification failed');
         }
       }
 
