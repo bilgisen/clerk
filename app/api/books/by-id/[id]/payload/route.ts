@@ -1,67 +1,59 @@
 import { NextResponse, NextRequest } from 'next/server';
-import { headers } from 'next/headers';
 import { db } from '@/db/drizzle';
-import { books, chapters, users } from '@/db/schema';
-import { eq, and } from 'drizzle-orm';
-import { verifyGithubOidc, OidcAuthError } from '@/lib/auth/verifyGithubOidc';
-import { getAuth } from '@clerk/nextjs/server';
-import { InferSelectModel } from 'drizzle-orm';
+import { books, chapters } from '@/db/schema';
+import { and, eq } from 'drizzle-orm';
+import { verifyRequest } from '@/lib/verify-jwt';
+import { z } from 'zod';
 
+// Schema for query parameters
+const queryParamsSchema = z.object({
+  format: z.enum(['epub']).default('epub'),
+  generate_toc: z.string().default('true').transform(val => val === 'true'),
+  include_imprint: z.string().default('true').transform(val => val === 'true'),
+  style: z.string().default('default'),
+  toc_depth: z.string().default('3').transform(Number).refine(n => n >= 1 && n <= 6, {
+    message: 'TOC depth must be between 1 and 6',
+  }),
+  language: z.string().optional(),
+});
+
+type QueryParams = z.infer<typeof queryParamsSchema>;
+
+// Configuration
 export const dynamic = 'force-dynamic';
 export const dynamicParams = true;
-
 export const runtime = 'nodejs';
-// Force Node.js runtime since we're using Node.js modules
-// that aren't available in Edge Runtime
 
-type Chapter = InferSelectModel<typeof chapters>;
-type Book = {
+// Constants
+const DEFAULT_LANGUAGE = 'en';
+const MAX_CONTENT_LENGTH = 10 * 1024 * 1024; // 10MB
+
+// Types
+interface Chapter {
   id: string;
-  userId: string;
+  bookId: string;
   title: string;
-  slug: string;
-  author: string;
-  language: string;
-  coverImageUrl: string | null;
-  createdAt: Date;
-  updatedAt: Date;
-  subtitle?: string | null;
-  description?: string | null;
-  publishedAt?: Date | null;
-  // Add other fields as needed
-};
-
-type User = {
-  id: string;
-  clerkId: string;
-  email: string;
-  // Add other fields as needed
-};
-
-type AuthResult = {
-  type: 'github' | 'clerk';
-  userId?: string;
-  repository?: string;
-  ref?: string;
-  workflow?: string;
-  actor?: string;
-  run_id?: string;
-};
-
-type BookWithUser = Book & {
-  user?: User;
-};
-
-interface ChapterWithChildren extends Omit<Chapter, 'parentChapterId'> {
-  children: ChapterWithChildren[];
+  content: any;
+  order: number;
   parentChapterId: string | null;
+  level?: number;
+  isDraft?: boolean;
+  publishedAt?: Date | null;
+  slug?: string;
+}
+
+interface ChapterNode extends Chapter {
+  children: ChapterNode[];
+  slug: string;
 }
 
 interface PayloadChapter {
   id: string;
   title: string;
+  slug: string;
   url: string;
-  level: number;
+  content_url: string;
+  content: string;
   order: number;
   parent: string | null;
   title_tag: 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6';
@@ -76,9 +68,8 @@ interface EbookPayload {
     output_filename: string;
     cover_url: string;
     stylesheet_url: string;
-    imprint?: {
-      url: string;
-    };
+    subtitle?: string;
+    description?: string;
     chapters: PayloadChapter[];
   };
   options: {
@@ -88,111 +79,94 @@ interface EbookPayload {
     include_imprint: boolean;
     cover: boolean;
   };
+  metadata?: {
+    generated_at: string;
+    generated_by: string;
+    workflow_run_id?: string;
+  };
 }
 
-function buildChapterTree(chapterList: Chapter[], parentId: string | null = null): ChapterWithChildren[] {
-  return chapterList
-    .filter((chapter): chapter is Chapter & { parentChapterId: string | null } =>
-      chapter.parentChapterId === parentId
-    )
-    .sort((a, b) => a.order - b.order)
-    .map(chapter => ({
+// Helper function to build a tree structure from flat chapter list
+function buildChapterTree(chapters: Chapter[]): ChapterNode[] {
+  const chapterMap = new Map<string, ChapterNode>();
+  const rootChapters: ChapterNode[] = [];
+
+  // First pass: create all nodes
+  for (const chapter of chapters) {
+    const node: ChapterNode = {
       ...chapter,
-      children: buildChapterTree(chapterList, chapter.id),
-    }));
+      slug: chapter.slug || `chapter-${chapter.id.slice(0, 8)}`,
+      children: [],
+    };
+    chapterMap.set(chapter.id, node);
+  }
+
+  // Second pass: build the tree
+  for (const chapter of chapterMap.values()) {
+    if (chapter.parentChapterId && chapterMap.has(chapter.parentChapterId)) {
+      const parent = chapterMap.get(chapter.parentChapterId)!;
+      parent.children.push(chapter);
+    } else {
+      rootChapters.push(chapter);
+    }
+  }
+
+  // Sort children by order
+  const sortChapters = (nodes: ChapterNode[]): ChapterNode[] => {
+    return nodes
+      .sort((a, b) => a.order - b.order)
+      .map(node => ({
+        ...node,
+        children: sortChapters(node.children),
+      }));
+  };
+
+  return sortChapters(rootChapters);
 }
 
-function flattenChapterTree(chapters: ChapterWithChildren[], bookSlug: string, baseUrl: string, level = 1, parentId: string | null = null): PayloadChapter[] {
-  return chapters.flatMap((chapter, index) => {
-    const result: PayloadChapter = {
+// Helper function to flatten chapter tree for payload
+function flattenChapterTree(
+  chapters: ChapterNode[],
+  bookSlug: string,
+  baseUrl: string,
+  level = 1,
+  parentId: string | null = null
+): PayloadChapter[] {
+  const result: PayloadChapter[] = [];
+  
+  for (const chapter of chapters) {
+    const tag = (['h1', 'h2', 'h3', 'h4', 'h5', 'h6'] as const)[Math.min(level - 1, 5)];
+    const slug = chapter.slug || `chapter-${chapter.id.slice(0, 8)}`;
+    const url = `${baseUrl}/books/${bookSlug}/chapters/${slug}`;
+    const contentUrl = `${url}/content`;
+
+    const payloadChapter: PayloadChapter = {
       id: chapter.id,
       title: chapter.title,
-      url: `${baseUrl}/api/books/by-slug/${bookSlug}/chapters/${chapter.id}/html`,
-      level: level,
-      order: index,
+      slug,
+      url,
+      content_url: contentUrl,
+      content: chapter.content || '',
+      order: chapter.order,
       parent: parentId,
-      title_tag: `h${Math.min(level + 1, 6)}` as 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6',
+      title_tag: tag,
     };
 
-    const children = flattenChapterTree(chapter.children, bookSlug, baseUrl, level + 1, chapter.id);
-    return [result, ...children];
-  });
+    result.push(payloadChapter);
+
+    if (chapter.children.length > 0) {
+      result.push(...flattenChapterTree(chapter.children, bookSlug, baseUrl, level + 1, chapter.id));
+    }
+  }
+
+  return result;
 }
 
-// Verify authentication (either Clerk or GitHub OIDC)
-async function verifyRequest(headers: Headers, request: NextRequest): Promise<AuthResult> {
-  // First check for GitHub OIDC token in standard Authorization header
-  const authHeader = headers.get('authorization') || headers.get('Authorization') || '';
-  
-  if (authHeader?.startsWith('Bearer ')) {
-    const token = authHeader.split(' ')[1];
-    if (token) {
-      try {
-        // Try to verify as GitHub OIDC token first
-        const claims = await verifyGithubOidc(token, {
-          audience: process.env.GHA_OIDC_AUDIENCE,
-          allowedRepo: process.env.GHA_ALLOWED_REPO,
-          allowedRef: process.env.GHA_ALLOWED_REF,
-        });
-        
-        console.log('Authenticated via GitHub OIDC');
-        // Ensure all properties are strings
-        const result = { 
-          type: 'github' as const, 
-          repository: String(claims.repository ?? ''),
-          ref: String(claims.ref ?? ''),
-          workflow: String(claims.workflow ?? ''),
-          actor: String(claims.actor ?? ''),
-          run_id: String(claims.run_id ?? '')
-        };
-        
-        return result;
-      } catch (error) {
-        const githubError = error as Error;
-        // If it's a GitHub-specific error, rethrow
-        if (githubError instanceof OidcAuthError) {
-          console.error('GitHub OIDC verification failed:', githubError.message);
-          throw githubError;
-        }
-        // If it's not a GitHub token, continue to check for Clerk token
-        console.log('Not a GitHub OIDC token, checking for Clerk token...');
-      }
-    }
-  }
-  
-  // Check for Clerk token in Clerk-Authorization header
-  const clerkAuthHeader = headers.get('clerk-authorization') || headers.get('Clerk-Authorization') || '';
-  
-  if (clerkAuthHeader?.startsWith('Bearer ')) {
-    try {
-      // Create a new request without the Authorization header to avoid conflicts
-      const modifiedRequest = new NextRequest(request);
-      modifiedRequest.headers.delete('authorization');
-      modifiedRequest.headers.delete('Authorization');
-      
-      // Get Clerk auth
-      const authObj = getAuth(modifiedRequest);
-      if (authObj.userId) {
-        console.log('Authenticated via Clerk');
-        return { 
-          type: 'clerk' as const, 
-          userId: authObj.userId,
-          // Add empty GitHub specific fields to satisfy TypeScript
-          repository: '',
-          ref: '',
-          workflow: '',
-          actor: '',
-          run_id: ''
-        };
-      }
-    } catch (clerkError) {
-      console.error('Clerk authentication failed:', clerkError);
-      throw new Error('Clerk authentication failed');
-    }
-  }
-  
-  // If we get here, no valid authentication was found
-  throw new Error('No valid authentication found. Either a valid Clerk or GitHub OIDC token is required.');
+// Helper function to get base URL
+function getBaseUrl(request: NextRequest): string {
+  const protocol = request.headers.get('x-forwarded-proto') || 'https';
+  const host = request.headers.get('host') || 'clerko.com';
+  return `${protocol}://${host}`;
 }
 
 export async function GET(
@@ -200,188 +174,115 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
-    // Get the book ID from params
+    // Parse and validate query parameters
+    const searchParams = Object.fromEntries(request.nextUrl.searchParams);
+    const { format, generate_toc, include_imprint, style, toc_depth, language } = 
+      queryParamsSchema.parse(searchParams);
+
+    // Get the base URL for generating absolute URLs
+    const baseUrl = getBaseUrl(request);
     const bookId = params.id;
-    
-    // Verify GitHub OIDC token
-    const headersList = await headers();
-    const headersObj = Object.fromEntries(Array.from(headersList.entries()));
-    const claims = await verifyRequest(new Headers(headersObj), request);
-    
-    console.log('Authentication successful:', {
-      type: claims.type,
-      userId: claims.userId,
-      repository: claims.repository,
-      ref: claims.ref,
-      workflow: claims.workflow,
-      actor: claims.actor,
-      run_id: claims.run_id
-    });
 
-    // Get the book by ID with user verification for Clerk auth
-    let book: Book | null = null;
+    // Verify authentication
+    const auth = await verifyRequest(request);
     
-    if (claims.type === 'clerk' && claims.userId) {
-      // For Clerk auth, verify the user owns the book
-      const result = await db.select()
+    // Fetch the book and its chapters in a transaction
+    const [bookResult, chapterResults] = await db.transaction(async (tx) => {
+      const bookQuery = await tx
+        .select()
         .from(books)
-        .innerJoin(users, eq(books.userId, users.id))
-        .where(and(
-          eq(users.clerkId, claims.userId),
-          eq(books.id, bookId)
-        ))
+        .where(eq(books.id, bookId))
         .limit(1);
-      
-      const dbBook = result[0]?.books;
-      if (!dbBook) {
-        book = null;
-      } else {
-        book = {
-          id: dbBook.id,
-          userId: dbBook.userId,
-          title: dbBook.title || 'Untitled',
-          slug: dbBook.slug || '',
-          author: dbBook.author || 'Unknown',
-          language: dbBook.language || 'tr',
-          coverImageUrl: dbBook.coverImageUrl || null,
-          createdAt: dbBook.createdAt || new Date(),
-          updatedAt: dbBook.updatedAt || new Date(),
-          subtitle: dbBook.subtitle || null,
-          description: dbBook.description || null,
-          publishedAt: dbBook.publishedAt || null
-        };
-      }
-    } else {
-      // For GitHub OIDC, just get the book by ID
-      const result = await db.query.books.findFirst({
-        where: eq(books.id, bookId)
-      });
-      
-      if (!result) {
-        book = null;
-      } else {
-        book = {
-          id: result.id,
-          userId: result.userId,
-          title: result.title || 'Untitled',
-          slug: result.slug || '',
-          author: result.author || 'Unknown',
-          language: result.language || 'tr',
-          coverImageUrl: result.coverImageUrl || null,
-          createdAt: result.createdAt || new Date(),
-          updatedAt: result.updatedAt || new Date(),
-          subtitle: result.subtitle || null,
-          description: result.description || null,
-          publishedAt: result.publishedAt || null
-        };
-      }
-    }
-
-    if (!book) {
+        
+      const chaptersQuery = await tx
+        .select()
+        .from(chapters)
+        .where(and(
+          eq(chapters.bookId, bookId),
+          eq(chapters.isDraft, false)
+        ))
+        .orderBy(chapters.order);
+        
+      return [bookQuery, chaptersQuery];
+    });
+    
+    if (!bookResult || bookResult.length === 0) {
       return NextResponse.json(
-        { error: 'Book not found or access denied' },
+        { error: 'Book not found' },
         { status: 404 }
       );
     }
     
-    const bookChapters = (await db.query.chapters.findMany({
-      where: eq(chapters.bookId, book.id),
-      orderBy: (chapters, { asc }) => [asc(chapters.order)],
-    })) as Chapter[];
-
-    // Determine base URL for absolute links
-    const reqUrl = new URL(request.url);
-    const configuredBase = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_BASE_URL || '';
-    const baseUrl = configuredBase || `${reqUrl.protocol}//${reqUrl.host}`;
+    const book = bookResult[0];
     
-    // Read publishing options from query params with sensible defaults
-    const search = reqUrl.searchParams;
-    const formatParam = (search.get('format') || 'epub').toLowerCase();
-    const format = (formatParam === 'mobi' ? 'mobi' : 'epub') as 'epub' | 'mobi';
-    const generateToc = (search.get('generate_toc') ?? 'true').toLowerCase() === 'true';
-    const includeImprint = (search.get('include_imprint') ?? 'true').toLowerCase() === 'true';
-    const includeCover = (search.get('cover') ?? (book.coverImageUrl ? 'true' : 'false')).toLowerCase() === 'true';
-    const style = (search.get('style') || 'default').toLowerCase();
-    const tocDepth = Number(search.get('toc_depth') ?? '3');
-    const languageOverride = search.get('language') || undefined;
-
-    const stylesheetPath = style === 'style2' ? '/styles/ebook-style2.css' : '/styles/ebook.css';
-    const outputExt = format === 'mobi' ? 'mobi' : 'epub';
-
-    // Build chapter tree
-    const chapterTree = buildChapterTree(bookChapters);
+    // Check authorization
+    if (auth.type === 'clerk' && book.userId !== auth.userId) {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 403 }
+      );
+    }
+    
+    // Build chapter tree and flatten for payload
+    const chapterTree = buildChapterTree(chapterResults);
     const flattenedChapters = flattenChapterTree(chapterTree, book.slug, baseUrl);
     
-    // Log chapter information for debugging
-    console.log(`Found ${bookChapters.length} chapters for book ${book.id}`);
-    console.log(`Flattened to ${flattenedChapters.length} chapters in the payload`);
-
-    // Construct the payload
+    // Prepare the payload
     const payload: EbookPayload = {
       book: {
         slug: book.slug,
         title: book.title,
-        author: book.author || 'Unknown',
-        language: languageOverride || book.language || 'tr',
-        output_filename: `${book.slug}.${outputExt}`,
-        cover_url: includeCover ? (book.coverImageUrl || '') : '',
-        stylesheet_url: `${baseUrl}${stylesheetPath}`,
-        ...(includeImprint ? { imprint: { url: `${baseUrl}/api/books/by-slug/${book.slug}/imprint` } } : {}),
-        chapters: flattenedChapters
+        author: book.author,
+        language: language || book.language || DEFAULT_LANGUAGE,
+        output_filename: `${book.slug}.${format}`,
+        cover_url: book.coverImageUrl ? new URL(book.coverImageUrl, baseUrl).toString() : '',
+        stylesheet_url: `${baseUrl}/styles/ebook-${style}.css`,
+        ...(book.subtitle && { subtitle: book.subtitle }),
+        ...(book.description && { description: book.description }),
+        chapters: flattenedChapters,
       },
       options: {
-        generate_toc: generateToc,
-        toc_depth: Number.isFinite(tocDepth) && tocDepth > 0 ? tocDepth : 3,
+        generate_toc,
+        toc_depth,
         embed_metadata: true,
-        include_imprint: includeImprint,
-        cover: includeCover
-      }
+        include_imprint,
+        cover: !!book.coverImageUrl,
+      },
+      metadata: {
+        generated_at: new Date().toISOString(),
+        generated_by: auth.type === 'github' ? `github:${auth.actor}` : `user:${auth.userId}`,
+        ...(auth.type === 'github' && { workflow_run_id: auth.runId }),
+      },
     };
-
-    // Return the payload as JSON
+    
     return NextResponse.json(payload);
-
-  } catch (err: unknown) {
-    const error = err as Error & { status?: number; code?: string };
-    console.error('Error generating payload by ID:', error);
     
-    // Enhanced error details for debugging
-    console.error('Error details:', {
-      bookId: params.id,
-      timestamp: new Date().toISOString(),
-      error: error.message,
-      stack: error.stack,
-      code: error.code,
-      status: error.status
-    });
+  } catch (error) {
+    console.error('Error generating payload:', error);
     
-    // Provide more detailed error messages for common OIDC issues
-    let errorMessage = 'Failed to generate EPUB payload';
-    let statusCode = 500;
+    let status = 500;
+    let message = 'Internal server error';
     
-    if (error.message?.includes('no applicable key found in the JSON Web Key Set')) {
-      errorMessage = 'Authentication failed: Invalid or expired token';
-      statusCode = 401;
-    } else if (error.message?.includes('JWTExpired')) {
-      errorMessage = 'Authentication failed: Token has expired';
-      statusCode = 401;
-    } else if (error.message?.includes('JWSInvalid')) {
-      errorMessage = 'Authentication failed: Invalid token signature';
-      statusCode = 401;
-    } else if (error.message?.includes('JWTClaimValidationFailed')) {
-      errorMessage = 'Authentication failed: Invalid token claims';
-      statusCode = 401;
+    if (error instanceof z.ZodError) {
+      status = 400;
+      message = error.issues.map(issue => 
+        `${issue.path.join('.')}: ${issue.message}`
+      ).join(', ');
+    } else if (error instanceof Error) {
+      message = error.message;
+      
+      if (message.includes('No authorization token provided')) {
+        status = 401;
+      } else if (message.includes('Authentication failed')) {
+        status = 403;
+      } else if (message.includes('not found')) {
+        status = 404;
+      }
     }
     
-    const response: {
-      error: string;
-      details?: string;
-    } = { error: errorMessage };
-
-    if (process.env.NODE_ENV === 'development' && error instanceof Error) {
-      response.details = error.message;
-    }
-
-    return NextResponse.json(response, { status: statusCode });
+    return NextResponse.json(
+      { error: message },
+      { status }
+    );
   }
 }

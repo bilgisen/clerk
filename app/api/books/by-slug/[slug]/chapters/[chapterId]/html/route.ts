@@ -1,11 +1,9 @@
 import { NextResponse, NextRequest } from 'next/server';
-import { headers } from 'next/headers';
 import { db } from '@/db/drizzle';
-import { books, chapters, users } from '@/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { books, chapters } from '@/db/schema';
+import { eq } from 'drizzle-orm';
 import { generateChapterHTML, generateCompleteDocumentHTML } from '@/lib/generateChapterHTML';
-import { verifyGithubOidc } from '@/lib/auth/verifyGithubOidc';
-import { getAuth } from '@clerk/nextjs/server';
+import { verifyRequest } from '@/lib/verify-jwt';
 
 export const dynamic = 'force-dynamic';
 export const dynamicParams = true;
@@ -18,126 +16,36 @@ interface BookWithChapters extends Book {
   chapters?: Chapter[];
 }
 
-type AuthResult = {
-  type: 'github' | 'clerk';
-  userId?: string;
-  repository?: string;
-  ref?: string;
-  workflow?: string;
-  actor?: string;
-  run_id?: string;
-};
-
-// Verify authentication (either Clerk or GitHub OIDC)
-async function verifyRequest(headers: Headers, request: NextRequest): Promise<AuthResult> {
-  // Check for Clerk token first (from Clerk-Authorization header)
-  const clerkAuthHeader = headers.get('clerk-authorization') || headers.get('Clerk-Authorization') || '';
-  
-  if (clerkAuthHeader?.startsWith('Bearer ')) {
-    try {
-      // Remove the Clerk-Authorization header to prevent conflicts with getAuth()
-      const modifiedRequest = new NextRequest(request);
-      modifiedRequest.headers.delete('authorization');
-      modifiedRequest.headers.delete('Authorization');
-      
-      const authObj = getAuth(modifiedRequest);
-      if (authObj.userId) {
-        console.log('Authenticated via Clerk');
-        return { 
-          type: 'clerk', 
-          userId: authObj.userId,
-          // Add empty GitHub specific fields to satisfy TypeScript
-          repository: '',
-          ref: '',
-          workflow: '',
-          actor: '',
-          run_id: ''
-        };
-      }
-    } catch (clerkError) {
-      console.log('Clerk authentication failed:', clerkError);
-    }
-  }
-  
-  // If no Clerk token or Clerk auth failed, try GitHub OIDC
-  const githubAuthHeader = headers.get('authorization') || headers.get('Authorization') || '';
-  
-  if (!githubAuthHeader.startsWith('Bearer ')) {
-    throw new Error('Missing or invalid Authorization header');
-  }
-
-  const token = githubAuthHeader.split(' ')[1];
-  
-  if (!token) {
-    throw new Error('Missing token in Authorization header');
-  }
-  
-  try {
-    const claims = await verifyGithubOidc(token, {
-      audience: process.env.GHA_OIDC_AUDIENCE,
-      allowedRepo: process.env.GHA_ALLOWED_REPO,
-      allowedRef: process.env.GHA_ALLOWED_REF,
-    });
-    
-    console.log('Authenticated via GitHub OIDC');
-    // Type assertion for GitHub claims
-    const githubClaims = claims as {
-      repository?: string;
-      ref?: string;
-      workflow?: string;
-      actor?: string;
-      run_id?: string;
-    };
-    
-    return { 
-      type: 'github', 
-      repository: githubClaims.repository || '',
-      ref: githubClaims.ref || '',
-      workflow: githubClaims.workflow || '',
-      actor: githubClaims.actor || '',
-      run_id: githubClaims.run_id || ''
-    };
-  } catch (githubError) {
-    console.error('GitHub OIDC verification failed:', githubError);
-    throw new Error('No valid authentication found');
-  }
-}
-
 export async function GET(
   request: NextRequest,
   { params }: { params: { slug: string; chapterId: string } }
 ) {
   try {
     const { slug, chapterId } = params;
+    const requestStart = Date.now();
     
-    // Verify GitHub OIDC token
-    const authHeader = await headers();
-    const headersObj = Object.fromEntries(Array.from(authHeader.entries()));
-    const claims = await verifyRequest(new Headers(headersObj), request);
+    // Verify authentication
+    const auth = await verifyRequest(request);
     
     console.log('Authentication successful:', {
-      type: claims.type,
-      userId: claims.userId,
-      repository: claims.repository,
-      ref: claims.ref,
-      workflow: claims.workflow,
-      actor: claims.actor,
-      run_id: claims.run_id
+      type: auth.type,
+      userId: auth.userId,
+      repository: auth.repository,
+      ref: auth.ref,
+      workflow: auth.workflow,
+      actor: auth.actor,
+      runId: auth.runId
     });
     
     // For Clerk auth, verify the user owns the book
-    if (claims.type === 'clerk' && claims.userId) {
-      const bookResult = await db.select()
+    if (auth.type === 'clerk' && auth.userId) {
+      const [book] = await db
+        .select()
         .from(books)
-        .innerJoin(users, eq(books.userId, users.id))
-        .where(and(
-          eq(users.clerkId, claims.userId),
-          eq(books.slug, params.slug)
-        ))
-        .limit(1);
+        .where(eq(books.slug, slug));
         
-      if (!bookResult.length) {
-        console.error(`Access denied: User ${claims.userId} does not own book ${params.slug}`);
+      if (!book || book.userId !== auth.userId) {
+        console.error(`Access denied: User ${auth.userId} does not have access to book ${slug}`);
         return new NextResponse(
           JSON.stringify({ error: 'Access denied' }), 
           { status: 403, headers: { 'Content-Type': 'application/json' } }
@@ -145,15 +53,6 @@ export async function GET(
       }
     }
     
-    console.log('GitHub OIDC token verified successfully for chapter HTML:', {
-      repository: claims.repository,
-      ref: claims.ref,
-      workflow: claims.workflow,
-      actor: claims.actor,
-      runId: claims.run_id
-    });
-    
-    const requestStart = Date.now();
     console.log(`[${new Date().toISOString()}] Request for book: ${slug}, chapter: ${chapterId}`);
 
     // Get the book
@@ -186,12 +85,9 @@ export async function GET(
     const childChapters = allChapters.filter(c => c.parentChapterId === chapter.id);
     
     // Prepare book data for the template
-    // The dates from the database are already Date objects, so we can use them directly
     const bookWithChapters: BookWithChapters = {
       ...book,
       chapters: allChapters,
-      // No need to convert dates to strings as the Book type expects Date objects
-      // The BookWithChapters interface extends Book, so it inherits the Date types
     };
 
     // Generate the HTML content
@@ -221,9 +117,10 @@ export async function GET(
       params,
     });
     return new NextResponse('Error generating chapter HTML', { 
-      status: 500,
+      status: errorMessage.includes('authentication') ? 401 : 500,
       headers: {
         'Cache-Control': 'no-store, no-cache',
+        'Content-Type': 'application/json',
       },
     });
   }
