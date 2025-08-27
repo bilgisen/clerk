@@ -1,7 +1,36 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyCombinedToken } from "./combined";
 import { getSession } from "../store/redis";
-import { JWTVerificationError } from "./github-oidc";
+
+// CombinedTokenClaims type from combined.ts
+type CombinedTokenClaims = {
+  // Standard JWT claims
+  iss: string;         // Issuer (your application)
+  sub: string;         // Subject (Clerk user ID)
+  aud: string;         // Audience (should match COMBINED_JWT_AUD)
+  exp: number;         // Expiration time (Unix timestamp)
+  iat: number;         // Issued at (Unix timestamp)
+  jti: string;         // JWT ID
+  nbf?: number;        // Not before (Unix timestamp, optional)
+  
+  // Custom claims
+  sid: string;         // Session ID (from publish session)
+  scope: string;       // Token scope (e.g., 'publish')
+  
+  // Additional claims can be added here as needed
+  [key: string]: any;  // Allow for additional custom claims
+};
+
+// Local error class for JWT verification
+export class JWTVerificationError extends Error {
+  code: string;
+  
+  constructor(message: string, code: string) {
+    super(message);
+    this.name = 'JWTVerificationError';
+    this.code = code;
+  }
+}
 
 export class AuthError extends Error {
   status: number;
@@ -63,11 +92,14 @@ export async function requireCombinedToken(req: NextRequest) {
     }
     
     return claims;
-  } catch (error) {
-    if (error instanceof jose.errors.JOSEError) {
-      throw new AuthError("Invalid token: " + error.message, "INVALID_TOKEN", 401);
+  } catch (error: unknown) {
+    if (error instanceof Error) {
+      if ('code' in error && (error as any).code === 'ERR_JWS_SIGNATURE_VERIFICATION_FAILED') {
+        throw new AuthError("Invalid token signature", "INVALID_TOKEN_SIGNATURE", 401);
+      }
+      throw new AuthError("Authentication failed: " + error.message, "AUTH_ERROR", 401);
     }
-    throw error;
+    throw new AuthError("Unknown authentication error", "UNKNOWN_AUTH_ERROR", 500);
   }
 }
 
@@ -88,16 +120,23 @@ export function withPublishAuth<T = any>(
     { params }: { params: T }
   ): Promise<NextResponse> {
     try {
-      const token = extractTokenFromRequest(req);
+      const authHeader = req.headers.get('authorization');
+      if (!authHeader?.startsWith('Bearer ')) {
+        throw new AuthError('Missing or invalid Authorization header', 'MISSING_AUTH_HEADER', 401);
+      }
+      const token = authHeader.split(' ')[1];
+      
+      // Verify the token and get claims
       const claims = await verifyCombinedToken(token);
       
-      // Add claims to request headers for downstream use
+      // Create a new request with updated headers
       const headers = new Headers(req.headers);
       headers.set('x-publish-session-id', claims.sid);
       headers.set('x-user-id', claims.sub);
       
-      // Add claims to request object for TypeScript
-      (req as any).auth = {
+      // Add auth info to the request object
+      const authReq = req as NextRequest & { auth?: any };
+      authReq.auth = {
         userId: claims.sub,
         sessionId: claims.sid,
         github: claims.gh
@@ -153,9 +192,26 @@ export function requireResourceOwner(
   }
 }
 
-// Extend the NextRequest type to include our auth claims
+// Extend the global Request type to include our auth type
+declare global {
+  // This makes the auth property available on all Request objects
+  interface Request {
+    auth?: CombinedTokenClaims & {
+      // Add any additional properties that should be available on req.auth
+      userId: string;  // Alias for sub
+      sessionId: string; // Alias for sid
+      github?: any;    // GitHub OAuth data if needed
+    };
+  }
+}
+
+// Extend the NextRequest type to match our Request type
 declare module "next/server" {
   interface NextRequest {
-    auth?: Awaited<ReturnType<typeof requireCombinedToken>>;
+    auth?: CombinedTokenClaims & {
+      userId: string;
+      sessionId: string;
+      github?: any;
+    };
   }
 }

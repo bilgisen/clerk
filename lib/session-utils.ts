@@ -33,10 +33,12 @@ export async function initializePublishSession(params: SessionInitParams): Promi
     status: 'pending-runner',
     contentId: params.contentId,
     gh: params.gh,
-    metadata: params.metadata || {},
-    // Add required timestamps
-    createdAt: now,
-    updatedAt: now
+    // Include timestamps in metadata
+    metadata: {
+      ...(params.metadata || {}),
+      createdAt: now,
+      updatedAt: now
+    }
   });
 
   if (!session) {

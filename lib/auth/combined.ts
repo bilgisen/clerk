@@ -1,5 +1,5 @@
-import { SignJWT, jwtVerify, decodeJwt, JWTPayload, importPKCS8, importSPKI } from "jose";
-import { randomUUID } from "crypto";
+import { SignJWT, jwtVerify, decodeJwt, JWTPayload, importPKCS8, importSPKI, base64url } from "jose";
+import { v4 as uuidv4 } from 'uuid';
 
 type KeyLike = CryptoKey | Uint8Array;
 
@@ -19,22 +19,19 @@ class JWTVerificationError extends Error {
   }
 }
 
-const ALG = (process.env.COMBINED_JWT_ALG || "EdDSA") as "EdDSA" | "HS256";
-const AUD = process.env.COMBINED_JWT_AUD!;
+const ALG = (process.env.COMBINED_JWT_ALG || "HS256") as "HS256";
+const AUD = process.env.COMBINED_JWT_AUD || 'clerk-js';
 
 // Key management
-let keyPromise: Promise<KeyLike | Uint8Array>;
+let signingKey: Uint8Array;
 
-if (ALG === "EdDSA") {
-  if (!process.env.COMBINED_JWT_PRIVATE_KEY) {
-    throw new Error("COMBINED_JWT_PRIVATE_KEY is required for EdDSA");
-  }
-  keyPromise = importPKCS8(process.env.COMBINED_JWT_PRIVATE_KEY, "Ed25519");
-} else {
+if (ALG === "HS256") {
   if (!process.env.COMBINED_JWT_SECRET) {
     throw new Error("COMBINED_JWT_SECRET is required for HS256");
   }
-  keyPromise = Promise.resolve(new TextEncoder().encode(process.env.COMBINED_JWT_SECRET));
+  signingKey = new TextEncoder().encode(process.env.COMBINED_JWT_SECRET);
+} else {
+  throw new Error(`Unsupported algorithm: ${ALG}. Only HS256 is supported in Edge Runtime.`);
 }
 
 export type CombinedTokenClaims = {
@@ -72,22 +69,17 @@ export async function signCombinedToken(
   claims: Omit<CombinedTokenClaims, 'iss' | 'aud' | 'exp' | 'iat' | 'jti'>,
   ttlSeconds = 15 * 60
 ): Promise<string> {
-  const key = await keyPromise;
   const now = Math.floor(Date.now() / 1000);
   
-  const jwt = new SignJWT({
-    ...claims,
-    // Ensure these can't be overridden
-    iss: "clerko",
-    aud: AUD,
-    iat: now,
-    exp: now + ttlSeconds,
-    jti: randomUUID(),
-  });
-  
-  return await jwt
-    .setProtectedHeader({ alg: ALG, typ: 'JWT' })
-    .sign(key);
+  return new SignJWT({ ...claims })
+    .setProtectedHeader({ alg: ALG })
+    .setIssuedAt()
+    .setIssuer('clerk')
+    .setAudience(AUD)
+    .setSubject(claims.sub)
+    .setJti(uuidv4())
+    .setExpirationTime(now + ttlSeconds)
+    .sign(signingKey);
 }
 
 /**
@@ -97,52 +89,35 @@ export async function signCombinedToken(
  * @throws {jose.errors.JOSEError} If verification fails
  */
 export async function verifyCombinedToken(token: string): Promise<CombinedTokenClaims> {
-  let key: KeyLike | Uint8Array;
-  
-  if (ALG === "EdDSA") {
-    if (!process.env.COMBINED_JWT_PUBLIC_KEY) {
-      throw new Error("COMBINED_JWT_PUBLIC_KEY is required for EdDSA verification");
-    }
-key = await importSPKI(process.env.COMBINED_JWT_PUBLIC_KEY, "Ed25519");
-  } else {
-    key = new TextEncoder().encode(process.env.COMBINED_JWT_SECRET!);
-  }
-  
   try {
-    const { payload } = await jwtVerify(token, key, {
-      audience: AUD,
+    const { payload } = await jwtVerify(token, signingKey, {
       algorithms: [ALG],
+      audience: AUD,
+      issuer: 'clerk'
     });
-  
-    // Type assertion with runtime validation
-    const claims = payload as unknown as CombinedTokenClaims;
-  
-    // Validate required claims
-    if (!claims.sid || !claims.gh || !claims.gh.repository || !claims.gh.run_id || !claims.gh.workflow) {
-      throw new JWTVerificationError(
-        "Missing required claims in Combined Token",
-        "ERR_INVALID_CLAIMS"
-      );
-    }
-  
-    // Validate scope
-    if (claims.scope !== "publish") {
-      throw new JWTVerificationError(
-        "Invalid scope in Combined Token",
-        "ERR_INVALID_SCOPE"
-      );
-    }
-  
-    return claims;
+
+    return payload as CombinedTokenClaims;
   } catch (error) {
-    if (error instanceof Error) {
-      const jwtError = new JWTVerificationError(
-        error.message,
-        (error as JWTError).code || 'JWT_VERIFICATION_ERROR'
-      );
-      throw jwtError;
+    const err = error as JWTError;
+    
+    // Provide more specific error messages
+    if (err.name === 'JWTExpired') {
+      throw new JWTVerificationError('Token has expired', 'TOKEN_EXPIRED');
     }
-    throw new Error("Failed to verify token");
+    
+    if (err.name === 'JWSInvalid' || err.name === 'JWTInvalid') {
+      throw new JWTVerificationError('Invalid token', 'INVALID_TOKEN');
+    }
+    
+    if (err.name === 'JWTClaimValidationFailed') {
+      throw new JWTVerificationError('Token validation failed', 'VALIDATION_FAILED');
+    }
+    
+    // Re-throw any other errors with additional context
+    throw new JWTVerificationError(
+      `Token verification failed: ${err.message}`,
+      err.code || 'VERIFICATION_FAILED'
+    );
   }
 }
 

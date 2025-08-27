@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { getAuth } from '@clerk/nextjs/server';
+import { clerkMiddleware } from '@clerk/nextjs/server';
 import { verifyGithubOidc } from './lib/auth/github-oidc';
 import { verifySecretToken } from './lib/auth/verifySecret';
 import { verifyCombinedToken } from './lib/auth/combined';
@@ -42,8 +42,36 @@ const PUBLIC_ROUTES = [
 // Check if path matches any of the patterns
 const isPathMatching = (path: string, patterns: string[]): boolean => {
   return patterns.some(pattern => {
-    const regex = new RegExp(`^${pattern.replace(/\*/g, '.*')}$`);
-    return regex.test(path);
+    try {
+      const regex = new RegExp(`^${pattern.replace(/\*/g, '.*')}$`);
+      return regex.test(path);
+    } catch (e) {
+      console.error(`Invalid regex pattern: ${pattern}`, e);
+      return false;
+    }
+  });
+};
+
+// Check if a path is a public route
+const isPublicRoute = (path: string): boolean => {
+  const publicRoutes = [
+    '/',
+    '/api/webhook(.*)',
+    '/api/health',
+    '/sign-in(.*)',
+    '/sign-up(.*)',
+    '/_next(.*)',
+    '/favicon.ico',
+  ];
+  
+  return publicRoutes.some(route => {
+    try {
+      const regex = new RegExp(`^${route.replace(/\*\*$/, '.*')}$`);
+      return regex.test(path);
+    } catch (e) {
+      console.error(`Invalid public route pattern: ${route}`, e);
+      return false;
+    }
   });
 };
 
@@ -152,68 +180,44 @@ async function handleApiAuth(request: NextRequest): Promise<NextResponse | null>
 }
 
 // Custom middleware function
-export default async function middleware(req: NextRequest): Promise<NextResponse | void> {
-  const { userId } = getAuth(req as any); // Type assertion as a temporary workaround
+export default clerkMiddleware(async (auth, req) => {
+  const authResult = await auth();
+  const userId = authResult.userId;
+  const { pathname } = req.nextUrl;
   
-  // Public routes that don't require authentication
-  const publicRoutes = ['/api/webhook/clerk', '/api/health', '/sign-in', '/sign-up'];
+  // Skip middleware for public routes
+  if (isPublicRoute(pathname)) {
+    return NextResponse.next();
+  }
   
-  // Handle API routes
-  if (req.nextUrl.pathname.startsWith('/api')) {
-    // Skip auth for public API routes
-    if (publicRoutes.some(route => req.nextUrl.pathname.startsWith(route))) {
-      return NextResponse.next();
-    }
-
-    // Handle authentication for protected API routes
-    const authResponse = await handleApiAuth(req);
-    if (authResponse) {
-      return authResponse;
+  // Handle API authentication for protected routes
+  if (pathname.startsWith('/api/')) {
+    const apiResponse = await handleApiAuth(req);
+    if (apiResponse) {
+      return apiResponse;
     }
     
-    // Default to Clerk auth for other protected routes
-    if (!isPathMatching(req.nextUrl.pathname, [...publicRoutes, ...SECRET_TOKEN_ROUTES, ...COMBINED_TOKEN_ROUTES])) {
-      if (!userId) {
-        return NextResponse.json(
-          { error: 'Unauthorized' },
-          { status: 401 }
-        );
-      }
+    // If no specific API handler, ensure user is authenticated
+    if (!userId) {
+      return new NextResponse('Unauthorized', { status: 401 });
     }
     
     return NextResponse.next();
   }
   
-  // Handle non-API routes
+  // Handle protected client-side routes
   if (!userId) {
-    // Redirect to sign-in for protected pages
-    if (!publicRoutes.includes(req.nextUrl.pathname)) {
-      const signInUrl = new URL('/sign-in', req.url);
-      signInUrl.searchParams.set('redirect_url', req.url);
-      return NextResponse.redirect(signInUrl);
-    }
-  } else if (['/sign-in', '/sign-up'].includes(req.nextUrl.pathname)) {
-    // Redirect authenticated users away from auth pages
-    return NextResponse.redirect(new URL('/dashboard', req.url));
+    const signInUrl = new URL('/sign-in', req.url);
+    signInUrl.searchParams.set('redirect_url', pathname);
+    return NextResponse.redirect(signInUrl);
   }
-
-  // Check if the route is protected
-  if (isProtectedRoute(req) && !publicRoutes.includes(req.nextUrl.pathname)) {
-    // If user is not signed in and the route is not public, redirect to sign in
-    if (!userId) {
-      const signInUrl = new URL('/sign-in', req.url);
-      signInUrl.searchParams.set('redirect_url', req.url);
-      return NextResponse.redirect(signInUrl);
-    }
-  }
-
-  // For all other cases, continue with the request
+  
   return NextResponse.next();
-}
+});
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|sign-in|sign-up).*)',
+    '/((?!_next/static|_next/image|favicon.ico).*)',
     '/',
     '/(api|trpc)(.*)',
   ],

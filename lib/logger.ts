@@ -8,17 +8,9 @@ type LogMessage = {
   [key: string]: unknown;
 };
 
-// Create a Pino logger instance
-const baseLogger = pino({
+// Create a Pino logger instance with environment-specific configuration
+const loggerConfig: pino.LoggerOptions = {
   level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
-  transport: {
-    target: 'pino-pretty',
-    options: {
-      colorize: true,
-      translateTime: 'SYS:standard',
-      ignore: 'pid,hostname',
-    },
-  },
   customLevels: {
     debug: 20,
     info: 30,
@@ -26,7 +18,21 @@ const baseLogger = pino({
     error: 50,
     fatal: 60,
   },
-});
+};
+
+// Only use pino-pretty in development
+if (process.env.NODE_ENV !== 'production') {
+  loggerConfig.transport = {
+    target: 'pino-pretty',
+    options: {
+      colorize: true,
+      translateTime: 'SYS:standard',
+      ignore: 'pid,hostname',
+    },
+  };
+}
+
+const baseLogger = pino(loggerConfig);
 
 // Create a child logger with default context
 const createLogger = (context: Record<string, unknown> = {}) => {

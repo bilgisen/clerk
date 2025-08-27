@@ -1,10 +1,32 @@
 import { Redis } from '@upstash/redis';
 import { logger } from '../logger';
 
+// Parse Redis URL
+const parseRedisUrl = (url: string) => {
+  try {
+    const parsedUrl = new URL(url);
+    const password = parsedUrl.password || '';
+    const hostname = parsedUrl.hostname || '';
+    const port = parsedUrl.port || '6379';
+    
+    return {
+      url: `https://${hostname}:${port}`,
+      token: password
+    };
+  } catch (error) {
+    logger.error('Error parsing Redis URL', { error });
+    return { url: '', token: '' };
+  }
+};
+
 // Initialize Redis client
+const redisConfig = process.env.REDIS_URL ? 
+  parseRedisUrl(process.env.REDIS_URL) : 
+  { url: '', token: '' };
+
 const redis = new Redis({
-  url: process.env.UPSTASH_REDIS_REST_URL || '',
-  token: process.env.UPSTASH_REDIS_REST_TOKEN || '',
+  url: redisConfig.url,
+  token: redisConfig.token
 });
 
 // Session interface

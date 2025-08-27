@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireUser } from "@/lib/auth/clerk";
+import { auth } from "@clerk/nextjs/server";
 import { initializePublishSession } from "@/lib/session-utils";
 import { PublishStatus } from "@/lib/store/redis";
 
@@ -12,7 +12,14 @@ export interface InitPublishRequest {
 
 export async function POST(req: Request) {
   try {
-    const userId = requireUser();
+    const { userId } = await auth();
+    if (!userId) {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      );
+    }
+    
     const { contentId, metadata } = await req.json() as InitPublishRequest;
 
     if (!contentId) {

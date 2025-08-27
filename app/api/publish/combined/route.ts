@@ -1,12 +1,18 @@
 import { NextResponse } from "next/server";
-import { requireUser } from "@/lib/auth/clerk";
+import { auth } from "@clerk/nextjs/server";
 import { getSession, updateSession } from "@/lib/store/redis";
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: Request) {
   try {
-    const userId = requireUser();
+    const { userId } = await auth();
+    if (!userId) {
+      return NextResponse.json(
+        { error: 'Unauthorized', code: 'UNAUTHORIZED' },
+        { status: 401 }
+      );
+    }
     const { searchParams } = new URL(req.url);
     const sessionId = searchParams.get("sessionId");
     
