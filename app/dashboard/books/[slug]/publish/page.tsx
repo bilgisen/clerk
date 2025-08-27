@@ -106,7 +106,7 @@ export default function PublishPage() {
             )}
           </p>
         </div>
-        <BooksMenu slug={slug} />
+        <BooksMenu slug={slug} bookId={book?.id || ''} />
       </div>
       <Separator className="mb-8" />
 
@@ -118,7 +118,7 @@ export default function PublishPage() {
               description={format.description}
               icon={format.icon}
               active={format.active}
-              onClick={() => format.active && router.push(`/dashboard/books/${slug}/publish/ebook`)}
+              onClick={() => format.active && router.push(`/dashboard/books/${slug}/publish/ebook/`)}
             />
           </div>
         ))}
