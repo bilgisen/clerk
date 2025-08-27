@@ -1,7 +1,7 @@
-import { SignJWT, jwtVerify, JWTPayload, JWTVerifyResult } from 'jose';
-import { PublishSession } from '../store/redis';
+import { SignJWT, jwtVerify, JWTPayload } from 'jose';
+import { createPrivateKey, createPublicKey } from 'crypto';
 
-const ALG = 'EdDSA';
+const ALG = 'RS256';
 const DEFAULT_TTL = 15 * 60; // 15 minutes in seconds
 
 export interface CombinedTokenPayload extends JWTPayload {
@@ -28,14 +28,36 @@ export interface CombinedTokenPayload extends JWTPayload {
   };
 }
 
+// Load and validate keys from environment
+function getKeys() {
+  if (!process.env.COMBINED_JWT_PRIVATE_KEY || !process.env.COMBINED_JWT_PUBLIC_KEY) {
+    throw new Error('JWT keys not configured in environment variables');
+  }
+
+  // Decode base64 to PEM
+  const privateKeyPem = Buffer.from(process.env.COMBINED_JWT_PRIVATE_KEY, 'base64').toString('utf8');
+  const publicKeyPem = Buffer.from(process.env.COMBINED_JWT_PUBLIC_KEY, 'base64').toString('utf8');
+
+  // Validate PEM format
+  if (!privateKeyPem.startsWith('-----BEGIN PRIVATE KEY-----')) {
+    throw new Error('Invalid private key format');
+  }
+  if (!publicKeyPem.startsWith('-----BEGIN PUBLIC KEY-----')) {
+    throw new Error('Invalid public key format');
+  }
+
+  return {
+    privateKey: createPrivateKey(privateKeyPem),
+    publicKey: createPublicKey(publicKeyPem)
+  };
+}
+
 export async function generateCombinedToken(
-  session: PublishSession,
-  privateKey: string,
+  session: { id: string; userId: string; contentId: string; nonce: string; gh?: any },
   audience: string,
-  expiresIn = DEFAULT_TTL
+  expiresIn: string | number = DEFAULT_TTL
 ): Promise<string> {
-  const privateKeyObj = await importPKCS8(privateKey, ALG);
-  const now = Math.floor(Date.now() / 1000);
+  const { privateKey } = getKeys();
   
   return new SignJWT({
     session_id: session.id,
@@ -48,67 +70,63 @@ export async function generateCombinedToken(
     .setSubject(session.id)
     .setAudience(audience)
     .setIssuedAt()
-    .setExpirationTime(now + expiresIn)
-    .sign(privateKeyObj);
+    .setExpirationTime(typeof expiresIn === 'number' ? expiresIn : `${expiresIn}s`)
+    .sign(privateKey);
 }
 
 export async function verifyCombinedToken(
   token: string,
-  publicKey: string,
   audience: string
 ): Promise<CombinedTokenPayload> {
+  const { publicKey } = getKeys();
+  
   try {
-    const publicKeyObj = await importSPKI(publicKey, ALG);
-    const { payload } = await jwtVerify(token, publicKeyObj, {
+    const { payload } = await jwtVerify(token, publicKey, {
       algorithms: [ALG],
       audience,
       clockTolerance: 30, // 30 seconds clock skew tolerance
     });
 
     return payload as CombinedTokenPayload;
-  } catch (error) {
+  } catch (error: any) {
     if (error.code === 'ERR_JWT_EXPIRED') {
       throw new Error('Token has expired');
     }
     if (error.code === 'ERR_JWT_CLAIM_VALIDATION_FAILED') {
       throw new Error('Invalid token claims');
     }
-    throw new Error('Invalid token');
+    throw new Error('Invalid token: ' + error.message);
   }
 }
 
-// Helper function to import PKCS8 formatted private key
-async function importPKCS8(pem: string, alg: string) {
-  const pemContents = pem
-    .toString()
-    .replace(/-----BEGIN PRIVATE KEY-----/, '')
-    .replace(/-----END PRIVATE KEY-----/, '')
-    .replace(/\s+/g, '');
-  
-  const binaryDer = Uint8Array.from(atob(pemContents), c => c.charCodeAt(0));
-  return await crypto.subtle.importKey(
-    'pkcs8',
-    binaryDer,
-    { name: 'EdDSA', namedCurve: 'Ed25519' },
-    false,
-    ['sign']
-  );
+// For testing purposes
+export async function testTokenFlow() {
+  const testPayload = {
+    id: 'test-session-123',
+    userId: 'user-123',
+    contentId: 'content-456',
+    nonce: 'random-nonce-789',
+    gh: {
+      repository: 'test/repo',
+      run_id: '123456789'
+    }
+  };
+
+  try {
+    const token = await generateCombinedToken(testPayload, 'test-audience', '1h');
+    console.log('Generated token:', token);
+    
+    const decoded = await verifyCombinedToken(token, 'test-audience');
+    console.log('Decoded token:', decoded);
+    
+    return { token, decoded };
+  } catch (error) {
+    console.error('Test failed:', error);
+    throw error;
+  }
 }
 
-// Helper function to import SPKI formatted public key
-async function importSPKI(pem: string, alg: string) {
-  const pemContents = pem
-    .toString()
-    .replace(/-----BEGIN PUBLIC KEY-----/, '')
-    .replace(/-----END PUBLIC KEY-----/, '')
-    .replace(/\s+/g, '');
-  
-  const binaryDer = Uint8Array.from(atob(pemContents), c => c.charCodeAt(0));
-  return await crypto.subtle.importKey(
-    'spki',
-    binaryDer,
-    { name: 'EdDSA', namedCurve: 'Ed25519' },
-    false,
-    ['verify']
-  );
+// Run test if this file is executed directly
+if (require.main === module) {
+  testTokenFlow().catch(console.error);
 }
