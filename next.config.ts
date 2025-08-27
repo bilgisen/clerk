@@ -2,6 +2,11 @@
 
 import type { NextConfig } from 'next';
 
+// Required for Edge Runtime
+if (!process.env.NEXT_RUNTIME) {
+  globalThis.crypto = require('crypto').webcrypto;
+}
+
 const clerkConfig = {
   // Production Clerk domain
   domain: 'clerk.editor.bookshall.com',
@@ -39,6 +44,9 @@ const nextConfig: NextConfig = {
   },
   
   // Webpack configuration to handle Node.js core modules
+  experimental: {
+    serverComponentsExternalPackages: ['@upstash/redis'],
+  },
   webpack: (config, { isServer }) => {
     // Only apply these changes for client-side bundles
     if (!isServer) {
@@ -64,6 +72,15 @@ const nextConfig: NextConfig = {
   env: {
     // Clerk configuration
     NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
+    
+    // JWT Configuration
+    COMBINED_JWT_PRIVATE_KEY: process.env.COMBINED_JWT_PRIVATE_KEY,
+    COMBINED_JWT_PUBLIC_KEY: process.env.COMBINED_JWT_PUBLIC_KEY,
+    COMBINED_JWT_AUD: process.env.COMBINED_JWT_AUD || 'clerk-js',
+    
+    // Redis Configuration
+    REDIS_URL: process.env.REDIS_URL,
+    SESSION_SECRET: process.env.SESSION_SECRET,
     NEXT_PUBLIC_CLERK_FRONTEND_API: clerkConfig.domain,
     CLERK_SECRET_KEY: process.env.CLERK_SECRET_KEY,
     NEXT_PUBLIC_CLERK_SIGN_IN_URL: '/sign-in',
