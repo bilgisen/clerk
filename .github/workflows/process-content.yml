@@ -1,80 +1,108 @@
-name: Build E-Book
+name: Publish Content
 
+# This workflow is called by the backend with a pre-authenticated combined token
 on:
-  workflow_dispatch:
+  workflow_call:
     inputs:
+      session_id:
+        description: 'Publish session ID from the backend'
+        required: true
+        type: string
+      nonce:
+        description: 'One-time nonce for this publish session'
+        required: true
+        type: string
       content_id:
         description: 'Content ID for the book'
         required: true
         type: string
       slug:
-        description: 'Slug for the book'
+        description: 'Slug for the book (optional)'
         required: false
         type: string
       metadata:
-        description: 'Additional metadata (optional)'
+        description: 'Additional metadata (JSON string)'
         required: false
         type: string
+    secrets:
+      COMBINED_TOKEN:
+        description: 'Pre-authenticated combined token for API access'
+        required: true
 
+# Required permissions
+permissions:
+  contents: read    # Checkout repo
+  actions: read     # For workflow run information
+
+# Environment variables
 env:
   NODE_ENV: production
-  API_BASE_URL: 'https://editor.bookshall.com'
-  GHA_ALLOWED_REPO: '${{ github.repository }}'  # Only allow from this repository
+  BACKEND_URL: ${{ vars.BACKEND_URL || 'https://editor.bookshall.com' }}
 
 jobs:
   build-epub:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read   # Required for checking out code
-      actions: read    # Required for workflow run information
-      
-    # Environment variables for the job
-    env:
-      NODE_ENV: production
-      API_BASE_URL: 'https://editor.bookshall.com'
-      GITHUB_REF_NAME: ${{ github.ref_name }}
-      GITHUB_RUN_ID: ${{ github.run_id }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install deps
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install system deps
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y curl jq
+          sudo apt-get install -y curl jq pandoc
+
+      - name: Validate inputs
+        run: |
+          if [ -z "${{ inputs.session_id }}" ] || [ -z "${{ inputs.nonce }}" ] || [ -z "${{ inputs.content_id }}" ]; then
+            echo "Missing required inputs"
+            exit 1
+          fi
+          
+          # Set environment variables from inputs
+          echo "SESSION_ID=${{ inputs.session_id }}" >> $GITHUB_ENV
+          echo "NONCE=${{ inputs.nonce }}" >> $GITHUB_ENV
+          echo "CONTENT_ID=${{ inputs.content_id }}" >> $GITHUB_ENV
+          
+          if [ -n "${{ inputs.slug }}" ]; then
+            echo "SLUG=${{ inputs.slug }}" >> $GITHUB_ENV
+          fi
+          
+          # Mask sensitive values
+          echo "::add-mask::${{ secrets.COMBINED_TOKEN }}"
+
+      - name: Update status (started)
+        env:
+          COMBINED_TOKEN: ${{ secrets.COMBINED_TOKEN }}
+        run: |
+          curl -X POST "$BACKEND_URL/api/publish/update" \
+            -H "Authorization: Bearer $COMBINED_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "status": "in-progress",
+              "phase": "initializing",
+              "message": "Starting build process",
+              "progress": 5
+            }' || echo "Warning: Failed to update status"
 
       - name: Fetch book content
         env:
-          # Required for the script
-          CONTENT_ID: ${{ github.event.inputs.content_id }}
-          GT_PAYLOAD_SECRET: ${{ secrets.GT_PAYLOAD_SECRET }}
-          
-          # Base URL for API requests
-          BASE_URL: ${{ env.API_BASE_URL }}
-          
-          # Debug information
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          GITHUB_REF: ${{ github.ref }}
-          GITHUB_RUN_ID: ${{ github.run_id }}
+          CONTENT_ID: ${{ env.CONTENT_ID }}
+          BASE_URL: ${{ env.BACKEND_URL }}
+          COMBINED_TOKEN: ${{ secrets.COMBINED_TOKEN }}
         run: |
           set -e
-          echo "🔐 Using secret token authentication"
-          echo "Repository: $GITHUB_REPOSITORY"
-          echo "Ref: $GITHUB_REF"
-          echo "Run ID: $GITHUB_RUN_ID"
-          
-          # Debug: Print environment (without secrets)
-          env | grep -v -E 'TOKEN|SECRET|PASSWORD|KEY' | sort
-          
           mkdir -p ./book-content ./output
           chmod +x ./scripts/fetch-book.sh
-          
-          # Enable debug output if needed
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            export CURL_VERBOSE=1
-          fi
-          
           ./scripts/fetch-book.sh
 
       - name: Generate EPUB
@@ -108,6 +136,11 @@ jobs:
           echo "📖 Building EPUB..."
           "${PANDOC_CMD[@]}"
 
+          curl -X POST "$BACKEND_URL/api/publish/status" \
+            -H "Authorization: Bearer $COMBINED_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"phase": "building", "progress": 50, "message": "EPUB generated"}'
+
       - name: Upload EPUB to Cloudflare R2
         run: |
           CONTENT_ID="${{ github.event.inputs.content_id }}"
@@ -119,26 +152,78 @@ jobs:
           [ -z "$SLUG" ] && SLUG="$CONTENT_ID"
           KEY="books/${SLUG}-${CONTENT_ID}.epub"
 
-          # Upload to R2
           echo "📤 Uploading EPUB to R2..."
           curl -X PUT "${R2_ENDPOINT}/${R2_BUCKET}/${KEY}" \
             -H "Authorization: Bearer ${R2_ACCESS_KEY_ID}:${R2_SECRET_ACCESS_KEY}" \
             -H "Content-Type: application/epub+zip" \
             --upload-file "$FILE_PATH"
 
-          # Update the book with the new EPUB URL
           EPUB_URL="${R2_PUBLIC_URL}/${R2_BUCKET}/${KEY}"
           echo "🔄 Updating book with new EPUB URL: $EPUB_URL"
-          
-          curl -X POST "${API_BASE_URL}/api/books/by-id/${CONTENT_ID}/epub" \
+
+          curl -X POST "$BACKEND_URL/api/books/by-id/${CONTENT_ID}/epub" \
+            -H "Authorization: Bearer $COMBINED_TOKEN" \
             -H "Content-Type: application/json" \
-            -H "Authorization: Bearer ${GT_PAYLOAD_SECRET}" \
             -d "{\"epubUrl\":\"${EPUB_URL}\"}"
+
+          curl -X POST "$BACKEND_URL/api/publish/status" \
+            -H "Authorization: Bearer $COMBINED_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"phase": "uploading", "progress": 90, "message": "EPUB uploaded to R2"}'
         env:
           R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_PUBLIC_URL: ${{ secrets.R2_PUBLIC_URL }}
-          GT_PAYLOAD_SECRET: ${{ secrets.GT_PAYLOAD_SECRET }}
-          API_BASE_URL: ${{ env.API_BASE_URL }}
+
+      - name: Finalize publish
+        if: always()
+        env:
+          COMBINED_TOKEN: ${{ secrets.COMBINED_TOKEN }}
+        run: |
+          # Always try to finalize, even if previous steps failed
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "✅ Publish completed successfully"
+            
+            # Final success update
+            curl -X POST "$BACKEND_URL/api/publish/update" \
+              -H "Authorization: Bearer $COMBINED_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d '{
+                "status": "completed",
+                "phase": "completed",
+                "progress": 100,
+                "message": "Publish completed successfully",
+                "result": {
+                  "workflowRunId": "${{ github.run_id }}",
+                  "commit": "${{ github.sha }}",
+                  "runNumber": "${{ github.run_number }}",
+                  "success": true
+                }
+              }' || echo "Warning: Failed to update final status"
+          else
+            echo "❌ Publish failed"
+            
+            # Final error update
+            curl -X POST "$BACKEND_URL/api/publish/update" \
+              -H "Authorization: Bearer $COMBINED_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d '{
+                "status": "failed",
+                "phase": "error",
+                "progress": 100,
+                "message": "Publish failed in GitHub Actions workflow",
+                "error": {
+                  "message": "Workflow execution failed",
+                  "details": {
+                    "workflowRunId": "${{ github.run_id }}",
+                    "runNumber": "${{ github.run_number }}",
+                    "runAttempt": "${{ github.run_attempt }}"
+                  }
+                }
+              }' || echo "Warning: Failed to update error status"
+            
+            # Exit with error to mark the job as failed
+            exit 1
+          fi

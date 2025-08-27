@@ -1,9 +1,11 @@
 import { type NextRequest, NextResponse } from 'next/server';
 import { db } from '@/db/drizzle';
 import { books, chapters } from '@/db/schema';
-import { sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { generateChapterHTML, generateCompleteDocumentHTML } from '@/lib/generateChapterHTML';
-import { verifySecretToken } from '@/lib/auth/verifySecret';
+import { withCombinedToken } from '@/lib/middleware/withCombinedToken';
+import { logger } from '@/lib/logger';
+import { getSession } from '@/lib/redis/session';
 
 // Configuration
 export const dynamic = 'force-dynamic';
@@ -25,9 +27,10 @@ interface RouteParams {
   };
 }
 
-export async function GET(
+async function handler(
   request: NextRequest,
-  { params }: { params: { slug: string; chapterId: string } }
+  { params }: { params: { slug: string; chapterId: string } },
+  session: { sessionId: string; userId: string }
 ) {
   try {
     const { slug, chapterId } = params;
@@ -35,50 +38,70 @@ export async function GET(
     
     console.log(`[${new Date().toISOString()}] Request for book: ${slug}, chapter: ${chapterId}`);
 
-    // Get the book with proper error handling
+    // Get the current session for additional context
+    const currentSession = await getSession(session.sessionId);
+    if (!currentSession) {
+      logger.warn('Session not found', { sessionId: session.sessionId });
+      return new NextResponse(
+        JSON.stringify({ error: 'Session expired or invalid' }),
+        { status: 401, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Get the book with proper error handling and access control
     let book: BookWithChapters | undefined;
     try {
-      const result = await db.execute(
-        sql`SELECT * FROM books WHERE slug = ${slug} LIMIT 1`
-      );
-      book = result.rows[0] as BookWithChapters | undefined;
+      const result = await db
+        .select()
+        .from(books)
+        .where(
+          and(
+            eq(books.slug, slug),
+            eq(books.userId, session.userId) // Ensure user owns the book
+          )
+        )
+        .limit(1);
+
+      book = result[0] as BookWithChapters | undefined;
 
       if (!book) {
-        console.error(`Book not found: ${slug}`);
+        logger.warn('Book not found or access denied', { 
+          slug, 
+          userId: session.userId,
+          sessionId: session.sessionId 
+        });
         return new NextResponse(
-          JSON.stringify({ error: 'Book not found' }), 
+          JSON.stringify({ error: 'Book not found or access denied' }), 
           { status: 404, headers: { 'Content-Type': 'application/json' } }
         );
       }
     } catch (error) {
-      console.error('Error fetching book:', error);
+      logger.error('Error fetching book', { 
+        error, 
+        slug, 
+        userId: session.userId,
+        sessionId: session.sessionId 
+      });
       return new NextResponse(
         JSON.stringify({ error: 'Internal server error' }), 
         { status: 500, headers: { 'Content-Type': 'application/json' } }
       );
     }
 
-    // Get all chapters for the book in a single query using direct SQL
+    // Get all chapters for the book with access control
     let allChapters: Chapter[] = [];
     try {
-      // Check if request is using secret token
-      const isUsingSecretToken = await verifySecretToken(request);
-      
-      let query = `SELECT * FROM chapters WHERE book_id = $1 `;
-      const params: (string | boolean)[] = [book.id];
-      
-      // Only filter out drafts if not using secret token
-      if (!isUsingSecretToken) {
-        query += `AND is_draft = false `;
-      }
-      
-      query += `ORDER BY "order" ASC`;
-      
-      // Build the query with parameters directly in the SQL string
-      const result = await db.execute(
-        sql.raw(query.replace('$1', `'${book.id}'`))
-      );
-      allChapters = result.rows as Chapter[];
+      allChapters = await db
+        .select()
+        .from(chapters)
+        .where(
+          and(
+            eq(chapters.bookId, book.id),
+            eq(chapters.userId, session.userId), // Ensure user owns the chapters
+            eq(chapters.isDraft, false) // Only include published chapters
+          )
+        )
+        .orderBy(chapters.order);
     } catch (error) {
       console.error('Error fetching chapters:', error);
       return new NextResponse(
@@ -87,27 +110,21 @@ export async function GET(
       );
     }
 
-    // Debug: Log all chapter IDs and the one we're looking for
-    console.log('All chapter IDs:', allChapters.map(c => c.id));
-    console.log('Looking for chapter ID:', chapterId);
-    console.log('All chapters:', JSON.stringify(allChapters, null, 2));
-    
     // Find the requested chapter with case-insensitive comparison
     const chapter = allChapters.find(c => c.id.toLowerCase() === chapterId.toLowerCase());
     
-    console.log('Found chapter:', chapter);
-    
     if (!chapter) {
-      console.error('Chapter not found:', { 
+      logger.warn('Chapter not found or access denied', { 
         chapterId, 
         bookId: book.id,
+        userId: session.userId,
         availableChapters: allChapters.map(c => ({ id: c.id, title: c.title }))
       });
+      
       return new NextResponse(
         JSON.stringify({ 
-          error: 'Chapter not found',
+          error: 'Chapter not found or access denied',
           chapterId,
-          availableChapters: allChapters.map(c => ({ id: c.id, title: c.title }))
         }), 
         { 
           status: 404, 
@@ -121,29 +138,36 @@ export async function GET(
       c.parentChapterId && c.parentChapterId.toLowerCase() === chapter.id.toLowerCase()
     );
     
-    console.log('Child chapters:', childChapters);
-    
     // Prepare book data for the template
     const bookWithChapters: BookWithChapters = {
       ...book,
       chapters: allChapters,
     };
     
-    console.log('Book with chapters prepared');
+    logger.debug('Prepared chapter data', {
+      bookId: book.id,
+      chapterId: chapter.id,
+      childChapterCount: childChapters.length,
+      totalChapters: allChapters.length,
+      userId: session.userId
+    });
 
     try {
       // Generate the HTML content
-      console.log('Generating chapter HTML...');
       const chapterHTML = generateChapterHTML(chapter, childChapters, bookWithChapters);
-      console.log('Generated chapter HTML, creating complete document...');
-      
       const completeHTML = generateCompleteDocumentHTML(
         `${book.title || 'Untitled Book'} - ${chapter.title || 'Untitled Chapter'}`,
         chapterHTML
       );
 
       // Log successful response
-      console.log(`Successfully generated HTML for chapter ${chapterId} in book ${book.id} [${Date.now() - requestStart}ms]`);
+      logger.info('Generated chapter HTML', {
+        bookId: book.id,
+        chapterId: chapter.id,
+        durationMs: Date.now() - requestStart,
+        userId: session.userId,
+        sessionId: session.sessionId
+      });
 
       return new NextResponse(completeHTML, {
         headers: {
@@ -157,31 +181,43 @@ export async function GET(
         },
       });
     } catch (error) {
-      console.error('Error generating HTML:', error);
+      logger.error('Error generating HTML', {
+        error: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined,
+        bookId: book?.id,
+        chapterId,
+        userId: session.userId,
+        sessionId: session.sessionId
+      });
+      
       return new NextResponse(
         JSON.stringify({ 
           error: 'Failed to generate HTML',
-          details: error instanceof Error ? error.message : 'Unknown error'
+          code: 'HTML_GENERATION_ERROR'
         }), 
         { status: 500, headers: { 'Content-Type': 'application/json' } }
       );
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    const errorStack = error instanceof Error ? error.stack : undefined;
     const statusCode = errorMessage.includes('authentication') ? 401 : 
                       errorMessage.includes('not found') ? 404 : 500;
                       
-    console.error('[CHAPTER_HTML_GET] Error:', {
+    logger.error('Unexpected error in chapter HTML handler', {
       error: errorMessage,
-      stack: error instanceof Error ? error.stack : undefined,
-      params,
+      stack: errorStack,
+      bookSlug: params?.slug,
+      chapterId: params?.chapterId,
+      userId: session?.userId,
+      sessionId: session?.sessionId,
       timestamp: new Date().toISOString()
     });
     
     return new NextResponse(
       JSON.stringify({ 
-        error: errorMessage,
-        status: statusCode 
+        error: 'An unexpected error occurred',
+        code: 'INTERNAL_SERVER_ERROR'
       }), { 
         status: statusCode,
         headers: {
@@ -194,4 +230,9 @@ export async function GET(
   }
 }
 
-// Authentication is handled by middleware
+// Export the handler wrapped with combined token middleware
+export const GET = withCombinedToken(handler, {
+  requireSession: true,
+  requireUser: true,
+  requireBookAccess: true
+});

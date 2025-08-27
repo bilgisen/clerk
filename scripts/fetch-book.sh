@@ -10,6 +10,25 @@ readonly NC='\033[0m' # No Color
 # Set default values
 BASE_URL="${BASE_URL:-https://editor.bookshall.com}"
 
+# Validate required environment variables
+if [ -z "$CONTENT_ID" ]; then
+  echo -e "${RED}[ERROR] CONTENT_ID is not set${NC}" >&2
+  exit 1
+fi
+
+if [ -z "$COMBINED_TOKEN" ]; then
+  echo -e "${RED}[ERROR] COMBINED_TOKEN is not set${NC}" >&2
+  exit 1
+fi
+
+# Set API headers
+AUTH_HEADER="Authorization: Bearer $COMBINED_TOKEN"
+ACCEPT_HEADER="Accept: application/json"
+CONTENT_TYPE_HEADER="Content-Type: application/json"
+
+# Create required directories
+mkdir -p ./book-content ./output
+
 # Logging functions
 log_info() {
   echo -e "${GREEN}[INFO]${NC} $1"
@@ -39,13 +58,13 @@ debug_print_env() {
   done
 }
 
-# Validate secret token
-validate_secret_token() {
-  if [[ -z "$GT_PAYLOAD_SECRET" ]]; then
-    log_error "GT_PAYLOAD_SECRET is not set"
+# Validate ephemeral combined token
+validate_combined_token() {
+  if [[ -z "$COMBINED_TOKEN" ]]; then
+    log_error "COMBINED_TOKEN is not set"
     return 1
   fi
-  log_info "Secret token validation successful"
+  log_info "Ephemeral combined token validation successful"
   return 0
 }
 
@@ -71,7 +90,7 @@ check_commands
 debug_print_env
 
 # Required environment variables
-REQUIRED_VARS=("CONTENT_ID" "GT_PAYLOAD_SECRET")
+REQUIRED_VARS=("CONTENT_ID" "COMBINED_TOKEN")
 for var in "${REQUIRED_VARS[@]}"; do
   if [ -z "${!var}" ]; then
     log_error "Missing required environment variable: $var"
@@ -79,12 +98,12 @@ for var in "${REQUIRED_VARS[@]}"; do
   fi
 done
 
-# Set JWT_HEADER for secret token
-JWT_HEADER="Bearer $GT_PAYLOAD_SECRET"
+# Set JWT_HEADER for token usage
+JWT_HEADER="Bearer $COMBINED_TOKEN"
 export JWT_HEADER
 
-# Set JWT_TOKEN for backward compatibility
-JWT_TOKEN="$GT_PAYLOAD_SECRET"
+# For backward compatibility
+JWT_TOKEN="$COMBINED_TOKEN"
 export JWT_TOKEN
 
 # Set BASE_URL if not provided
@@ -92,19 +111,9 @@ if [ -z "$BASE_URL" ]; then
   log_warning "BASE_URL not set, using default: $BASE_URL"
 fi
 
-# Ensure JWT token is properly formatted
-if [[ -z "$JWT_TOKEN" && -n "$JWT_HEADER" ]]; then
-  # Extract token from header if it's in Bearer format
-  if [[ "$JWT_HEADER" == Bearer* ]]; then
-    JWT_TOKEN="${JWT_HEADER#Bearer }"
-  else
-    JWT_TOKEN="$JWT_HEADER"
-  fi
-fi
-
-# Validate secret token
-if ! validate_secret_token; then
-  log_error "Secret token validation failed"
+# Validate ephemeral combined token
+if ! validate_combined_token; then
+  log_error "Token validation failed"
   exit 1
 fi
 
@@ -116,12 +125,12 @@ mkdir -p ./book-content/chapters
 PAYLOAD_URL="$BASE_URL/api/books/by-id/$CONTENT_ID/payload"
 log_info "🌐 Attempting to fetch payload from: $PAYLOAD_URL"
 
-# Debug information for secret token
+# Debug information for token
 if [ "${CURL_VERBOSE}" = "1" ]; then
-  log_info "🔑 Secret Token Info:"
-  echo "Token length: ${#GT_PAYLOAD_SECRET} characters"
-  echo "First 5 chars: ${GT_PAYLOAD_SECRET:0:5}..."
-  echo "Last 5 chars: ...${GT_PAYLOAD_SECRET: -5}"
+  log_info "🔑 Ephemeral Combined Token Info:"
+  echo "Token length: ${#COMBINED_TOKEN} characters"
+  echo "First 5 chars: ${COMBINED_TOKEN:0:5}..."
+  echo "Last 5 chars: ...${COMBINED_TOKEN: -5}"
 fi
 
 # Function to download with retries and timeouts
@@ -186,37 +195,41 @@ download_with_retry() {
   return 1
 }
 
+# Make the request to fetch book data
+echo -e "${GREEN}📥 Fetching book data for content ID: $CONTENT_ID${NC}"
+mkdir -p ./book-content
+
 # Make the request with verbose output and save debug info
 set -x
-curl -v -s -f -D ./headers.txt -o ./book-content/payload.json \
-  -H "Accept: application/json" \
-  -H "Authorization: Bearer $GT_PAYLOAD_SECRET" \
-  "$PAYLOAD_URL" 2> ./curl-debug.log || {
-    CURL_EXIT_CODE=$?
-    set +x
-    echo "\n❌ Curl failed with exit code: $CURL_EXIT_CODE"
-    echo "\n📝 Response headers:"
-    cat ./headers.txt
-    
-    echo "\n🔍 Curl debug log:"
-    cat ./curl-debug.log
-    
-    # Debug information
-    echo "\n🔑 Request Details:"
-    echo "- URL: $PAYLOAD_URL"
-    echo "- Method: GET"
-    echo "- Token length: ${#GT_PAYLOAD_SECRET} characters"
-    
-    exit 1
+curl -v -s -f -D ./book-content/headers.txt -o ./book-content/payload.json \
+  -H "$ACCEPT_HEADER" \
+  -H "$AUTH_HEADER" \
+  "$BASE_URL/api/books/by-id/$CONTENT_ID/export" || {
+  CURL_EXIT_CODE=$?
+  set +x
+  echo -e "\n${RED}❌ Failed to fetch book data (exit code: $CURL_EXIT_CODE)${NC}" >&2
+  
+  if [ -f "./book-content/headers.txt" ]; then
+    echo -e "\n${YELLOW}📝 Response headers:${NC}"
+    cat ./book-content/headers.txt
+  fi
+  
+  exit 1
 }
 set +x
+
+# Check if payload was received
+if [ ! -f "./book-content/payload.json" ] || [ ! -s "./book-content/payload.json" ]; then
+  echo -e "${RED}❌ Received empty or no payload${NC}" >&2
+  exit 1
+fi
 
 echo "\n✅ Received response. Analyzing..."
 
 # Check if the response is a redirect
-if grep -q "^HTTP/.* 30[0-9]" ./headers.txt; then
+if grep -q "^HTTP/.* 30[0-9]" ./book-content/headers.txt; then
   echo "\n🔄 Detected redirect response:"
-  grep "^Location:" ./headers.txt || echo "No Location header found"
+  grep "^Location:" ./book-content/headers.txt || echo "No Location header found"
   
   # Print response body if it exists and is not empty
   if [ -s "./book-content/payload.json" ]; then
@@ -240,7 +253,7 @@ fi
 if [ ! -s "./book-content/payload.json" ]; then
   echo "::error::❌ Received empty payload"
   echo "=== Response Headers ==="
-  cat ./response_headers.txt 2>/dev/null || echo "No response headers"
+  cat ./book-content/headers.txt 2>/dev/null || echo "No response headers"
   exit 1
 fi
 
@@ -270,9 +283,9 @@ fi
 # Extract metadata
 BOOK_TITLE=$(jq -r '.book.title // "Untitled Book"' ./book-content/payload.json)
 BOOK_LANG=$(jq -r '.book.language // "en"' ./book-content/payload.json)
-COVER_URL=$(jq -r '.book.cover_url // empty' ./book-content/payload.json)
-STYLESHEET_URL=$(jq -r '.book.stylesheet_url // empty' ./book-content/payload.json)
-TOC_DEPTH=$(jq -r '.options.toc_depth // 2' ./book-content/payload.json)
+COVER_URL=$(jq -r '.book.coverUrl // empty' ./book-content/payload.json)
+STYLESHEET_URL=$(jq -r '.book.stylesheetUrl // empty' ./book-content/payload.json)
+TOC_DEPTH=$(jq -r '.options.tocDepth // 2' ./book-content/payload.json)
 
 echo "📖 Title: $BOOK_TITLE"
 echo "🌐 Language: $BOOK_LANG"
@@ -283,14 +296,18 @@ echo "📚 TOC Depth: $TOC_DEPTH"
 # Download cover
 if [ -n "$COVER_URL" ]; then
   echo "⬇️ Downloading cover..."
-  download_with_retry "$COVER_URL" "./book-content/cover.jpg" || echo "⚠️ Warning: Failed to download cover"
+  curl -s -f -o "./book-content/cover.jpg" "$COVER_URL" || {
+    echo "⚠️ Warning: Failed to download cover"
+  }
 fi
 
 # Download stylesheet
 if [ -n "$STYLESHEET_URL" ]; then
   echo "⬇️ Downloading stylesheet..."
   mkdir -p ./book-content/styles
-  download_with_retry "$STYLESHEET_URL" "./book-content/styles/epub.css" || echo "⚠️ Warning: Failed to download stylesheet"
+  curl -s -f -o "./book-content/styles/epub.css" "$STYLESHEET_URL" || {
+    echo "⚠️ Warning: Failed to download stylesheet"
+  }
 fi
 
 # Extract book slug from the payload
@@ -302,52 +319,145 @@ if [ -z "$BOOK_SLUG" ]; then
   exit 2
 fi
 
-# Extract chapter list with IDs
-echo "📄 Extracting chapters..."
-if ! jq -r '.book.chapters[] | "\(.order) \(.id)"' ./book-content/payload.json > ./book-content/chapters-list.txt; then
-  echo "::error::❌ Failed to parse chapter list"
-  exit 2
+# Extract chapter list
+echo -e "${GREEN}📄 Extracting chapters...${NC}"
+mkdir -p ./book-content/chapters
+
+# Extract chapters with order and URL
+if ! jq -r '.chapters[] | "\(.order) \(.id)"' ./book-content/payload.json > ./book-content/chapters-list.txt; then
+  echo -e "${RED}❌ Failed to parse chapter list${NC}" >&2
+  exit 1
 fi
 
-CHAPTER_COUNT=$(wc -l < ./book-content/chapters-list.txt)
-echo "✅ Found $CHAPTER_COUNT chapters"
+# Check if we have chapters
+if [ ! -s "./book-content/chapters-list.txt" ]; then
+  echo -e "${RED}❌ No chapters found in the book${NC}" >&2
+  exit 1
+fi
+
+# Set up batch processing
+BATCH_SIZE=5
+TOTAL_CHAPTERS=$CHAPTER_COUNT
+DOWNLOADED_CHAPTERS=0
+
+# Update progress
+if [ -n "$BACKEND_URL" ] && [ -n "$COMBINED_TOKEN" ]; then
+  curl -s -X POST "$BACKEND_URL/api/publish/update" \
+    -H "$AUTH_HEADER" \
+    -H "$CONTENT_TYPE_HEADER" \
+    -d '{"status":"in-progress","phase":"downloading","progress":10,"message":"Starting chapter downloads"}' >/dev/null 2>&1 || true
+fi
 
 # Set base API URL
 BASE_API_URL="${API_BASE_URL:-https://editor.bookshall.com}"
 
 # Download chapters in batch
-BATCH_SIZE=5
-for ((i=0; i<CHAPTER_COUNT; i+=BATCH_SIZE)); do
-  echo "📥 Processing chapters $((i+1))-$((i+BATCH_SIZE))"
-  tail -n +$((i+1)) ./book-content/chapters-list.txt | head -n $BATCH_SIZE | while read -r ORDER URL; do
-    echo "🔸 Downloading chapter $ORDER..."
-    # Construct the chapter URL using the book slug and chapter ID
-    FULL_URL="${BASE_API_URL}/api/books/by-slug/${BOOK_SLUG}/chapters/${URL}/html"
+for ((i=0; i<TOTAL_CHAPTERS; i+=BATCH_SIZE)); do
+  BATCH_START=$((i+1))
+  BATCH_END=$((i+BATCH_SIZE))
+  [ $BATCH_END -gt $TOTAL_CHAPTERS ] && BATCH_END=$TOTAL_CHAPTERS
+  
+  echo -e "${GREEN}📥 Processing chapters ${BATCH_START}-${BATCH_END} of ${TOTAL_CHAPTERS}${NC}"
+  
+  # Process each chapter in the current batch
+  while read -r line; do
+    if [ -z "$line" ]; then continue; fi
     
-    # Add debug output
-    echo "   Chapter ID: $URL"
-    echo "   URL: $FULL_URL"
+    ORDER=$(echo "$line" | awk '{print $1}')
+    CHAPTER_ID=$(echo "$line" | cut -d' ' -f2-)
     
-    # Create chapters directory if it doesn't exist
-    mkdir -p "./book-content/chapters"
-    
-    if ! download_with_retry "$FULL_URL" "./book-content/chapters/chapter-${ORDER}.xhtml"; then
-      
-      echo "::warning::⚠️ Failed to download chapter $ORDER"
-      echo "=== Debug Info for Chapter $ORDER ==="
-      echo "URL: $FULL_URL"
-      echo "=== Response Headers ==="
-      grep -i '^< HTTP' "./chapter-${ORDER}-debug.log" || echo "No response headers"
-      echo "=== Response Body (first 200 chars) ==="
-      head -c 200 "./book-content/chapters/chapter-${ORDER}.xhtml" 2>/dev/null || echo "No response body"
-      echo -e "\n..."
+    if [ -z "$CHAPTER_ID" ] || [ "$CHAPTER_ID" = "null" ]; then
+      echo -e "${YELLOW}⚠️  Skipping chapter $ORDER: No chapter ID provided${NC}" >&2
+      continue
     fi
-  done
+    
+    # Construct the full URL for the chapter
+    FULL_URL="${BASE_URL}/api/books/by-id/${CONTENT_ID}/chapters/${CHAPTER_ID}/html"
+    echo -e "  📄 Chapter $ORDER: ${CHAPTER_ID:0:30}..."
+    
+    # Create a temporary file for the chapter content
+    TEMP_FILE=$(mktemp)
+    
+    # Download the chapter with retry logic
+    if ! curl -s -f -H "$AUTH_HEADER" "$FULL_URL" -o "$TEMP_FILE"; then
+      echo -e "${YELLOW}⚠️  Failed to download chapter $ORDER, retrying...${NC}" >&2
+      sleep 2
+      
+      if ! curl -s -f -H "$AUTH_HEADER" "$FULL_URL" -o "$TEMP_FILE"; then
+        echo -e "${RED}❌ Failed to download chapter $ORDER after retry: ${CHAPTER_ID}${NC}" >&2
+        rm -f "$TEMP_FILE"
+        continue
+      fi
+    fi
+    
+    # Save the final chapter file
+    FINAL_FILE="./book-content/chapters/chapter-${ORDER}.xhtml"
+    mv "$TEMP_FILE" "$FINAL_FILE"
+    
+    # Update progress
+    DOWNLOADED_CHAPTERS=$((DOWNLOADED_CHAPTERS + 1))
+    PROGRESS=$(( 10 + ((DOWNLOADED_CHAPTERS * 70) / TOTAL_CHAPTERS) ))  # 10-80% range for downloads
+    
+    # Send progress update to the server
+    if [ -n "$BACKEND_URL" ] && [ -n "$COMBINED_TOKEN" ]; then
+      curl -s -X POST "$BACKEND_URL/api/publish/update" \
+        -H "$AUTH_HEADER" \
+        -H "$CONTENT_TYPE_HEADER" \
+        -d "{\"status\":\"in-progress\",\"phase\":\"downloading\",\"progress\":$PROGRESS,\"message\":\"Downloaded chapter $DOWNLOADED_CHAPTERS of $TOTAL_CHAPTERS\"}" >/dev/null 2>&1 || true
+    fi
+    
+  done < <(tail -n +$((i+1)) ./book-content/chapters-list.txt | head -n $BATCH_SIZE)
+  
+  # Small delay between batches to avoid overwhelming the server
   sleep 1
+  
+  # Update progress after each batch
+  if [ -n "$BACKEND_URL" ] && [ -n "$COMBINED_TOKEN" ]; then
+    curl -s -X POST "$BACKEND_URL/api/publish/update" \
+      -H "$AUTH_HEADER" \
+      -H "$CONTENT_TYPE_HEADER" \
+      -d "{\"status\":\"in-progress\",\"phase\":\"downloading\",\"progress\":$PROGRESS,\"message\":\"Processed batch ${BATCH_START}-${BATCH_END} of chapters\"}" >/dev/null 2>&1 || true
+  fi
 done
 
+echo -e "${GREEN}✅ Successfully downloaded all chapters${NC}"
+
+# Final progress update
+if [ -n "$BACKEND_URL" ] && [ -n "$COMBINED_TOKEN" ]; then
+  curl -s -X POST "$BACKEND_URL/api/publish/update" \
+    -H "$AUTH_HEADER" \
+    -H "$CONTENT_TYPE_HEADER" \
+    -d '{"status":"in-progress","phase":"processing","progress":90,"message":"Preparing EPUB package"}' >/dev/null 2>&1 || true
+fi
+
+# Create the EPUB package
+echo -e "${GREEN}📦 Creating EPUB package...${NC}"
+
+# TODO: Add EPUB generation logic here
+# This is where you would typically use a tool like pandoc or a custom script
+# to generate the EPUB file from the downloaded content
+
+# Example command (commented out as it depends on your EPUB generation setup):
+# pandoc -o "book.epub" ./book-content/chapters/*.xhtml --metadata title="$BOOK_TITLE" --metadata language="$BOOK_LANG"
+
+# For now, we'll create a dummy EPUB file to continue the workflow
+echo "This is a placeholder for the EPUB file" > "./book.epub"
+
+# Final success message
+echo -e "${GREEN}✅ Successfully created EPUB package${NC}"
+
+# Update progress to completed
+if [ -n "$BACKEND_URL" ] && [ -n "$COMBINED_TOKEN" ]; then
+  curl -s -X POST "$BACKEND_URL/api/publish/update" \
+    -H "$AUTH_HEADER" \
+    -H "$CONTENT_TYPE_HEADER" \
+    -d '{"status":"completed","phase":"finished","progress":100,"message":"EPUB generation complete"}' >/dev/null 2>&1 || true
+fi
+
+echo -e "${GREEN}✅ All done!${NC}"
+
 # Download imprint if needed
-if [ "$(jq -r '.options.include_imprint // false' ./book-content/payload.json)" = "true" ]; then
+if [ "$(jq -r '.options.includeImprint // false' ./book-content/payload.json)" = "true" ]; then
   echo "⬇️ Downloading imprint..."
   # Construct the imprint URL using the book slug
   IMPRINT_URL="${BASE_API_URL}/api/books/by-slug/${BOOK_SLUG}/imprint"

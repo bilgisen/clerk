@@ -1,8 +1,11 @@
 import { type NextRequest, NextResponse } from 'next/server';
 import { db } from '@/db/drizzle';
 import { books } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { generateImprintHTML } from '@/lib/generateChapterHTML';
+import { withCombinedToken } from '@/lib/middleware/withCombinedToken';
+import { logger } from '@/lib/logger';
+import { getSession } from '@/lib/redis/session';
 
 // Configuration
 export const dynamic = 'force-dynamic';
@@ -12,93 +15,175 @@ export const runtime = 'nodejs';
 // Types
 type Book = typeof books.$inferSelect;
 
-export async function GET(
+async function handler(
   request: NextRequest,
-  { params }: { params: { slug: string } }
+  { params }: { params: { slug: string } },
+  session: { sessionId: string; userId: string }
 ) {
   const requestStart = Date.now();
-  
-  // Authentication is handled by middleware
   const { searchParams } = new URL(request.url);
   const format = searchParams.get('format') || 'html';
+  
+  // Get the current session for additional context
+  const currentSession = await getSession(session.sessionId);
+  if (!currentSession) {
+    logger.warn('Session not found', { sessionId: session.sessionId });
+    return NextResponse.json(
+      { error: 'Session expired or invalid' },
+      { status: 401 }
+    );
+  }
 
   if (format !== 'html' && format !== 'json') {
+    logger.warn('Invalid format requested', { 
+      format,
+      slug: params.slug,
+      userId: session.userId
+    });
+    
     return NextResponse.json(
       { 
         error: 'Invalid format',
         message: 'Format must be either html or json',
-        status: 400
+        code: 'INVALID_FORMAT'
       },
       { status: 400, headers: { 'Content-Type': 'application/json' } }
     );
   }
 
   try {
-    // Get the book by slug with proper error handling
+    // Get the book by slug with access control
     let book: Book | undefined;
     try {
       [book] = await db
         .select()
         .from(books)
-        .where(eq(books.slug, params.slug))
+        .where(
+          and(
+            eq(books.slug, params.slug),
+            eq(books.userId, session.userId) // Ensure user owns the book
+          )
+        )
         .limit(1);
 
       if (!book) {
-        console.error(`Book not found: ${params.slug}`);
+        logger.warn('Book not found or access denied', { 
+          slug: params.slug, 
+          userId: session.userId 
+        });
+        
         return new NextResponse(
           JSON.stringify({ 
-            error: 'Book not found',
-            message: `No book found with slug: ${params.slug}`,
-            status: 404
+            error: 'Book not found or access denied',
+            code: 'BOOK_NOT_FOUND',
+            message: `No book found with slug: ${params.slug}`
           }), 
           { status: 404, headers: { 'Content-Type': 'application/json' } }
         );
       }
     } catch (error) {
-      console.error('Error fetching book:', error);
+      logger.error('Error fetching book', { 
+        error: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined,
+        slug: params.slug,
+        userId: session.userId,
+        sessionId: session.sessionId
+      });
+      
       return new NextResponse(
         JSON.stringify({ 
-          error: 'Internal server error',
-          message: 'An error occurred while fetching the book',
-          status: 500
+          error: 'Failed to fetch book',
+          code: 'FETCH_BOOK_ERROR'
         }), 
         { status: 500, headers: { 'Content-Type': 'application/json' } }
       );
     }
 
-    // Get the current year for the copyright notice
-    const currentYear = new Date().getFullYear();
-    const publishYear = book.publishYear || currentYear;
+    try {
+      // Log successful access
+      logger.info('Generating imprint', {
+        bookId: book.id,
+        format,
+        userId: session.userId,
+        sessionId: session.sessionId
+      });
 
-    console.log(`Generating imprint for book: ${book.id}`);
+      // Generate the imprint content based on requested format
+      if (format === 'html') {
+        const imprintHTML = generateImprintHTML({
+          title: book.title,
+          author: book.author || 'Unknown Author',
+          publisher: book.publisher || '',
+          publisherWebsite: book.publisherWebsite || '',
+          publishYear: book.publishYear || new Date().getFullYear(),
+          isbn: book.isbn || '',
+          language: book.language || 'tr',
+          description: book.description || '',
+          coverImageUrl: book.coverImageUrl || ''
+        });
 
-    // Generate the imprint HTML
-    const imprintHTML = generateImprintHTML({
-      title: book.title,
-      author: book.author || 'Unknown Author',
-      publisher: book.publisher || '',
-      publisherWebsite: book.publisherWebsite || '',
-      publishYear: book.publishYear || new Date().getFullYear(),
-      isbn: book.isbn || '',
-      language: book.language || 'tr',
-      description: book.description || '',
-      coverImageUrl: book.coverImageUrl || ''
-    });
+        logger.info('Successfully generated HTML imprint', {
+          bookId: book.id,
+          durationMs: Date.now() - requestStart,
+          userId: session.userId
+        });
 
-    console.log(`Successfully generated imprint for book ${book.id} in ${Date.now() - requestStart}ms`);
-
-    // Return the HTML response with proper headers
-    return new NextResponse(imprintHTML, {
-      status: 200,
-      headers: {
-        'Content-Type': 'text/html; charset=utf-8',
-        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
-        'Pragma': 'no-cache',
-        'Expires': '0',
-        'Surrogate-Control': 'no-store',
-        'X-Content-Type-Options': 'nosniff'
+        return new NextResponse(imprintHTML, {
+          status: 200,
+          headers: {
+            'Content-Type': 'text/html; charset=utf-8',
+            'Cache-Control': 'public, max-age=300, s-maxage=3600, stale-while-revalidate=86400',
+            'X-Content-Type-Options': 'nosniff',
+            'X-Frame-Options': 'DENY',
+            'X-XSS-Protection': '1; mode=block',
+            'Referrer-Policy': 'strict-origin-when-cross-origin',
+            'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+          },
+        });
+      } else {
+        // JSON format
+        return NextResponse.json({
+          id: book.id,
+          slug: book.slug,
+          title: book.title,
+          author: book.author,
+          publisher: book.publisher,
+          publisherWebsite: book.publisherWebsite,
+          publishYear: book.publishYear,
+          isbn: book.isbn,
+          language: book.language,
+          description: book.description,
+          coverImageUrl: book.coverImageUrl,
+          createdAt: book.createdAt,
+          updatedAt: book.updatedAt,
+        }, {
+          headers: {
+            'Cache-Control': 'public, max-age=300, s-maxage=3600, stale-while-revalidate=86400',
+            'Content-Type': 'application/json',
+          },
+        });
       }
-    });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const errorStack = error instanceof Error ? error.stack : undefined;
+      
+      logger.error('Error generating imprint', {
+        error: errorMessage,
+        stack: errorStack,
+        bookId: book?.id,
+        userId: session.userId,
+        sessionId: session.sessionId,
+        timestamp: new Date().toISOString()
+      });
+      
+      return NextResponse.json(
+        { 
+          error: 'An error occurred while generating the imprint',
+          code: 'IMPRINT_GENERATION_ERROR'
+        },
+        { status: 500 }
+      );
+    }
   } catch (error) {
     console.error('[IMPRINT_GET] Error:', error);
     return new NextResponse(
@@ -113,3 +198,10 @@ export async function GET(
     );
   }
 }
+
+// Export the handler wrapped with combined token middleware
+export const GET = withCombinedToken(handler, {
+  requireSession: true,
+  requireUser: true,
+  requireBookAccess: true
+});

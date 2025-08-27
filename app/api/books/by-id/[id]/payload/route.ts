@@ -4,6 +4,8 @@ import { db } from '@/db/drizzle';
 import { books, chapters } from '@/db/schema';
 import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
+import { withCombinedToken } from '@/lib/middleware/withCombinedToken';
+import { logger } from '@/lib/logger';
 
 // Schema for query parameters
 const queryParamsSchema = z.object({
@@ -169,9 +171,10 @@ function getBaseUrl(request: NextRequest): string {
   return `${protocol}://${host}`;
 }
 
-export async function GET(
+async function handler(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: { id: string } },
+  session: { sessionId: string; userId: string }
 ) {
   try {
     // Parse and validate query parameters
@@ -183,34 +186,58 @@ export async function GET(
     const baseUrl = getBaseUrl(request);
     const bookId = params.id;
 
-    // Fetch the book and its chapters in a transaction
-    const [bookResult, chapterResults] = await db.transaction(async (tx) => {
-      const bookQuery = await tx
-        .select()
-        .from(books)
-        .where(eq(books.id, bookId))
-        .limit(1);
-        
-      const chaptersQuery = await tx
-        .select()
-        .from(chapters)
-        .where(and(
-          eq(chapters.bookId, bookId),
-          eq(chapters.isDraft, false)
-        ))
-        .orderBy(chapters.order);
-        
-      return [bookQuery, chaptersQuery];
+    // Get the book with user relation to verify ownership
+    const book = await db.query.books.findFirst({
+      where: (books, { eq }) => eq(books.id, bookId),
+      with: {
+        user: {
+          columns: {
+            id: true
+          }
+        }
+      }
     });
-    
-    if (!bookResult || bookResult.length === 0) {
+
+    if (!book) {
+      logger.warn({
+        message: 'Book not found',
+        bookId,
+        userId: session.userId
+      });
       return NextResponse.json(
-        { error: 'Book not found' },
+        { 
+          error: 'Book not found',
+          code: 'BOOK_NOT_FOUND'
+        },
         { status: 404 }
       );
     }
-    
-    const book = bookResult[0];
+
+    // Verify the user has access to the book
+    if (book.user.id !== session.userId) {
+      logger.warn({
+        message: 'Unauthorized access attempt',
+        bookId, 
+        userId: session.userId,
+        bookOwnerId: book.user.id
+      });
+      return NextResponse.json(
+        { 
+          error: 'Unauthorized',
+          code: 'UNAUTHORIZED_ACCESS'
+        },
+        { status: 403 }
+      );
+    }
+
+    // Get all published chapters for the book
+    const chapterResults = await db.query.chapters.findMany({
+      where: (chapters, { eq, and }) => and(
+        eq(chapters.bookId, bookId),
+        eq(chapters.isDraft, false)
+      ),
+      orderBy: (chapters, { asc }) => [asc(chapters.order)]
+    });
     
     // Build chapter tree and flatten for payload
     const chapterTree = buildChapterTree(chapterResults);
@@ -243,19 +270,67 @@ export async function GET(
       },
     };
     
+    // Log successful payload generation
+    logger.info({
+      message: 'Generated book payload',
+      bookId,
+      chapterCount: flattenedChapters.length,
+      userId: session.userId,
+      sessionId: session.sessionId
+    });
+    
     return NextResponse.json(payload);
     
   } catch (error) {
-    console.error('Error generating payload:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    const errorStack = error instanceof Error ? error.stack : undefined;
+    
+    logger.error({
+      message: 'Error generating book payload',
+      error: new Error(errorMessage),
+      stack: errorStack,
+      bookId: params.id,
+      userId: session?.userId,
+      sessionId: session?.sessionId
+    });
     
     const status = error instanceof z.ZodError ? 400 : 500;
-    const message = error instanceof Error ? error.message : 'Internal server error';
+    const message = status === 500 ? 'Internal server error' : errorMessage;
     
     return NextResponse.json(
-      { error: message },
-      { status }
+      { error: message, code: 'PAYLOAD_GENERATION_ERROR' },
+      { status: status as number }
     );
   }
-};
+}
 
-// Authentication is handled by middleware
+// Helper function to verify book access
+async function verifyBookAccess(bookId: string, userId: string): Promise<boolean> {
+  try {
+    const book = await db.query.books.findFirst({
+      where: (books, { and, eq }) => and(
+        eq(books.id, bookId),
+        eq(books.userId, userId)
+      ),
+      columns: { id: true }
+    });
+    
+    return !!book;
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    logger.error({
+      message: 'Error verifying book access',
+      error: new Error(errorMessage),
+      bookId, 
+      userId 
+    });
+    return false;
+  }
+}
+
+// Export the handler wrapped with combined token middleware
+export const GET = withCombinedToken(handler, {
+  requireSession: true,
+  requireUser: true,
+  requireBookAccess: true
+});
