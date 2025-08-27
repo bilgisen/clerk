@@ -49,9 +49,9 @@ if (!process.env.COMBINED_JWT_PUBLIC_KEY) {
   throw new Error('COMBINED_JWT_PUBLIC_KEY is required');
 }
 
-// Decode the base64 encoded private key
+// Decode the base64 encoded keys
 const privateKeyPem = Buffer.from(process.env.COMBINED_JWT_PRIVATE_KEY, 'base64').toString('utf-8');
-const publicKeyPem = process.env.COMBINED_JWT_PUBLIC_KEY;
+const publicKeyPem = Buffer.from(process.env.COMBINED_JWT_PUBLIC_KEY, 'base64').toString('utf-8');
 
 // Import keys
 let privateKey: CryptoKey;
