@@ -327,8 +327,8 @@ export function decodeCombinedToken(token: string): CombinedTokenClaims | null {
       return null;
     }
     
-    // Decode the JWT token
-    const { payload } = decodeJwt(token);
+    // Decode the JWT token - decodeJwt returns the payload directly
+    const payload = decodeJwt(token);
     
     // Ensure payload is a non-null object
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
