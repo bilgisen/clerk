@@ -18,21 +18,47 @@ const loggerConfig: pino.LoggerOptions = {
     error: 50,
     fatal: 60,
   },
+  // Base configuration for all environments
+  base: {
+    env: process.env.NODE_ENV || 'development',
+  },
+  // Disable pretty printing in production
+  ...(process.env.NODE_ENV !== 'production' ? {
+    transport: {
+      target: 'pino-pretty',
+      options: {
+        colorize: true,
+        translateTime: 'SYS:standard',
+        ignore: 'pid,hostname',
+      },
+    },
+  } : {
+    // Production configuration
+    formatters: {
+      level: (label) => ({ level: label }),
+    },
+    timestamp: () => `,"time":"${new Date().toISOString()}"`,
+  })
 };
 
-// Only use pino-pretty in development
-if (process.env.NODE_ENV !== 'production') {
-  loggerConfig.transport = {
-    target: 'pino-pretty',
-    options: {
-      colorize: true,
-      translateTime: 'SYS:standard',
-      ignore: 'pid,hostname',
-    },
-  };
-}
+// Create logger instance
+let baseLogger: pino.Logger;
 
-const baseLogger = pino(loggerConfig);
+try {
+  baseLogger = pino(loggerConfig);
+} catch (error) {
+  // Fallback to basic console logging if pino initialization fails
+  console.error('Failed to initialize logger:', error);
+  baseLogger = pino({
+    level: 'info',
+    browser: {
+      write: (o) => {
+        const log = typeof o === 'object' ? JSON.stringify(o) : String(o);
+        console.log(log);
+      }
+    }
+  });
+}
 
 // Create a child logger with default context
 const createLogger = (context: Record<string, unknown> = {}) => {
