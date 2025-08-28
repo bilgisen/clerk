@@ -80,7 +80,10 @@ export default clerkMiddleware(async (auth, req) => {
     if (isClerkOnlyRoute(pathname)) {
       const session = await auth();
       if (!session.userId) {
-        return new NextResponse('Unauthorized', { status: 401 });
+        return NextResponse.json(
+          { error: 'Unauthorized', code: 'UNAUTHORIZED' },
+          { status: 401, headers: { 'Content-Type': 'application/json' } }
+        );
       }
       return NextResponse.next();
     }
@@ -88,6 +91,14 @@ export default clerkMiddleware(async (auth, req) => {
     // For other API routes, use our auth gateway
     const response = await authGateway(req);
     if (response) {
+      // Ensure all error responses are JSON
+      if (response.status >= 400 && !response.headers.get('Content-Type')?.includes('application/json')) {
+        const text = await response.text();
+        return NextResponse.json(
+          { error: text || 'Unauthorized', code: 'UNAUTHORIZED' },
+          { status: response.status, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
       return response;
     }
     

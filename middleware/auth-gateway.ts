@@ -44,7 +44,10 @@ export async function authGateway(request: NextRequest): Promise<NextResponse | 
   request.authContext = { authType: 'unauthorized' };
   
   // Return 401 for unauthenticated requests to protected routes
-  return new NextResponse('Unauthorized', { status: 401 });
+  return NextResponse.json(
+    { error: 'Unauthorized', code: 'UNAUTHORIZED' },
+    { status: 401, headers: { 'Content-Type': 'application/json' } }
+  );
 }
 
 // Type guard for authenticated requests
