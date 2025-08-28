@@ -1,6 +1,7 @@
-import { NextResponse } from 'next/server';
-import { withPublishAuth } from '@/lib/auth/withPublishAuth';
+import { NextResponse, type NextRequest } from 'next/server';
+import { withGithubOidcAuth, type HandlerWithAuth } from '@/middleware/auth';
 import { updateSession, PublishSession } from '@/lib/store/redis';
+import { logger } from '@/lib/logger';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,12 +20,21 @@ type FinalizeRequest = {
   };
 };
 
-export const POST = withPublishAuth(async (request, _, claims) => {
+const handler: HandlerWithAuth = async (request: NextRequest, context) => {
   try {
+    const { authContext } = context || {};
+    
+    // Log the authentication context for debugging
+    logger.info('Finalize request received', { 
+      authType: authContext?.type,
+      userId: authContext?.type === 'github-oidc' ? authContext.userId : 'unknown'
+    });
+    
     // Ensure this is an OIDC-authenticated request
-    if (claims.authType !== 'github-oidc') {
+    if (authContext?.type !== 'github-oidc') {
+      logger.warn('Invalid authentication type', { authType: authContext?.type });
       return NextResponse.json(
-        { error: 'This endpoint requires OIDC authentication' },
+        { error: 'invalid_auth', message: 'This endpoint requires GitHub OIDC authentication' },
         { status: 401 }
       );
     }
@@ -32,14 +42,28 @@ export const POST = withPublishAuth(async (request, _, claims) => {
     const { success, result, error } = (await request.json()) as FinalizeRequest;
     
     // Update the session in Redis as completed
+    const sessionId = authContext.claims?.sid;
+    if (!sessionId) {
+      logger.error('Missing session ID in auth context');
+      return NextResponse.json(
+        { error: 'Missing session ID in authentication context' },
+        { status: 400 }
+      );
+    }
+    
     const updateData: Partial<PublishSession> = {
       status: success ? 'completed' : 'failed',
-      completedAt: Date.now(),
       updatedAt: Date.now(),
-      ...(success ? { result } : { error })
+      ...(success && result ? { downloadUrl: result.artifactUrl } : {}),
+      ...(error ? { 
+        error: {
+          message: error.message || 'Unknown error',
+          ...(error.code && { code: error.code })
+        } 
+      } : {})
     };
     
-    const updated = await updateSession(claims.sid, updateData);
+    const updated = await updateSession(sessionId, updateData);
 
     if (!updated) {
       return NextResponse.json(
@@ -50,18 +74,10 @@ export const POST = withPublishAuth(async (request, _, claims) => {
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error('Error finalizing publish:', error);
-    
-    if (error instanceof Error) {
-      return NextResponse.json(
-        { 
-          error: error.message,
-          code: 'FINALIZE_ERROR',
-          success: false 
-        },
-        { status: 400 }
-      );
-    }
+    logger.error('Error finalizing publish', { 
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined 
+    });
     
     return NextResponse.json(
       { 
@@ -72,4 +88,6 @@ export const POST = withPublishAuth(async (request, _, claims) => {
       { status: 500 }
     );
   }
-});
+};
+
+export const POST = withGithubOidcAuth(handler);

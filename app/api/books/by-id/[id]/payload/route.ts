@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/db/drizzle';
 import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
-import { withOidcOnly } from '@/lib/middleware/withOidcOnly';
+import { withGithubOidcAuth } from '@/middleware/auth';
 import { logger } from '@/lib/logger';
 
 // Schema for query parameters
@@ -282,5 +282,5 @@ async function handler(
   }
 }
 
-// Export the handler wrapped with OIDC-only middleware
-export const GET = withOidcOnly(handler);
+// Export the handler wrapped with GitHub OIDC auth middleware
+export const GET = withGithubOidcAuth(handler);

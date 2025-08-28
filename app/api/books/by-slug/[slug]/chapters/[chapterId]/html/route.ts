@@ -1,10 +1,12 @@
 import { type NextRequest, NextResponse } from 'next/server';
 import { db } from '@/db/drizzle';
 import { books, chapters } from '@/db/schema';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { generateChapterHTML, generateCompleteDocumentHTML } from '@/lib/generateChapterHTML';
-import { withOidcOnly } from '@/lib/middleware/withOidcOnly';
+import { withGithubOidcAuth, type AuthContextUnion, type HandlerWithAuth } from '@/middleware/auth';
 import { logger } from '@/lib/logger';
+
+type GitHubOidcContext = Extract<AuthContextUnion, { type: 'github-oidc' }>;
 
 // Configuration
 export const dynamic = 'force-dynamic';
@@ -15,187 +17,147 @@ export const runtime = 'nodejs';
 type Chapter = typeof chapters.$inferSelect;
 type Book = typeof books.$inferSelect;
 
-interface BookWithChapters extends Book {
-  chapters?: Chapter[];
+interface BookWithChapters extends Omit<Book, 'chapters'> {
+  chapters: Chapter[];
 }
 
-interface RouteParams {
-  params: {
-    slug: string;
-    chapterId: string;
-  };
-}
-
-async function handler(
+const handleRequest: HandlerWithAuth = async (
   request: NextRequest,
-  { params }: { params: { slug: string; chapterId: string } },
-  oidcClaims: any
-) {
+  context: { params?: Record<string, string>; authContext: AuthContextUnion } = { authContext: { type: 'unauthorized' } }
+): Promise<NextResponse> => {
+  // Ensure we have a valid GitHub OIDC context
+  if (context.authContext.type !== 'github-oidc') {
+    return new NextResponse(
+      JSON.stringify({ error: 'GitHub OIDC authentication required' }),
+      { status: 401, headers: { 'Content-Type': 'application/json' } }
+    );
+  }
+  
+  const authContext = context.authContext;
+  const slug = context.params?.slug;
+  const chapterId = context.params?.chapterId;
+  
+  if (!slug || !chapterId) {
+    return new NextResponse(
+      JSON.stringify({ error: 'Missing required parameters' }), 
+      { status: 400, headers: { 'Content-Type': 'application/json' } }
+    );
+  }
+  const requestStart = Date.now();
+  const userId = authContext.userId;
+  
   try {
-    const { slug, chapterId } = params;
-    const requestStart = Date.now();
-    
-    console.log(`[${new Date().toISOString()}] Request for book: ${slug}, chapter: ${chapterId}`);
-
-    // Log OIDC context for audit
     logger.info('OIDC-authenticated chapter HTML request', {
-      repository: oidcClaims.repository,
-      workflow: oidcClaims.workflow,
-      run_id: oidcClaims.run_id,
+      repository: authContext.repository,
+      workflow: authContext.workflow,
+      runId: authContext.runId,
       bookSlug: slug,
       chapterId
     });
 
-    // Get the book with proper error handling and access control
-    let book: BookWithChapters | undefined;
-    try {
-      const result = await db
-        .select()
-        .from(books)
-        .where(
-          and(
-            eq(books.slug, slug),
-            eq(books.userId, session.userId) // Ensure user owns the book
-          )
-        )
-        .limit(1);
-
-      book = result[0] as BookWithChapters | undefined;
-
-      if (!book) {
-        logger.warn('Book not found or access denied', { 
-          slug, 
-          userId: session.userId,
-          sessionId: session.sessionId 
-        });
-        return new NextResponse(
-          JSON.stringify({ error: 'Book not found or access denied' }), 
-          { status: 404, headers: { 'Content-Type': 'application/json' } }
-        );
+    // Get the book with the requested chapter
+    const bookWithChapters = await db.query.books.findFirst({
+      where: and(
+        eq(books.slug, slug),
+        eq(books.userId, userId)
+      ),
+      with: {
+        chapters: {
+          where: eq(chapters.id, chapterId)
+        }
       }
-    } catch (error) {
-      logger.error('Error fetching book', { 
-        error, 
-        slug, 
-        userId: session.userId,
-        sessionId: session.sessionId 
-      });
+    });
+
+    if (!bookWithChapters) {
+      logger.warn('Book not found or access denied', { slug, userId });
       return new NextResponse(
-        JSON.stringify({ error: 'Internal server error' }), 
-        { status: 500, headers: { 'Content-Type': 'application/json' } }
+        JSON.stringify({ error: 'Book not found or access denied' }), 
+        { status: 404, headers: { 'Content-Type': 'application/json' } }
       );
     }
 
-    // Get all chapters for the book with access control
-    let allChapters: Chapter[] = [];
-    try {
-      allChapters = await db
-        .select()
-        .from(chapters)
-        .where(
-          and(
-            eq(chapters.bookId, book.id),
-            eq(chapters.userId, session.userId), // Ensure user owns the chapters
-            eq(chapters.isDraft, false) // Only include published chapters
-          )
-        )
-        .orderBy(chapters.order);
-    } catch (error) {
-      console.error('Error fetching chapters:', error);
+    // Get the requested chapter
+    const chapter = bookWithChapters.chapters[0];
+    if (!chapter) {
+      logger.warn('Chapter not found', { chapterId, bookId: bookWithChapters.id, userId });
       return new NextResponse(
-        JSON.stringify({ error: 'Error fetching chapters' }), 
-        { status: 500, headers: { 'Content-Type': 'application/json' } }
+        JSON.stringify({ error: 'Chapter not found or access denied' }), 
+        { status: 404, headers: { 'Content-Type': 'application/json' } }
       );
     }
+
+    // Get all chapters for the book
+    const allChapters = await db.query.chapters.findMany({
+      where: eq(chapters.bookId, bookWithChapters.id),
+      orderBy: (chapters, { asc }) => [asc(chapters.order)]
+    });
 
     // Find the requested chapter with case-insensitive comparison
-    const chapter = allChapters.find(c => c.id.toLowerCase() === chapterId.toLowerCase());
-    
-    if (!chapter) {
-      logger.warn('Chapter not found or access denied', { 
+    const requestedChapter = allChapters.find(c => c.id.toLowerCase() === chapterId.toLowerCase());
+    if (!requestedChapter) {
+      logger.warn('Chapter not found in full chapter list', { 
         chapterId, 
-        bookId: book.id,
-        userId: session.userId,
+        bookId: bookWithChapters.id,
+        userId,
         availableChapters: allChapters.map(c => ({ id: c.id, title: c.title }))
       });
       
       return new NextResponse(
-        JSON.stringify({ 
-          error: 'Chapter not found or access denied',
-          chapterId,
-        }), 
-        { 
-          status: 404, 
-          headers: { 'Content-Type': 'application/json' } 
-        }
+        JSON.stringify({ error: 'Chapter not found' }), 
+        { status: 404, headers: { 'Content-Type': 'application/json' } }
       );
     }
 
-    // Get direct child chapters with case-insensitive comparison
+    // Check if the book is published or user has access
+    if (!bookWithChapters.publishedAt && bookWithChapters.userId !== userId) {
+      logger.warn('Book not published or access denied', { slug, userId });
+      return new NextResponse(
+        JSON.stringify({ error: 'Book not published or access denied' }), 
+        { status: 403, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Get direct child chapters
     const childChapters = allChapters.filter(c => 
-      c.parentChapterId && c.parentChapterId.toLowerCase() === chapter.id.toLowerCase()
+      c.parentChapterId && c.parentChapterId.toLowerCase() === requestedChapter.id.toLowerCase()
     );
-    
-    // Prepare book data for the template
-    const bookWithChapters: BookWithChapters = {
-      ...book,
-      chapters: allChapters,
-    };
-    
-    logger.debug('Prepared chapter data', {
-      bookId: book.id,
-      chapterId: chapter.id,
-      childChapterCount: childChapters.length,
-      totalChapters: allChapters.length,
-      userId: session.userId
+
+    // Generate the HTML content
+    const chapterHTML = generateChapterHTML(requestedChapter, childChapters, bookWithChapters);
+    const completeHTML = generateCompleteDocumentHTML(
+      `${bookWithChapters.title || 'Untitled Book'} - ${requestedChapter.title || 'Untitled Chapter'}`,
+      chapterHTML,
+      {
+        book: bookWithChapters.title || 'Untitled Book',
+        chapter_id: requestedChapter.id,
+        order: requestedChapter.order || 0,
+        level: requestedChapter.level || 1,
+        title_tag: `h${Math.min((requestedChapter.level || 1) + 1, 6)}`,
+        title: requestedChapter.title || 'Untitled Chapter',
+        ...(requestedChapter.parentChapterId ? { parent_chapter: requestedChapter.parentChapterId } : {})
+      }
+    );
+
+    // Log successful response
+    logger.info('Generated chapter HTML', {
+      bookId: bookWithChapters.id,
+      chapterId: requestedChapter.id,
+      durationMs: Date.now() - requestStart,
+      userId,
+      sessionId: authContext.runId
     });
 
-    try {
-      // Generate the HTML content
-      const chapterHTML = generateChapterHTML(chapter, childChapters, bookWithChapters);
-      const completeHTML = generateCompleteDocumentHTML(
-        `${book.title || 'Untitled Book'} - ${chapter.title || 'Untitled Chapter'}`,
-        chapterHTML
-      );
-
-      // Log successful response
-      logger.info('Generated chapter HTML', {
-        bookId: book.id,
-        chapterId: chapter.id,
-        durationMs: Date.now() - requestStart,
-        userId: session.userId,
-        sessionId: session.sessionId
-      });
-
-      return new NextResponse(completeHTML, {
-        headers: {
-          'Content-Type': 'text/html; charset=utf-8',
-          'Cache-Control': 'public, max-age=300, s-maxage=3600, stale-while-revalidate=86400',
-          'X-Content-Type-Options': 'nosniff',
-          'X-Frame-Options': 'DENY',
-          'X-XSS-Protection': '1; mode=block',
-          'Referrer-Policy': 'strict-origin-when-cross-origin',
-          'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
-        },
-      });
-    } catch (error) {
-      logger.error('Error generating HTML', {
-        error: error instanceof Error ? error.message : 'Unknown error',
-        stack: error instanceof Error ? error.stack : undefined,
-        bookId: book?.id,
-        chapterId,
-        userId: session.userId,
-        sessionId: session.sessionId
-      });
-      
-      return new NextResponse(
-        JSON.stringify({ 
-          error: 'Failed to generate HTML',
-          code: 'HTML_GENERATION_ERROR'
-        }), 
-        { status: 500, headers: { 'Content-Type': 'application/json' } }
-      );
-    }
+    return new NextResponse(completeHTML, {
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'public, max-age=300, s-maxage=3600, stale-while-revalidate=86400',
+        'X-Content-Type-Options': 'nosniff',
+        'X-Frame-Options': 'DENY',
+        'X-XSS-Protection': '1; mode=block',
+        'Referrer-Policy': 'strict-origin-when-cross-origin',
+        'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+      },
+    });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     const errorStack = error instanceof Error ? error.stack : undefined;
@@ -205,10 +167,9 @@ async function handler(
     logger.error('Unexpected error in chapter HTML handler', {
       error: errorMessage,
       stack: errorStack,
-      bookSlug: params?.slug,
-      chapterId: params?.chapterId,
-      userId: session?.userId,
-      sessionId: session?.sessionId,
+      bookSlug: slug,
+      chapterId,
+      userId,
       timestamp: new Date().toISOString()
     });
     
@@ -228,5 +189,6 @@ async function handler(
   }
 }
 
-// Export the handler wrapped with OIDC-only middleware
-export const GET = withOidcOnly(handler);
+// Export the wrapped handler
+// Wrap the handler with GitHub OIDC authentication
+export const GET = withGithubOidcAuth(handleRequest);

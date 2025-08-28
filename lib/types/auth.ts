@@ -1,10 +1,10 @@
 import { JwtPayload } from 'jsonwebtoken';
 
-export type AuthType = 'clerk' | 'github';
+export type AuthType = 'clerk' | 'github-oidc';
 
 export interface BaseAuthContext {
   type: AuthType;
-  userId?: string;
+  userId: string;
 }
 
 export interface ClerkAuthContext extends BaseAuthContext {
@@ -14,18 +14,24 @@ export interface ClerkAuthContext extends BaseAuthContext {
   firstName?: string;
   lastName?: string;
   imageUrl?: string;
+  sessionId?: string;
+  sessionClaims?: Record<string, unknown>;
 }
 
-export interface GitHubAuthContext extends BaseAuthContext {
-  type: 'github';
+export interface GitHubOidcAuthContext extends BaseAuthContext {
+  type: 'github-oidc';
+  userId: string;
   claims: GitHubOidcClaims;
-  workflowRunId?: string;
-  actor?: string;
   repository?: string;
+  repositoryOwner?: string;
+  actor?: string;
   ref?: string;
+  sha?: string;
+  workflow?: string;
+  runId?: string;
 }
 
-export type AuthContext = ClerkAuthContext | GitHubAuthContext;
+export type AuthContext = ClerkAuthContext | GitHubOidcAuthContext;
 
 export interface GitHubOidcClaims extends JwtPayload {
   // Standard claims
@@ -39,18 +45,21 @@ export interface GitHubOidcClaims extends JwtPayload {
   repository?: string;
   repository_owner?: string;
   repository_id?: string;
+  repository_visibility?: 'public' | 'private' | 'internal';
   workflow?: string;
   job_workflow_ref?: string;
   ref?: string;
+  ref_type?: string;
   sha?: string;
   run_id?: string;
   run_number?: string;
   run_attempt?: string;
   actor?: string;
+  actor_id?: string;
   event_name?: string;
+  environment?: string;
   head_ref?: string;
   base_ref?: string;
-  ref_type?: string;
 }
 
 export interface AuthError extends Error {

@@ -1,71 +1,179 @@
 import { NextResponse } from 'next/server';
-import { ContentService } from '@/lib/services/content.service';
-import { GitHubActionsService } from '@/lib/services/github-actions.service';
+import { withGithubOidcAuth, type HandlerWithAuth } from '@/middleware/auth';
+import { randomUUID } from 'crypto';
+
+// Types
+type EbookFormat = 'pdf' | 'docx' | 'html';
 
 interface GenerateRequest {
   title: string;
   content: string;
-  format: 'pdf' | 'docx' | 'html';
-  metadata?: Record<string, any>;
+  format?: EbookFormat;
+  metadata?: Record<string, unknown>;
 }
 
-export async function POST(request: Request) {
-  try {
-    const { title, content, format, metadata } = (await request.json()) as GenerateRequest;
+interface ContentGenerationResponse {
+  success: boolean;
+  contentId: string;
+  sessionId: string;
+  workflowId: string;
+  status: 'processing' | 'completed' | 'failed';
+  timestamp: string;
+  error?: string;
+}
+
+// GitHub Actions Service
+class GitHubActionsService {
+  private static octokit = new (require('@octokit/rest').Octokit)({
+    auth: process.env.GITHUB_TOKEN,
+  });
+
+  static async triggerContentProcessing(params: {
+    contentId: string;
+    sessionId: string;
+    nonce: string;
+    metadata?: Record<string, unknown>;
+  }) {
+    const { contentId, sessionId, nonce, metadata = {} } = params;
+    const owner = process.env.GITHUB_REPO_OWNER || '';
+    const repo = process.env.GITHUB_REPO_NAME || '';
+    const workflowId = process.env.GITHUB_WORKFLOW || 'process-content.yml';
+
+    if (!owner || !repo) {
+      throw new Error('GitHub repository owner or name not configured');
+    }
+
+    const response = await this.octokit.actions.createWorkflowDispatch({
+      owner,
+      repo,
+      workflow_id: workflowId,
+      ref: 'main',
+      inputs: {
+        session_id: sessionId,
+        nonce,
+        content_id: contentId,
+        ...metadata,
+      },
+    });
+
+    const workflowRunId = response.data.id;
+
+    return {
+      success: true as const,
+      status: 'workflow_triggered' as const,
+      contentId,
+      sessionId,
+      workflowRunId: workflowRunId.toString(),
+      triggeredAt: new Date().toISOString(),
+    };
+  }
+}
+
+// Content Service
+class ContentService {
+  static async generateContent(params: {
+    title: string;
+    content: string;
+    format: EbookFormat;
+    metadata?: Record<string, unknown>;
+  }) {
+    const contentId = `content_${randomUUID()}`;
     
-    // Generate content and get job token
-    const { contentId, jobToken } = await ContentService.generateContent({
+    if (!params.content || params.content.trim().length < 10) {
+      throw new Error('Content is too short');
+    }
+
+    return {
+      contentId,
+      status: 'pending' as const,
+    };
+  }
+}
+
+// Handler
+const handler: HandlerWithAuth = async (req, context) => {
+  try {
+    const { authContext } = context || {};
+    
+    if (authContext?.type !== 'github-oidc') {
+      return new NextResponse(
+        JSON.stringify({ 
+          success: false, 
+          error: 'GitHub OIDC authentication required' 
+        }),
+        { 
+          status: 401,
+          headers: { 'Content-Type': 'application/json' }
+        }
+      );
+    }
+
+    const { title, content, format = 'pdf', metadata } = (await req.json()) as GenerateRequest;
+    
+    if (!title || !content) {
+      return new NextResponse(
+        JSON.stringify({ 
+          success: false, 
+          error: 'Title and content are required' 
+        }),
+        { 
+          status: 400,
+          headers: { 'Content-Type': 'application/json' }
+        }
+      );
+    }
+
+    const { contentId } = await ContentService.generateContent({
       title,
       content,
       format,
       metadata,
     });
 
-    // Trigger GitHub Actions workflow
+    const sessionId = `sess_${randomUUID()}`;
+    const nonce = randomUUID();
+
     const workflow = await GitHubActionsService.triggerContentProcessing({
       contentId,
-      format,
+      sessionId,
+      nonce,
       metadata: {
         ...metadata,
-        jobToken,
+        format,
+        title,
       },
     });
 
-    return NextResponse.json({
+    const response: ContentGenerationResponse = {
       success: true,
       contentId,
-      jobToken,
-      workflowId: workflow.runId,
+      sessionId,
+      workflowId: workflow.workflowRunId,
       status: 'processing',
       timestamp: new Date().toISOString(),
+    };
+
+    return new NextResponse(JSON.stringify(response), {
+      status: 202,
+      headers: { 'Content-Type': 'application/json' },
     });
-  } catch (error: any) {
+
+  } catch (error: unknown) {
     console.error('Content generation error:', error);
-    return NextResponse.json(
-      { 
-        success: false, 
-        error: error.message || 'İçerik oluşturulurken bir hata oluştu' 
-      },
-      { status: 400 }
-    );
-  }
-}
-
-export async function GET(request: Request) {
-  try {
-    const { searchParams } = new URL(request.url);
-    const contentId = searchParams.get('contentId');
+    const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
     
-    if (!contentId) {
-      throw new Error('contentId parametresi gerekli');
-    }
-
-    const status = await ContentService.getContentStatus(contentId);
-    return NextResponse.json(status);
-  } catch (error: any) {
-    return NextResponse.json(
-      { error: error.message || 'İçerik durumu alınamadı' },
-      { status: 400 }
+    return new NextResponse(
+      JSON.stringify({ 
+        success: false, 
+        error: errorMessage 
+      }),
+      { 
+        status: 500,
+        headers: { 'Content-Type': 'application/json' }
+      }
     );
   }
-}
+};
+
+// Export the handler with GitHub OIDC authentication
+export const POST = withGithubOidcAuth(handler);

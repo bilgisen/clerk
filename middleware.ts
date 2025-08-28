@@ -1,23 +1,13 @@
 import { NextResponse } from 'next/server';
-import type { NextRequest } from 'next/server';
-import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
-import { authGateway } from './middleware/auth-gateway';
-
-declare module 'next/server' {
-  interface NextRequest {
-    authContext?: {
-      authType: 'clerk' | 'github-oidc' | 'unauthorized';
-      userId?: string;
-      sessionId?: string;
-      claims?: Record<string, any>;
-    };
-  }
-}
+import type { NextRequest, NextFetchEvent } from 'next/server';
+import { withAuth, withClerkAuth, withGithubOidcAuth } from './middleware/auth';
 
 // Public routes that don't require authentication
 const PUBLIC_ROUTES = [
   '/',
   '/api/public/(.*)',
+  '/api/auth/(.*)',
+  '/api/webhooks/(.*)',
   '/api/trpc/(.*)',
   '/_next/(.*)',
   '/favicon.ico',
@@ -28,98 +18,86 @@ const PUBLIC_ROUTES = [
   '/api/publish/status(.*)',
 ];
 
-// Routes that should only use Clerk auth
+// Clerk-only routes (require Clerk session)
 const CLERK_ONLY_ROUTES = [
-  '/api/books/by-slug/[^/]+/publish',
+  '/dashboard(.*)',
+  '/api/user(.*)',
+  '/api/account(.*)',
+  '/api/books(.*)',
 ];
 
-// Check if a path is a public route
-const isPublicRoute = (path: string): boolean => {
-  return PUBLIC_ROUTES.some(route => {
-    try {
-      const regex = new RegExp(`^${route.replace(/\*\*$/, '.*')}$`);
-      return regex.test(path);
-    } catch (e) {
-      console.error(`Invalid public route pattern: ${route}`, e);
-      return false;
+// GitHub OIDC only routes (for GitHub Actions)
+const GITHUB_OIDC_ROUTES = [
+  '/api/publish/attest',
+  '/api/publish/combined',
+];
+
+// Simple route matcher
+const matchesRoute = (path: string, patterns: string[]): boolean => {
+  return patterns.some(pattern => {
+    if (pattern.endsWith('(.*)')) {
+      const base = pattern.replace('(.*)', '');
+      return path.startsWith(base);
     }
+    return path === pattern;
   });
 };
 
-// Check if a path requires authentication
-const requiresAuth = (path: string): boolean => {
-  // All API routes except public ones require auth
-  return path.startsWith('/api/') && !isPublicRoute(path);
+// Handler for public routes
+const publicHandler = async (req: NextRequest): Promise<NextResponse> => {
+  return NextResponse.next();
 };
 
-// Check if a path should use Clerk auth only
-const isClerkOnlyRoute = (path: string): boolean => {
-  return CLERK_ONLY_ROUTES.some(route => {
-    try {
-      const regex = new RegExp(`^${route.replace(/\[\^\/\]\+/g, '([^/]+)')}$`);
-      return regex.test(path);
-    } catch (e) {
-      console.error(`Invalid Clerk-only route pattern: ${route}`, e);
-      return false;
-    }
-  });
-};
-
-// Main middleware function
-export default clerkMiddleware(async (auth, req) => {
-  const { pathname } = req.nextUrl;
-
-  // Skip public routes
-  if (isPublicRoute(pathname)) {
+// Handler for Clerk authenticated routes
+const clerkHandler = (req: NextRequest): Promise<NextResponse> => {
+  return withClerkAuth(async (req: NextRequest) => {
     return NextResponse.next();
-  }
+  })(req);
+};
 
-  // Handle API routes with auth gateway
-  if (pathname.startsWith('/api/')) {
-    // For Clerk-only routes, use Clerk's auth
-    if (isClerkOnlyRoute(pathname)) {
-      const session = await auth();
-      if (!session.userId) {
-        return NextResponse.json(
-          { error: 'Unauthorized', code: 'UNAUTHORIZED' },
-          { status: 401, headers: { 'Content-Type': 'application/json' } }
-        );
+// Handler for GitHub OIDC routes
+const githubOidcHandler = (req: NextRequest): Promise<NextResponse> => {
+  return withGithubOidcAuth(async (req: NextRequest) => {
+    return NextResponse.next();
+  })(req);
+};
+
+// Main middleware
+export default withAuth(
+  (req: NextRequest) => ({
+    // Handler function that will be called after authentication
+    async handler(req: NextRequest) {
+      const { pathname } = req.nextUrl;
+      
+      // Handle public routes
+      if (matchesRoute(pathname, PUBLIC_ROUTES)) {
+        return await publicHandler(req);
       }
+      
+      // Handle Clerk-only routes
+      if (matchesRoute(pathname, CLERK_ONLY_ROUTES)) {
+        return await clerkHandler(req);
+      }
+      
+      // Handle GitHub OIDC routes
+      if (matchesRoute(pathname, GITHUB_OIDC_ROUTES)) {
+        return await githubOidcHandler(req);
+      }
+      
+      // Continue with the request for all other routes
       return NextResponse.next();
     }
-
-    // For other API routes, use our auth gateway
-    const response = await authGateway(req);
-    if (response) {
-      // Ensure all error responses are JSON
-      if (response.status >= 400 && !response.headers.get('Content-Type')?.includes('application/json')) {
-        const text = await response.text();
-        return NextResponse.json(
-          { error: text || 'Unauthorized', code: 'UNAUTHORIZED' },
-          { status: response.status, headers: { 'Content-Type': 'application/json' } }
-        );
-      }
-      return response;
-    }
-    
-    return NextResponse.next();
+  }),
+  {
+    // Default options for all routes
+    requireAuth: true,
+    allowedAuthTypes: ['clerk', 'github-oidc']
   }
+);
 
-  // For non-API routes, use Clerk's auth
-  const session = await auth();
-  if (!session.userId) {
-    const signInUrl = new URL('/sign-in', req.url);
-    signInUrl.searchParams.set('redirect_url', pathname);
-    return NextResponse.redirect(signInUrl);
-  }
-
-  return NextResponse.next();
-});
-
+// Configure which routes to run middleware on
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico).*)',
-    '/',
-    '/(api|trpc)(.*)',
+    '/((?!_next/static|_next/image|favicon.ico|.*\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 };

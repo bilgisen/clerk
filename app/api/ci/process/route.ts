@@ -1,6 +1,8 @@
 // app/api/ci/process/route.ts
-import { NextResponse, NextRequest } from 'next/server';
-import { withPublishAuth } from '@/lib/auth/withPublishAuth';
+import { NextResponse } from 'next/server';
+import { withGithubOidcAuth } from '@/middleware/auth';
+import type { NextRequest } from 'next/server';
+import type { AuthContextUnion } from '@/types/auth';
 
 // Basic in-memory idempotency cache (replace with Redis in production)
 const IDEMPOTENCY_TTL_MS = 10 * 60 * 1000; // 10 minutes
@@ -36,17 +38,33 @@ async function readJsonSafe(body: ReadableStream<Uint8Array> | null): Promise<an
 //   'Idempotency-Key': 'unique-request-id'
 // }
 // Body: { contentId: string, mode?: string }
-export const POST = withPublishAuth(async (req, _, claims) => {
-  // Ensure this is an OIDC-authenticated request
-  if (claims.authType !== 'github-oidc') {
+// Extend the request type to include authContext
+type AuthenticatedRequest = NextRequest & {
+  authContext: AuthContextUnion;
+};
+
+export const POST = withGithubOidcAuth(async (request) => {
+  const req = request as unknown as AuthenticatedRequest;
+  const { authContext } = req;
+  
+  // The auth middleware ensures we have a valid GitHub OIDC context
+  if (authContext.type !== 'github-oidc') {
     return NextResponse.json(
-      { error: 'unauthorized', message: 'This endpoint requires OIDC authentication' },
+      { error: 'Unauthorized', code: 'INVALID_AUTH_CONTEXT' },
       { status: 401 }
     );
   }
+  
+  // Log the request for auditing
+  console.log('CI process request', {
+    repository: authContext.repository,
+    runId: authContext.run_id, // Use run_id to match the type
+    workflow: authContext.workflow,
+    userId: authContext.userId
+  });
 
   // Verify content type
-  const contentType = req.headers.get('content-type') || '';
+  const contentType = request.headers.get('content-type') || '';
   if (!contentType.includes('application/json')) {
     return NextResponse.json(
       { error: 'invalid_content_type', message: 'Content-Type must be application/json' },
@@ -55,7 +73,7 @@ export const POST = withPublishAuth(async (req, _, claims) => {
   }
 
   // Handle idempotency
-  const idempotencyKey = req.headers.get('x-idempotency-key') || req.headers.get('idempotency-key') || '';
+  const idempotencyKey = request.headers.get('x-idempotency-key') || request.headers.get('idempotency-key') || '';
   if (!idempotencyKey) {
     return NextResponse.json(
       { error: 'missing_idempotency_key', message: 'Idempotency-Key header is required' },
@@ -131,5 +149,10 @@ export const POST = withPublishAuth(async (req, _, claims) => {
 // GET /api/ci/process/health
 // Public health check endpoint
 export async function GET() {
-  return NextResponse.json({ status: 'ok' });
+  gcCache(); // Clean up old cache entries
+  return NextResponse.json({ 
+    status: 'ok',
+    cacheSize: cache.size,
+    timestamp: new Date().toISOString()
+  });
 }

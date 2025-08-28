@@ -33,7 +33,8 @@ function getCreditsForPlan(priceId: string): number {
 export async function POST(req: Request) {
   try {
     // Verify webhook signature
-    const signature = headers().get("x-polar-signature");
+    const headersList = await headers();
+    const signature = headersList.get("x-polar-signature");
     if (!signature) {
       return new NextResponse("Missing signature", { status: 400 });
     }
@@ -76,10 +77,10 @@ export async function POST(req: Request) {
               userId,
               amount: credits,
               reason: "subscription_credit",
-              ref: data.id,
               idempotencyKey: `polar:sub:${data.id}:${data.current_period_start}`,
               source: "polar",
               metadata: {
+                ref: data.id, // Moved ref to metadata since it's not in CreditTransaction type
                 subscriptionId: data.id,
                 priceId: data.price_id,
                 billingPeriod: data.interval,
@@ -116,12 +117,12 @@ export async function POST(req: Request) {
           userId,
           amount: credits,
           reason: "purchase",
-          ref: data.id,
           idempotencyKey: `polar:order:${data.id}`,
           source: "polar",
           metadata: {
+            ref: data.id, // Moved ref to metadata since it's not in CreditTransaction type
             orderId: data.id,
-            amount: data.amount,
+            amount: data.amount_total / 100, // Convert from cents
             currency: data.currency,
             eventId: event.id,
           },

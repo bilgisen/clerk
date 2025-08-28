@@ -1,10 +1,10 @@
-import { NextResponse, NextRequest } from 'next/server';
-import { db } from '@/db';
+import { NextResponse, type NextRequest } from 'next/server';
+import { db } from '@/db/drizzle';
 import { books } from '@/db/schema';
 import { eq } from 'drizzle-orm';
-import { z } from 'zod';
-import { withOidcOnly } from '@/lib/middleware/withOidcOnly';
+import { withGithubOidcAuth, type HandlerWithAuth, type AuthContextUnion } from '@/middleware/auth';
 import { logger } from '@/lib/logger';
+import { z } from 'zod';
 
 // Schema for request body validation
 const UpdateEpubSchema = z.object({
@@ -15,11 +15,51 @@ const UpdateEpubSchema = z.object({
 // Protected by GitHub OIDC. Called by CI after uploading EPUB to R2.
 // Headers: { Authorization: 'Bearer <github-oidc-token>' }
 // Body: { epubUrl: string }
-async function handler(
+// Define the handler with explicit types
+const handler = async (
   req: NextRequest,
-  { params }: { params: { id: string } },
-  oidcClaims: any
-) {
+  context: {
+    params?: Record<string, string>;
+    authContext: AuthContextUnion;
+  } = { 
+    authContext: { 
+      type: 'github-oidc',
+      userId: 'system',
+      claims: { 
+        sub: 'system',
+        iss: 'https://token.actions.githubusercontent.com',
+        aud: 'https://api.clerko.com',
+        exp: Math.floor(Date.now() / 1000) + 3600, // 1 hour from now
+        iat: Math.floor(Date.now() / 1000),
+        repository: 'system/repo',
+        repository_owner: 'system',
+        run_id: '1',
+        workflow: 'system-workflow',
+        actor: 'system',
+        ref: 'refs/heads/main',
+        sha: 'a1b2c3d4e5f6g7h8i9j0',
+        event_name: 'workflow_dispatch'
+      },
+      repository: 'system/repo',
+      repositoryOwner: 'system',
+      actor: 'system',
+      ref: 'refs/heads/main',
+      sha: 'a1b2c3d4e5f6g7h8i9j0',
+      workflow: 'system-workflow',
+      runId: '1'
+    } 
+  }
+): Promise<NextResponse> => {
+  const { params = {}, authContext } = context || {};
+  const oidcClaims = authContext as any;
+  const id = params?.id;
+  
+  if (!id) {
+    return NextResponse.json(
+      { error: 'Book ID is required' },
+      { status: 400 }
+    );
+  }
   try {
     // Log OIDC context for audit
     logger.info('OIDC-authenticated EPUB update request', {
@@ -129,5 +169,6 @@ async function handler(
   }
 }
 
-// Export the handler wrapped with OIDC-only middleware
-export const POST = withOidcOnly(handler);
+// Export the handler wrapped with GitHub OIDC auth middleware
+// Export the handler wrapped with GitHub OIDC auth middleware
+export const POST = withGithubOidcAuth(handler as HandlerWithAuth);

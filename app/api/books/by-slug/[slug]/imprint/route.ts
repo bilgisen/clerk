@@ -1,199 +1,280 @@
-import { type NextRequest, NextResponse } from 'next/server';
+import { type NextRequest } from 'next/server';
+import { NextResponse } from 'next/server';
 import { db } from '@/db/drizzle';
 import { books } from '@/db/schema';
-import { and, eq } from 'drizzle-orm';
-import { generateImprintHTML } from '@/lib/generateChapterHTML';
-import { withOidcOnly } from '@/lib/middleware/withOidcOnly';
+import { generateImprintHTML, type BookImprintData } from '@/lib/generateChapterHTML';
+import { withGithubOidcAuth, type HandlerWithAuth, type AuthContextUnion } from '@/middleware/auth';
+import { eq } from 'drizzle-orm';
 import { logger } from '@/lib/logger';
 
-// Configuration
+// Configure route behavior
 export const dynamic = 'force-dynamic';
 export const dynamicParams = true;
 export const runtime = 'nodejs';
 
 // Types
-type Book = typeof books.$inferSelect;
+type Book = typeof books.$inferSelect & {
+  subtitle?: string | null;
+  description?: string | null;
+  publisherWebsite?: string | null;
+  publishYear?: number | null;
+  isbn?: string | null;
+  language?: string | null;
+  coverImageUrl?: string | null;
+};
 
-async function handler(
+const handler: HandlerWithAuth = async (
   request: NextRequest,
-  { params }: { params: { slug: string } },
-  oidcClaims: any
-) {
+  context: { 
+    params?: Record<string, string>; 
+    authContext: AuthContextUnion;
+  } = { authContext: { type: 'unauthorized' } }
+) => {
+  const { params = {}, authContext } = context;
+  const slug = params?.slug;
+  
+  // Validate slug parameter
+  if (!slug) {
+    const response = new NextResponse(
+      JSON.stringify({ 
+        error: 'Missing required parameter',
+        message: 'Book slug is required',
+        code: 'MISSING_PARAMETER'
+      }),
+      { 
+        status: 400,
+        headers: { 
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store, max-age=0',
+          'X-Content-Type-Options': 'nosniff'
+        } 
+      }
+    );
+    return response;
+  }
+  
+  // Ensure we have a valid GitHub OIDC context
+  if (authContext.type !== 'github-oidc') {
+    const response = new NextResponse(
+      JSON.stringify({ 
+        error: 'GitHub OIDC authentication required',
+        code: 'AUTH_REQUIRED'
+      }),
+      { 
+        status: 401, 
+        headers: { 
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store, max-age=0',
+          'X-Content-Type-Options': 'nosniff',
+          'X-Frame-Options': 'DENY',
+          'Referrer-Policy': 'strict-origin-when-cross-origin'
+        } 
+      }
+    );
+    return response;
+  }
+
+  const { claims } = authContext;
   const requestStart = Date.now();
   const { searchParams } = new URL(request.url);
   const format = searchParams.get('format') || 'html';
   
   // Log OIDC context for audit
   logger.info('OIDC-authenticated imprint request', {
-    repository: oidcClaims.repository,
-    workflow: oidcClaims.workflow,
-    run_id: oidcClaims.run_id,
-    bookSlug: params.slug
+    repository: claims.repository_owner,
+    workflow: claims.workflow,
+    run_id: claims.run_id,
+    bookSlug: slug,
+    format,
+    userId: claims.sub
   });
 
+  // Validate format
   if (format !== 'html' && format !== 'json') {
-    logger.warn('Invalid format requested', { 
-      format,
-      slug: params.slug
-    });
-    
-    return NextResponse.json(
-      { 
+    logger.warn('Invalid format requested', { format, slug });
+    const response = new NextResponse(
+      JSON.stringify({ 
         error: 'Invalid format',
         message: 'Format must be either html or json',
         code: 'INVALID_FORMAT'
-      },
-      { status: 400, headers: { 'Content-Type': 'application/json' } }
+      }),
+      { 
+        status: 400, 
+        headers: { 
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store, max-age=0',
+          'X-Content-Type-Options': 'nosniff',
+          'X-Frame-Options': 'DENY'
+        } 
+      }
     );
+    return response;
   }
 
   try {
-    // Get the book by slug with access control
-    let book: Book | undefined;
-    try {
-      [book] = await db
-        .select()
-        .from(books)
-        .where(
-          and(
-            eq(books.slug, params.slug),
-            eq(books.userId, session.userId) // Ensure user owns the book
-          )
-        )
-        .limit(1);
-
-      if (!book) {
-        logger.warn('Book not found or access denied', { 
-          slug: params.slug, 
-          userId: session.userId 
-        });
-        
-        return new NextResponse(
-          JSON.stringify({ 
-            error: 'Book not found or access denied',
-            code: 'BOOK_NOT_FOUND',
-            message: `No book found with slug: ${params.slug}`
-          }), 
-          { status: 404, headers: { 'Content-Type': 'application/json' } }
-        );
+    // Find the book by slug
+    const book = await db.query.books.findFirst({
+      where: eq(books.slug, slug),
+      columns: {
+        id: true,
+        title: true,
+        author: true,
+        publisher: true,
+        publisherWebsite: true,
+        publishYear: true,
+        isbn: true,
+        language: true,
+        description: true,
+        coverImageUrl: true,
+        subtitle: true,
+        slug: true,
+        createdAt: true,
+        updatedAt: true
       }
-    } catch (error) {
-      logger.error('Error fetching book', { 
-        error: error instanceof Error ? error.message : 'Unknown error',
-        stack: error instanceof Error ? error.stack : undefined,
-        slug: params.slug,
-        userId: session.userId,
-        sessionId: session.sessionId
-      });
-      
-      return new NextResponse(
+    });
+
+    if (!book) {
+      logger.warn('Book not found', { slug });
+      const response = new NextResponse(
         JSON.stringify({ 
-          error: 'Failed to fetch book',
-          code: 'FETCH_BOOK_ERROR'
-        }), 
-        { status: 500, headers: { 'Content-Type': 'application/json' } }
+          error: 'Not Found',
+          message: `No book found with slug: ${slug}`,
+          code: 'BOOK_NOT_FOUND'
+        }),
+        { 
+          status: 404,
+          headers: { 
+            'Content-Type': 'application/json',
+            'Cache-Control': 'no-store, max-age=0',
+            'X-Content-Type-Options': 'nosniff'
+          } 
+        }
       );
+      return response;
     }
 
-    try {
-      // Log successful access
-      logger.info('Generating imprint', {
+    // Log successful access
+    logger.info('Generating imprint', {
+      bookId: book.id,
+      format,
+      userId: claims.sub
+    });
+
+    // Prepare book data for imprint
+    const imprintData: BookImprintData = {
+      title: book.title,
+      author: book.author || 'Unknown Author',
+      publisher: book.publisher || undefined,
+      publisherWebsite: book.publisherWebsite || undefined,
+      publishYear: book.publishYear || undefined,
+      isbn: book.isbn || undefined,
+      language: book.language || 'tr',
+      description: book.description || undefined,
+      coverImageUrl: book.coverImageUrl || undefined
+    };
+
+    // Generate the imprint content based on requested format
+    if (format === 'html') {
+      const imprintHTML = generateImprintHTML(imprintData);
+      const duration = Date.now() - requestStart;
+
+      logger.info('Successfully generated HTML imprint', {
         bookId: book.id,
-        format,
-        userId: session.userId,
-        sessionId: session.sessionId
+        durationMs: duration,
+        userId: claims.sub
       });
 
-      // Generate the imprint content based on requested format
-      if (format === 'html') {
-        const imprintHTML = generateImprintHTML({
-          title: book.title,
-          author: book.author || 'Unknown Author',
-          publisher: book.publisher || '',
-          publisherWebsite: book.publisherWebsite || '',
-          publishYear: book.publishYear || new Date().getFullYear(),
-          isbn: book.isbn || '',
-          language: book.language || 'tr',
-          description: book.description || '',
-          coverImageUrl: book.coverImageUrl || ''
-        });
-
-        logger.info('Successfully generated HTML imprint', {
-          bookId: book.id,
-          durationMs: Date.now() - requestStart,
-          userId: session.userId
-        });
-
-        return new NextResponse(imprintHTML, {
-          status: 200,
-          headers: {
-            'Content-Type': 'text/html; charset=utf-8',
-            'Cache-Control': 'public, max-age=300, s-maxage=3600, stale-while-revalidate=86400',
-            'X-Content-Type-Options': 'nosniff',
-            'X-Frame-Options': 'DENY',
-            'X-XSS-Protection': '1; mode=block',
-            'Referrer-Policy': 'strict-origin-when-cross-origin',
-            'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
-          },
-        });
-      } else {
-        // JSON format
-        return NextResponse.json({
-          id: book.id,
-          slug: book.slug,
-          title: book.title,
-          author: book.author,
-          publisher: book.publisher,
-          publisherWebsite: book.publisherWebsite,
-          publishYear: book.publishYear,
-          isbn: book.isbn,
-          language: book.language,
-          description: book.description,
-          coverImageUrl: book.coverImageUrl,
-          createdAt: book.createdAt,
-          updatedAt: book.updatedAt,
-        }, {
-          headers: {
-            'Cache-Control': 'public, max-age=300, s-maxage=3600, stale-while-revalidate=86400',
-            'Content-Type': 'application/json',
-          },
-        });
-      }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      const errorStack = error instanceof Error ? error.stack : undefined;
-      
-      logger.error('Error generating imprint', {
-        error: errorMessage,
-        stack: errorStack,
-        bookId: book?.id,
-        userId: session.userId,
-        sessionId: session.sessionId,
-        timestamp: new Date().toISOString()
+      const response = new NextResponse(imprintHTML, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': 'public, max-age=300, s-maxage=3600, stale-while-revalidate=86400',
+          'X-Content-Type-Options': 'nosniff',
+          'X-Frame-Options': 'DENY',
+          'X-XSS-Protection': '1; mode=block',
+          'Referrer-Policy': 'strict-origin-when-cross-origin',
+          'Content-Security-Policy': "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https:;"
+        }
       });
-      
-      return NextResponse.json(
-        { 
-          error: 'An error occurred while generating the imprint',
-          code: 'IMPRINT_GENERATION_ERROR'
+      return response;
+    } else {
+      // Return JSON format
+      const responseData = {
+        ...imprintData,
+        _metadata: {
+          generatedAt: new Date().toISOString(),
+          format: 'json',
+          version: '1.0'
         },
-        { status: 500 }
-      );
+        _links: {
+          self: `${process.env.NEXT_PUBLIC_APP_URL}/api/books/by-slug/${book.slug}/imprint?format=json`,
+          html: `${process.env.NEXT_PUBLIC_APP_URL}/api/books/by-slug/${book.slug}/imprint?format=html`,
+          book: `${process.env.NEXT_PUBLIC_APP_URL}/api/books/by-slug/${book.slug}`,
+          cover: book.coverImageUrl ? {
+            href: book.coverImageUrl,
+            type: 'image/*'
+          } : undefined
+        }
+      };
+
+      const duration = Date.now() - requestStart;
+      logger.info('Successfully generated JSON imprint', {
+        bookId: book.id,
+        durationMs: duration,
+        userId: claims.sub
+      });
+
+      const response = new NextResponse(JSON.stringify(responseData), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'public, max-age=300, s-maxage=3600, stale-while-revalidate=86400',
+          'X-Content-Type-Options': 'nosniff',
+          'X-Frame-Options': 'DENY',
+          'Referrer-Policy': 'strict-origin-when-cross-origin',
+          'X-Response-Time': `${duration}ms`
+        }
+      });
+      return response;
     }
   } catch (error) {
-    console.error('[IMPRINT_GET] Error:', error);
-    return new NextResponse(
-      JSON.stringify({ 
-        error: 'Internal Server Error',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      }), 
-      { 
-        status: 500, 
-        headers: { 'Content-Type': 'application/json' } 
-      }
-    );
-  }
-}
+    const errorId = `err_${Math.random().toString(36).substring(2, 11)}`;
+    const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+    const errorStack = error instanceof Error ? error.stack : undefined;
+    
+    logger.error('Error generating imprint', {
+      error: errorMessage,
+      stack: errorStack,
+      errorId,
+      bookSlug: slug,
+      userId: claims?.sub,
+      format
+    });
 
-// Export the handler wrapped with OIDC-only middleware
-export const GET = withOidcOnly(handler);
+    const errorResponse = {
+      error: 'Internal Server Error',
+      message: 'An error occurred while generating the imprint',
+      errorId,
+      code: 'INTERNAL_SERVER_ERROR',
+      _links: {
+        support: 'https://bookshall.com/support',
+        documentation: 'https://docs.bookshall.com/api/errors'
+      }
+    };
+
+    const response = new NextResponse(JSON.stringify(errorResponse), {
+      status: 500,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Error-ID': errorId,
+        'Retry-After': '60',
+        'Cache-Control': 'no-store, no-cache, must-revalidate',
+        'X-Content-Type-Options': 'nosniff'
+      }
+    });
+    return response;
+  }
+};
+
+// Export the handler wrapped with GitHub OIDC auth middleware
+export const GET = withGithubOidcAuth(handler);

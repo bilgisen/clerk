@@ -63,7 +63,7 @@ function convertLexicalToHTML(lexicalState: any): string {
 /**
  * Interface for book metadata used in imprint generation
  */
-interface BookImprintData {
+export interface BookImprintData {
   title: string;
   author: string;
   publisher?: string | null;

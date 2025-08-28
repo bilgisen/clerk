@@ -43,9 +43,21 @@ const nextConfig: NextConfig = {
     ];
   },
   
-  // Webpack configuration to handle Node.js core modules
+  // Webpack and experimental features configuration
   experimental: {
+    // Enable server components external packages
     serverComponentsExternalPackages: ['@upstash/redis'],
+    // Enable server actions with allowed origins
+    serverActions: {
+      bodySizeLimit: '2mb',
+      allowedOrigins: [
+        'localhost:3000',
+        'editor.bookshall.com',
+        'clerk.editor.bookshall.com',
+        // Add other production domains as needed
+      ],
+    },
+    // Enable middleware (implicitly enabled by Next.js when using middleware.ts)
   },
   webpack: (config, { isServer }) => {
     // Only apply these changes for client-side bundles

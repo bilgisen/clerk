@@ -2,6 +2,8 @@ import { Octokit } from '@octokit/rest';
 
 export interface TriggerWorkflowParams {
   contentId: string;
+  sessionId: string;
+  nonce: string;
   metadata?: Record<string, any>;
 }
 
@@ -12,7 +14,7 @@ export class GitHubActionsService {
 
   static async triggerContentProcessing(params: TriggerWorkflowParams) {
     try {
-      const { contentId, metadata = {} } = params;
+      const { contentId, sessionId, nonce, metadata = {} } = params;
 
       const owner = process.env.GITHUB_REPO_OWNER;
       const repo = process.env.GITHUB_REPO_NAME;
@@ -22,15 +24,21 @@ export class GitHubActionsService {
         throw new Error('GitHub repository owner or name not configured');
       }
 
+      // Extract slug from metadata if available
+      const slug = metadata?.slug || `book-${contentId}`;
+
       const inputs: Record<string, string> = {
+        session_id: sessionId,
+        nonce: nonce,
         content_id: contentId,
+        slug: slug,
         metadata: JSON.stringify({
           ...metadata,
           timestamp: new Date().toISOString(),
         }),
       };
 
-      await this.octokit.rest.actions.createWorkflowDispatch({
+      const response = await this.octokit.rest.actions.createWorkflowDispatch({
         owner,
         repo,
         workflow_id: workflowId,
@@ -38,10 +46,16 @@ export class GitHubActionsService {
         inputs,
       });
 
+      const workflowRunId = response.data.id;
+      const workflowUrl = `https://github.com/${owner}/${repo}/actions/runs/${workflowRunId}`;
+
       return {
         success: true as const,
         status: 'workflow_triggered' as const,
         contentId,
+        sessionId,
+        workflowRunId,
+        workflowUrl,
         triggeredAt: new Date().toISOString(),
       };
     } catch (error) {

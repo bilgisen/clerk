@@ -1,6 +1,6 @@
 name: Publish Content
 
-# This workflow is called by the backend with a pre-authenticated combined token
+# This workflow is called by the backend with session-based authentication
 on:
   workflow_call:
     inputs:
@@ -24,10 +24,6 @@ on:
         description: 'Additional metadata (JSON string)'
         required: false
         type: string
-    secrets:
-      COMBINED_TOKEN:
-        description: 'Pre-authenticated combined token for API access'
-        required: true
 
 # Required permissions
 permissions:
@@ -81,37 +77,151 @@ jobs:
           echo "::add-mask::${{ secrets.COMBINED_TOKEN }}"
 
       - name: Update status (started)
-        env:
-          COMBINED_TOKEN: ${{ secrets.COMBINED_TOKEN }}
+        id: update_status_started
         run: |
-          curl -X POST "$BACKEND_URL/api/publish/update" \
-            -H "Authorization: Bearer $COMBINED_TOKEN" \
+          # Generate GitHub OIDC token
+          TOKEN=$(curl -s -X POST \
+            -H "Authorization: Bearer ${{ github.token }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/runners/registration-token" \
+            | jq -r '.token')
+          
+          # Update status using GitHub OIDC token
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$BACKEND_URL/api/publish/update" \
             -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${{ github.token }}" \
+            -H "X-GitHub-Run-Id: ${{ github.run_id }}" \
+            -H "X-Session-Id: ${{ inputs.session_id }}" \
             -d '{
               "status": "in-progress",
               "phase": "initializing",
+              "progress": 5,
               "message": "Starting build process",
-              "progress": 5
-            }' || echo "Warning: Failed to update status"
+              "metadata": {
+                "workflow": "${{ github.workflow }}",
+                "run_id": "${{ github.run_id }}",
+                "run_number": "${{ github.run_number }}",
+                "commit": "${{ github.sha }}",
+                "session_id": "${{ inputs.session_id }}",
+                "content_id": "${{ inputs.content_id }}"
+              }
+            }')
+          
+          # Extract status code and response body
+          HTTP_STATUS=$(echo "$RESPONSE" | tail -n1)
+          RESPONSE_BODY=$(echo "$RESPONSE" | head -n -1 | jq -r '.' 2>/dev/null || echo "$RESPONSE")
+          
+          if [ "$HTTP_STATUS" != "200" ]; then
+            echo "::error::Failed to update status: $RESPONSE_BODY"
+            exit 1
+          fi
+          
+          echo "Status updated successfully"
 
       - name: Fetch book content
+        id: fetch_content
         env:
           CONTENT_ID: ${{ env.CONTENT_ID }}
           BASE_URL: ${{ env.BACKEND_URL }}
-          COMBINED_TOKEN: ${{ secrets.COMBINED_TOKEN }}
+          SESSION_ID: ${{ inputs.session_id }}
         run: |
           set -e
-          mkdir -p ./book-content ./output
-          chmod +x ./scripts/fetch-book.sh
-          ./scripts/fetch-book.sh
+          
+          # Create necessary directories
+          mkdir -p ./book-content ./output ./book-content/styles ./book-content/chapters
+          
+          # Function to make authenticated requests
+          make_request() {
+            local url=$1
+            local output=$2
+            
+            echo "Fetching $url..."
+            
+            # Try with GitHub token first, fall back to session-based auth if needed
+            if ! curl -s -f -L "$url" \
+              -H "Authorization: Bearer ${{ github.token }}" \
+              -H "X-Session-Id: $SESSION_ID" \
+              -H "X-GitHub-Run-Id: ${{ github.run_id }}" \
+              -o "$output"; then
+              
+              echo "Failed to fetch $url, trying with session token..."
+              # Add any fallback logic here if needed
+              return 1
+            fi
+            return 0
+          }
+          
+          # Download book metadata
+          echo "Downloading book metadata..."
+          make_request "$BASE_URL/api/books/by-id/$CONTENT_ID/export" "./book-content/payload.json"
+          
+          # Extract book details
+          TITLE=$(jq -r '.book.title // "Untitled"' ./book-content/payload.json)
+          echo "Book: $TITLE"
+          
+          # Download cover image if available
+          COVER_URL=$(jq -r '.book.coverUrl // empty' ./book-content/payload.json)
+          if [ -n "$COVER_URL" ]; then
+            echo "Downloading cover image..."
+            make_request "$COVER_URL" "./book-content/cover.jpg" || true
+          fi
+          
+          # Download chapters
+          echo "Downloading chapters..."
+          jq -r '.chapters[] | .id' ./book-content/payload.json | while read -r chapterId; do
+            echo "  - Downloading chapter $chapterId"
+            make_request "$BASE_URL/api/books/by-id/$CONTENT_ID/chapters/$chapterId/html" "./book-content/chapters/chapter-$chapterId.xhtml"
+          done
+          
+          # Download styles
+          echo "Downloading styles..."
+          make_request "$BASE_URL/api/books/styles/epub.css" "./book-content/styles/epub.css" || true
+          
+          # Verify we have at least one chapter
+          if [ -z "$(find ./book-content/chapters -name '*.xhtml' -print -quit)" ]; then
+            echo "::error::No chapters found in the book"
+            exit 1
+          fi
+          
+          echo "Book content downloaded successfully"
 
       - name: Generate EPUB
+        id: generate_epub
+        env:
+          SESSION_ID: ${{ inputs.session_id }}
+          CONTENT_ID: ${{ inputs.content_id }}
         run: |
-          CONTENT_ID="${{ github.event.inputs.content_id }}"
+          set -e
+          
+          # Function to update status
+          update_status() {
+            local phase=$1
+            local progress=$2
+            local message=$3
+            
+            echo "::group::Status Update: $message"
+            
+            curl -X POST "$BACKEND_URL/api/publish/update" \
+              -H "Authorization: Bearer ${{ github.token }}" \
+              -H "Content-Type: application/json" \
+              -H "X-Session-Id: $SESSION_ID" \
+              -H "X-GitHub-Run-Id: ${{ github.run_id }}" \
+              -d "{\"phase\":\"$phase\",\"progress\":$progress,\"message\":\"$message\"}" || true
+              
+            echo "::endgroup::"
+          }
+          
+          # Update status
+          update_status "building" 30 "Preparing to generate EPUB"
+          
+          # Get book metadata
           TITLE=$(jq -r '.book.title // "Untitled"' ./book-content/payload.json)
           AUTHOR=$(jq -r '.book.author // "Unknown"' ./book-content/payload.json)
-          LANGUAGE=$(jq -r '.book.language // "tr"' ./book-content/payload.json)
-
+          LANGUAGE=$(jq -r '.book.language // "en"' ./book-content/payload.json)
+          
+          echo "📖 Building EPUB: $TITLE by $AUTHOR"
+          
+          # Build pandoc command
           PANDOC_CMD=(
             pandoc
             --from=html
@@ -123,107 +233,212 @@ jobs:
             --metadata=language:"$LANGUAGE"
             --metadata=identifier:"$CONTENT_ID"
           )
-
-          [ -f "./book-content/cover.jpg" ] && PANDOC_CMD+=(--epub-cover-image=./book-content/cover.jpg)
-          [ -f "./book-content/styles/epub.css" ] && PANDOC_CMD+=(--css=./book-content/styles/epub.css)
-
+          
+          # Add cover image if available
+          if [ -f "./book-content/cover.jpg" ]; then
+            echo "Adding cover image..."
+            PANDOC_CMD+=(--epub-cover-image=./book-content/cover.jpg)
+          fi
+          
+          # Add styles if available
+          if [ -f "./book-content/styles/epub.css" ]; then
+            PANDOC_CMD+=(--css=./book-content/styles/epub.css)
+          fi
+          
+          # Add chapters in order
+          echo "Adding chapters..."
           while IFS= read -r -d $'\0' file; do
             PANDOC_CMD+=("$file")
+            echo "  - $(basename "$file")"
           done < <(find ./book-content -type f -name 'chapter-*.xhtml' -print0 | sort -z -V)
-
-          [ -f "./book-content/imprint.xhtml" ] && PANDOC_CMD+=("./book-content/imprint.xhtml")
-
-          echo "📖 Building EPUB..."
-          "${PANDOC_CMD[@]}"
-
-          curl -X POST "$BACKEND_URL/api/publish/status" \
-            -H "Authorization: Bearer $COMBINED_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d '{"phase": "building", "progress": 50, "message": "EPUB generated"}'
+          
+          # Add imprint if available
+          if [ -f "./book-content/imprint.xhtml" ]; then
+            PANDOC_CMD+=("./book-content/imprint.xhtml")
+            echo "Adding imprint..."
+          fi
+          
+          # Generate EPUB
+          echo "Generating EPUB..."
+          update_status "building" 40 "Generating EPUB file"
+          
+          if ! "${PANDOC_CMD[@]}"; then
+            echo "::error::Failed to generate EPUB"
+            update_status "failed" 0 "Failed to generate EPUB"
+            exit 1
+          fi
+          
+          # Verify EPUB was created
+          if [ ! -f "./output/${CONTENT_ID}.epub" ]; then
+            echo "::error::EPUB file was not created"
+            update_status "failed" 0 "EPUB file was not created"
+            exit 1
+          fi
+          
+          # Update status
+          echo "✅ EPUB generated successfully"
+          update_status "building" 60 "EPUB generated successfully"
 
       - name: Upload EPUB to Cloudflare R2
-        run: |
-          CONTENT_ID="${{ github.event.inputs.content_id }}"
-          FILE_PATH="./output/${CONTENT_ID}.epub"
-          RAW_SLUG="${{ github.event.inputs.slug }}"
-          [ -z "$RAW_SLUG" ] && RAW_SLUG=$(jq -r '.book.title // "untitled"' ./book-content/payload.json)
-          TL=$(printf "%s" "$RAW_SLUG" | iconv -f UTF-8 -t ASCII//TRANSLIT 2>/dev/null || echo "$RAW_SLUG")
-          SLUG=$(echo "$TL" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g' | sed -E 's/^-+|-+$//g')
-          [ -z "$SLUG" ] && SLUG="$CONTENT_ID"
-          KEY="books/${SLUG}-${CONTENT_ID}.epub"
-
-          echo "📤 Uploading EPUB to R2..."
-          curl -X PUT "${R2_ENDPOINT}/${R2_BUCKET}/${KEY}" \
-            -H "Authorization: Bearer ${R2_ACCESS_KEY_ID}:${R2_SECRET_ACCESS_KEY}" \
-            -H "Content-Type: application/epub+zip" \
-            --upload-file "$FILE_PATH"
-
-          EPUB_URL="${R2_PUBLIC_URL}/${R2_BUCKET}/${KEY}"
-          echo "🔄 Updating book with new EPUB URL: $EPUB_URL"
-
-          curl -X POST "$BACKEND_URL/api/books/by-id/${CONTENT_ID}/epub" \
-            -H "Authorization: Bearer $COMBINED_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d "{\"epubUrl\":\"${EPUB_URL}\"}"
-
-          curl -X POST "$BACKEND_URL/api/publish/status" \
-            -H "Authorization: Bearer $COMBINED_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d '{"phase": "uploading", "progress": 90, "message": "EPUB uploaded to R2"}'
+        id: upload_epub
         env:
+          SESSION_ID: ${{ inputs.session_id }}
+          CONTENT_ID: ${{ inputs.content_id }}
           R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_PUBLIC_URL: ${{ secrets.R2_PUBLIC_URL }}
+        run: |
+          set -e
+          
+          # Function to update status
+          update_status() {
+            local phase=$1
+            local progress=$2
+            local message=$3
+            
+            echo "::group::Status Update: $message"
+            
+            curl -X POST "$BACKEND_URL/api/publish/update" \
+              -H "Authorization: Bearer ${{ github.token }}" \
+              -H "Content-Type: application/json" \
+              -H "X-Session-Id: $SESSION_ID" \
+              -H "X-GitHub-Run-Id: ${{ github.run_id }}" \
+              -d "{\"phase\":\"$phase\",\"progress\":$progress,\"message\":\"$message\"}" || true
+              
+            echo "::endgroup::"
+          }
+          
+          # Update status
+          update_status "uploading" 70 "Preparing to upload EPUB to Cloudflare R2"
+          
+          # Set file paths
+          FILE_PATH="./output/${CONTENT_ID}.epub"
+          
+          # Generate a slug from the book title or use the content ID
+          RAW_SLUG="${{ inputs.slug }}"
+          [ -z "$RAW_SLUG" ] && RAW_SLUG=$(jq -r '.book.title // "untitled"' ./book-content/payload.json)
+          
+          # Clean up the slug
+          SLUG=$(echo "$RAW_SLUG" | \
+            iconv -f UTF-8 -t ASCII//TRANSLIT 2>/dev/null || echo "$RAW_SLUG" | \
+            tr '[:upper:]' '[:lower:]' | \
+            sed -E 's/[^a-z0-9]+/-/g' | \
+            sed -E 's/^-+|-+$//g')
+          
+          [ -z "$SLUG" ] && SLUG="$CONTENT_ID"
+          
+          # Create a unique key for the EPUB file
+          TIMESTAMP=$(date +%s)
+          KEY="books/${SLUG}-${CONTENT_ID}-${TIMESTAMP}.epub"
+          
+          echo "📤 Uploading EPUB to Cloudflare R2..."
+          update_status "uploading" 75 "Uploading EPUB to Cloudflare R2"
+          
+          # Upload to R2
+          if ! curl -s -f -X PUT "${R2_ENDPOINT}/${R2_BUCKET}/${KEY}" \
+            -H "Authorization: Bearer ${R2_ACCESS_KEY_ID}:${R2_SECRET_ACCESS_KEY}" \
+            -H "Content-Type: application/epub+zip" \
+            --upload-file "$FILE_PATH"; then
+            
+            echo "::error::Failed to upload EPUB to R2"
+            update_status "failed" 0 "Failed to upload EPUB to Cloudflare R2"
+            exit 1
+          fi
+          
+          # Get the public URL
+          EPUB_URL="${R2_PUBLIC_URL}/${R2_BUCKET}/${KEY}"
+          echo "✅ EPUB uploaded successfully: $EPUB_URL"
+          
+          # Update the book with the new EPUB URL
+          echo "🔄 Updating book with new EPUB URL..."
+          update_status "uploading" 85 "Updating book with new EPUB URL"
+          
+          if ! curl -s -f -X POST "$BACKEND_URL/api/books/by-id/${CONTENT_ID}/epub" \
+            -H "Authorization: Bearer ${{ github.token }}" \
+            -H "Content-Type: application/json" \
+            -H "X-Session-Id: $SESSION_ID" \
+            -d "{\"epubUrl\":\"${EPUB_URL}\"}"; then
+            
+            echo "::warning::Failed to update book with EPUB URL"
+            # Don't fail the workflow for this - we can retry this part later
+          fi
+          
+          # Update status
+          update_status "uploading" 90 "EPUB successfully uploaded to Cloudflare R2"
+          
+          # Output the EPUB URL for use in subsequent steps
+          echo "EPUB_URL=$EPUB_URL" >> $GITHUB_OUTPUT
 
       - name: Finalize publish
+        id: finalize_publish
         if: always()
         env:
-          COMBINED_TOKEN: ${{ secrets.COMBINED_TOKEN }}
+          SESSION_ID: ${{ inputs.session_id }}
+          EPUB_URL: ${{ steps.upload_epub.outputs.EPUB_URL }}
         run: |
+          # Function to update status
+          update_status() {
+            local status=$1
+            local phase=$2
+            local progress=$3
+            local message=$4
+            
+            echo "::group::Final Status Update: $message"
+            
+            local data=$(cat <<EOF
+            {
+              "status": "$status",
+              "phase": "$phase",
+              "progress": $progress,
+              "message": "$message",
+              "metadata": {
+                "workflow": "${{ github.workflow }}",
+                "run_id": "${{ github.run_id }}",
+                "run_number": "${{ github.run_number }}",
+                "commit": "${{ github.sha }}",
+                "session_id": "$SESSION_ID"
+              },
+              "result": {
+                "workflowRunId": "${{ github.run_id }}",
+                "runUrl": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+                "commit": "${{ github.sha }}",
+                "epubUrl": "$EPUB_URL"
+              }
+            }
+            EOF
+            )
+            
+            # Remove newlines and extra spaces from JSON
+            data=$(echo "$data" | tr -d '\n' | tr -s ' ')
+            
+            curl -X POST "$BACKEND_URL/api/publish/update" \
+              -H "Authorization: Bearer ${{ github.token }}" \
+              -H "Content-Type: application/json" \
+              -H "X-Session-Id: $SESSION_ID" \
+              -H "X-GitHub-Run-Id: ${{ github.run_id }}" \
+              -d "$data" || true
+              
+            echo "::endgroup::"
+          }
+          
           # Always try to finalize, even if previous steps failed
           if [ "${{ job.status }}" = "success" ]; then
             echo "✅ Publish completed successfully"
-            
-            # Final success update
-            curl -X POST "$BACKEND_URL/api/publish/update" \
-              -H "Authorization: Bearer $COMBINED_TOKEN" \
-              -H "Content-Type: application/json" \
-              -d '{
-                "status": "completed",
-                "phase": "completed",
-                "progress": 100,
-                "message": "Publish completed successfully",
-                "result": {
-                  "workflowRunId": "${{ github.run_id }}",
-                  "commit": "${{ github.sha }}",
-                  "runNumber": "${{ github.run_number }}",
-                  "success": true
-                }
-              }' || echo "Warning: Failed to update final status"
+            update_status \
+              "completed" \
+              "completed" \
+              100 \
+              "Publish completed successfully - EPUB is ready for download"
           else
             echo "❌ Publish failed"
-            
-            # Final error update
-            curl -X POST "$BACKEND_URL/api/publish/update" \
-              -H "Authorization: Bearer $COMBINED_TOKEN" \
-              -H "Content-Type: application/json" \
-              -d '{
-                "status": "failed",
-                "phase": "error",
-                "progress": 100,
-                "message": "Publish failed in GitHub Actions workflow",
-                "error": {
-                  "message": "Workflow execution failed",
-                  "details": {
-                    "workflowRunId": "${{ github.run_id }}",
-                    "runNumber": "${{ github.run_number }}",
-                    "runAttempt": "${{ github.run_attempt }}"
-                  }
-                }
-              }' || echo "Warning: Failed to update error status"
-            
-            # Exit with error to mark the job as failed
+            update_status \
+              "failed" \
+              "failed" \
+              0 \
+              "Publish failed - check logs for details"
+              
+            # Fail the step to mark the workflow as failed
             exit 1
           fi

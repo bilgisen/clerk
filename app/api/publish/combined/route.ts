@@ -47,10 +47,15 @@ export async function GET(req: Request) {
     }
     
     // Get the token and clear it from the session (one-time use)
-    const combinedToken = session.combinedToken;
-    await updateSession(sessionId, { 
-      combinedToken: undefined 
-    });
+    const combinedToken = session.metadata?.combinedToken as string | undefined;
+    if (combinedToken) {
+      await updateSession(sessionId, { 
+        metadata: {
+          ...session.metadata,
+          combinedToken: undefined
+        }
+      });
+    }
     
     return NextResponse.json({ combinedToken });
     
