@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/db/drizzle';
 import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
-import { withGithubOidcAuth } from '@/middleware/auth';
+import { withGithubOidcAuth } from '@/middleware/old/auth';
 import { logger } from '@/lib/logger';
 
 // Schema for query parameters

@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/db/drizzle';
 import { books } from '@/db/schema';
 import { eq } from 'drizzle-orm';
-import { withGithubOidcAuth, type HandlerWithAuth, type AuthContextUnion } from '@/middleware/auth';
+import { withGithubOidcAuth, type HandlerWithAuth, type AuthContextUnion } from '@/middleware/old/auth';
 import { logger } from '@/lib/logger';
 import { z } from 'zod';
 

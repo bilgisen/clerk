@@ -1,6 +1,6 @@
 // app/api/ci/process/route.ts
 import { NextResponse } from 'next/server';
-import { withGithubOidcAuth } from '@/middleware/auth';
+import { withGithubOidcAuth } from '@/middleware/old/auth';
 import type { NextRequest } from 'next/server';
 import type { AuthContextUnion } from '@/types/auth';
 

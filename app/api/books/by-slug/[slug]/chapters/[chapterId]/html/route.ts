@@ -3,7 +3,7 @@ import { db } from '@/db/drizzle';
 import { books, chapters } from '@/db/schema';
 import { and, eq } from 'drizzle-orm';
 import { generateChapterHTML, generateCompleteDocumentHTML } from '@/lib/generateChapterHTML';
-import { withGithubOidcAuth, type AuthContextUnion, type HandlerWithAuth } from '@/middleware/auth';
+import { withGithubOidcAuth, type AuthContextUnion, type HandlerWithAuth } from '@/middleware/old/auth';
 import { logger } from '@/lib/logger';
 
 type GitHubOidcContext = Extract<AuthContextUnion, { type: 'github-oidc' }>;

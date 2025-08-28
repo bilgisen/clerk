@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 import { db } from '@/db/drizzle';
 import { books } from '@/db/schema';
 import { generateImprintHTML, type BookImprintData } from '@/lib/generateChapterHTML';
-import { withGithubOidcAuth, type HandlerWithAuth, type AuthContextUnion } from '@/middleware/auth';
+import { withGithubOidcAuth, type HandlerWithAuth, type AuthContextUnion } from '@/middleware/old/auth';
 import { eq } from 'drizzle-orm';
 import { logger } from '@/lib/logger';
 
