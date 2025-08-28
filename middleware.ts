@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { clerkMiddleware, auth as clerkAuth } from '@clerk/nextjs/server';
-import { authGateway, isAuthenticated } from './middleware/auth-gateway';
+import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
+import { authGateway } from './middleware/auth-gateway';
 
 declare module 'next/server' {
   interface NextRequest {
@@ -25,6 +25,7 @@ const PUBLIC_ROUTES = [
   '/sign-up(.*)',
   '/api/webhook(.*)',
   '/api/health',
+  '/api/publish/status(.*)',
 ];
 
 // Routes that should only use Clerk auth
@@ -55,75 +56,54 @@ const requiresAuth = (path: string): boolean => {
 const isClerkOnlyRoute = (path: string): boolean => {
   return CLERK_ONLY_ROUTES.some(route => {
     try {
-      const regex = new RegExp(`^/api/books/by-slug/[^/]+/publish$`);
+      const regex = new RegExp(`^${route.replace(/\[\^\/\]\+/g, '([^/]+)')}$`);
       return regex.test(path);
     } catch (e) {
-      console.error(`Invalid route pattern: ${route}`, e);
+      console.error(`Invalid Clerk-only route pattern: ${route}`, e);
       return false;
     }
   });
 };
 
 // Main middleware function
-export default async function middleware(request: NextRequest) {
-  const { pathname } = request.nextUrl;
+export default clerkMiddleware(async (auth, req) => {
+  const { pathname } = req.nextUrl;
 
-  // Skip middleware for public routes
+  // Skip public routes
   if (isPublicRoute(pathname)) {
     return NextResponse.next();
   }
 
-  // Handle Clerk-only routes
-  if (isClerkOnlyRoute(pathname)) {
-    try {
-      const session = await clerkAuth();
-      if (!session?.userId) {
+  // Handle API routes with auth gateway
+  if (pathname.startsWith('/api/')) {
+    // For Clerk-only routes, use Clerk's auth
+    if (isClerkOnlyRoute(pathname)) {
+      const session = await auth();
+      if (!session.userId) {
         return new NextResponse('Unauthorized', { status: 401 });
       }
-      // Set auth context for Clerk
-      request.authContext = {
-        authType: 'clerk',
-        userId: session.userId,
-        sessionId: session.sessionId || undefined,
-      };
       return NextResponse.next();
-    } catch (error) {
-      console.error('Clerk auth failed:', error);
-      return new NextResponse('Unauthorized', { status: 401 });
     }
-  }
 
-  // Handle API routes with the auth gateway
-  if (pathname.startsWith('/api/')) {
-    const response = await authGateway(request);
+    // For other API routes, use our auth gateway
+    const response = await authGateway(req);
     if (response) {
       return response;
     }
     
-    // Ensure the request is authenticated
-    if (!isAuthenticated(request)) {
-      return new NextResponse('Unauthorized', { status: 401 });
-    }
-
     return NextResponse.next();
   }
 
-  // Handle client-side routes with Clerk
-  try {
-    const { userId } = await clerkAuth();
-    if (!userId) {
-      const signInUrl = new URL('/sign-in', request.url);
-      signInUrl.searchParams.set('redirect_url', pathname);
-      return NextResponse.redirect(signInUrl);
-    }
-    return NextResponse.next();
-  } catch (error) {
-    console.error('Clerk authentication error:', error);
-    const signInUrl = new URL('/sign-in', request.url);
+  // For non-API routes, use Clerk's auth
+  const session = await auth();
+  if (!session.userId) {
+    const signInUrl = new URL('/sign-in', req.url);
     signInUrl.searchParams.set('redirect_url', pathname);
     return NextResponse.redirect(signInUrl);
   }
-}
+
+  return NextResponse.next();
+});
 
 export const config = {
   matcher: [
