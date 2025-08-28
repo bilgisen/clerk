@@ -1,8 +1,12 @@
-import { SignJWT, jwtVerify, JWTPayload } from 'jose';
-import { createPrivateKey, createPublicKey } from 'crypto';
+import { SignJWT, jwtVerify, JWTPayload, importPKCS8, importSPKI } from 'jose';
 
-const ALG = 'RS256';
+const ALG = 'EdDSA';
 const DEFAULT_TTL = 15 * 60; // 15 minutes in seconds
+
+// Debug logger
+function debugLog(message: string, data?: any) {
+  console.log(`[DEBUG][${new Date().toISOString()}] ${message}`, data || '');
+}
 
 export interface CombinedTokenPayload extends JWTPayload {
   // Standard claims
@@ -28,28 +32,45 @@ export interface CombinedTokenPayload extends JWTPayload {
   };
 }
 
-// Load and validate keys from environment
-function getKeys() {
-  if (!process.env.COMBINED_JWT_PRIVATE_KEY || !process.env.COMBINED_JWT_PUBLIC_KEY) {
-    throw new Error('JWT keys not configured in environment variables');
+// Load and validate EdDSA keys from environment
+async function getKeys() {
+  debugLog('Loading EdDSA JWT keys from environment...');
+  
+  const privateKeyPem = process.env.COMBINED_JWT_PRIVATE_KEY;
+  const publicKeyPem = process.env.COMBINED_JWT_PUBLIC_KEY;
+
+  if (!privateKeyPem || !publicKeyPem) {
+    const error = new Error('EdDSA JWT keys not configured in environment variables');
+    debugLog('Missing JWT keys in environment', {
+      hasPrivateKey: !!privateKeyPem,
+      hasPublicKey: !!publicKeyPem
+    });
+    throw error;
   }
 
-  // Decode base64 to PEM
-  const privateKeyPem = Buffer.from(process.env.COMBINED_JWT_PRIVATE_KEY, 'base64').toString('utf8');
-  const publicKeyPem = Buffer.from(process.env.COMBINED_JWT_PUBLIC_KEY, 'base64').toString('utf8');
-
-  // Validate PEM format
-  if (!privateKeyPem.startsWith('-----BEGIN PRIVATE KEY-----')) {
-    throw new Error('Invalid private key format');
+  try {
+    debugLog('Importing EdDSA keys...');
+    
+    // Import private key (PKCS#8 format expected)
+    const privateKey = await importPKCS8(privateKeyPem, ALG);
+    
+    // Import public key (SPKI format expected)
+    const publicKey = await importSPKI(publicKeyPem, ALG);
+    
+    debugLog('EdDSA keys imported successfully');
+    return { privateKey, publicKey };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorObj = error as Error & { code?: string };
+    
+    debugLog('Error in getKeys', {
+      error: errorMessage,
+      stack: errorObj.stack,
+      name: errorObj.name,
+      code: errorObj.code
+    });
+    throw new Error(`Failed to initialize EdDSA JWT keys: ${errorMessage}`);
   }
-  if (!publicKeyPem.startsWith('-----BEGIN PUBLIC KEY-----')) {
-    throw new Error('Invalid public key format');
-  }
-
-  return {
-    privateKey: createPrivateKey(privateKeyPem),
-    publicKey: createPublicKey(publicKeyPem)
-  };
 }
 
 export async function generateCombinedToken(
@@ -57,45 +78,88 @@ export async function generateCombinedToken(
   audience: string,
   expiresIn: string | number = DEFAULT_TTL
 ): Promise<string> {
-  const { privateKey } = getKeys();
+  const { privateKey } = await getKeys();
   
-  return new SignJWT({
+  const now = Math.floor(Date.now() / 1000);
+  const exp = typeof expiresIn === 'number' 
+    ? now + expiresIn 
+    : Math.floor(new Date(expiresIn).getTime() / 1000);
+
+  const payload: CombinedTokenPayload = {
+    sub: session.id,
+    aud: audience,
+    iat: now,
+    exp,
+    nbf: now,
+    jti: `ct_${session.id}_${Date.now()}`,
     session_id: session.id,
     user_id: session.userId,
     content_id: session.contentId,
     nonce: session.nonce,
-    gh: session.gh,
-  })
-    .setProtectedHeader({ alg: ALG, typ: 'JWT' })
-    .setSubject(session.id)
-    .setAudience(audience)
-    .setIssuedAt()
-    .setExpirationTime(typeof expiresIn === 'number' ? expiresIn : `${expiresIn}s`)
-    .sign(privateKey);
+    gh: session.gh
+  };
+
+  debugLog('Generating token with payload', payload);
+  
+  try {
+    const token = await new SignJWT(payload as any)
+      .setProtectedHeader({ 
+        alg: ALG,
+        typ: 'JWT' 
+      })
+      .setIssuedAt()
+      .setExpirationTime(exp)
+      .setNotBefore(now)
+      .setSubject(session.id)
+      .setAudience(audience)
+      .setJti(payload.jti!)
+      .sign(privateKey);
+
+    debugLog('Token generated successfully');
+    return token;
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    debugLog('Error generating token', { error: errorMessage });
+    throw new Error(`Failed to generate token: ${errorMessage}`);
+  }
 }
 
 export async function verifyCombinedToken(
   token: string,
   audience: string
 ): Promise<CombinedTokenPayload> {
-  const { publicKey } = getKeys();
+  const { publicKey } = await getKeys();
+  
+  debugLog('Verifying token', { token, audience });
   
   try {
     const { payload } = await jwtVerify(token, publicKey, {
       algorithms: [ALG],
       audience,
-      clockTolerance: 30, // 30 seconds clock skew tolerance
+      clockTolerance: 30, // 30 seconds leeway for clock skew
+      requiredClaims: ['exp', 'iat', 'sub', 'aud'],
+      typ: 'JWT'
     });
 
+    debugLog('Token verified successfully', { payload });
     return payload as CombinedTokenPayload;
-  } catch (error: any) {
-    if (error.code === 'ERR_JWT_EXPIRED') {
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorObj = error as Error & { code?: string };
+    
+    debugLog('Token verification failed', {
+      error: errorMessage,
+      code: errorObj.code,
+      stack: errorObj instanceof Error ? errorObj.stack : undefined
+    });
+    
+    if (errorObj.code === 'ERR_JWT_EXPIRED') {
       throw new Error('Token has expired');
     }
-    if (error.code === 'ERR_JWT_CLAIM_VALIDATION_FAILED') {
+    if (errorObj.code === 'ERR_JWT_CLAIM_VALIDATION_FAILED') {
       throw new Error('Invalid token claims');
     }
-    throw new Error('Invalid token: ' + error.message);
+    throw new Error(`Token verification failed: ${errorMessage}`);
   }
 }
 
