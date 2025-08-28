@@ -36,20 +36,24 @@ export interface CombinedTokenPayload extends JWTPayload {
 async function getKeys() {
   debugLog('Loading EdDSA JWT keys from environment...');
   
-  const privateKeyPem = process.env.COMBINED_JWT_PRIVATE_KEY;
-  const publicKeyPem = process.env.COMBINED_JWT_PUBLIC_KEY;
+  const privateKeyB64 = process.env.COMBINED_JWT_PRIVATE_KEY_B64;
+  const publicKeyB64 = process.env.COMBINED_JWT_PUBLIC_KEY_B64;
 
-  if (!privateKeyPem || !publicKeyPem) {
+  if (!privateKeyB64 || !publicKeyB64) {
     const error = new Error('EdDSA JWT keys not configured in environment variables');
     debugLog('Missing JWT keys in environment', {
-      hasPrivateKey: !!privateKeyPem,
-      hasPublicKey: !!publicKeyPem
+      hasPrivateKey: !!privateKeyB64,
+      hasPublicKey: !!publicKeyB64
     });
     throw error;
   }
 
   try {
-    debugLog('Importing EdDSA keys...');
+    debugLog('Decoding and importing EdDSA keys...');
+    
+    // Decode base64 to PEM format
+    const privateKeyPem = Buffer.from(privateKeyB64, 'base64').toString('utf-8');
+    const publicKeyPem = Buffer.from(publicKeyB64, 'base64').toString('utf-8');
     
     // Import private key (PKCS#8 format expected)
     const privateKey = await importPKCS8(privateKeyPem, ALG);
