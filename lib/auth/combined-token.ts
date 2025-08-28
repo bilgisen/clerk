@@ -8,32 +8,76 @@ function debugLog(message: string, data?: any) {
   console.log(`[DEBUG][${new Date().toISOString()}] ${message}`, data || '');
 }
 
-export interface CombinedTokenPayload extends JWTPayload {
-  // Standard claims
-  sub: string;          // Session ID
-  aud: string;          // Intended audience (e.g., 'clerk-actions')
-  iat: number;          // Issued at
-  exp: number;          // Expiration time
-  nbf?: number;         // Not before
-  jti?: string;         // JWT ID
-  
-  // Custom claims
-  session_id: string;   // Reference to the publish session
-  user_id: string;      // User who initiated the publish
-  content_id: string;   // Content being published
-  nonce: string;        // Nonce for replay protection
-  
-  // GitHub context (from OIDC token)
-  gh?: {
-    repository?: string;
-    run_id?: string;
-    workflow?: string;
-    sha?: string;
+export interface GitHubOIDCContext {
+  repository?: string;
+  run_id?: string;
+  run_number?: string;
+  workflow?: string;
+  sha?: string;
+  actor?: string;
+  event_name?: string;
+  ref?: string;
+  head_ref?: string;
+  base_ref?: string;
+}
+
+export interface GenerateTokenParams {
+  sessionId: string;
+  userId: string;
+  contentId: string;
+  nonce: string;
+  tokenType: 'user' | 'ci';
+  permissions?: {
+    can_publish?: boolean;
+    can_generate?: boolean;
+    can_manage?: boolean;
   };
+  gh?: GitHubOIDCContext;
+  metadata?: Record<string, unknown>;
+  status?: string;
+  progress?: number;
+  phase?: string;
+  message?: string;
+}
+
+export interface CombinedTokenPayload extends JWTPayload {
+  // Standard JWT claims
+  sub: string;      // Session ID (matches Redis session.id)
+  aud: string;      // Intended audience (e.g., 'clerk-actions')
+  iat: number;      // Issued at
+  exp: number;      // Expiration time
+  nbf: number;      // Not before
+  jti: string;      // JWT ID
+
+  // Session context (aligned with PublishSession)
+  session_id: string;  // Matches Redis session.id
+  user_id: string;     // Clerk user ID
+  content_id: string;  // Content being published
+  nonce: string;       // For replay protection
+  status?: string;     // Session status (pending, generating, completed, failed)
+  
+  // Token type and permissions
+  token_type: 'user' | 'ci';
+  permissions: {
+    can_publish: boolean;
+    can_generate: boolean;
+    can_manage: boolean;
+  };
+
+  // GitHub OIDC context (for CI tokens)
+  gh?: GitHubOIDCContext;
+  
+  // Additional metadata
+  metadata?: Record<string, unknown>;
+  
+  // Progress tracking (for long-running operations)
+  progress?: number;
+  phase?: string;
+  message?: string;
 }
 
 // Load and validate EdDSA keys from environment
-async function getKeys() {
+export async function getKeys() {
   debugLog('Loading EdDSA JWT keys from environment...');
   
   const privateKeyB64 = process.env.COMBINED_JWT_PRIVATE_KEY_B64;
@@ -78,45 +122,65 @@ async function getKeys() {
 }
 
 export async function generateCombinedToken(
-  session: { id: string; userId: string; contentId: string; nonce: string; gh?: any },
+  params: GenerateTokenParams,
   audience: string,
   expiresIn: string | number = DEFAULT_TTL
 ): Promise<string> {
   const { privateKey } = await getKeys();
-  
   const now = Math.floor(Date.now() / 1000);
   const exp = typeof expiresIn === 'number' 
     ? now + expiresIn 
     : Math.floor(new Date(expiresIn).getTime() / 1000);
 
   const payload: CombinedTokenPayload = {
-    sub: session.id,
+    // Standard JWT claims
+    sub: params.sessionId,
     aud: audience,
     iat: now,
     exp,
     nbf: now,
-    jti: `ct_${session.id}_${Date.now()}`,
-    session_id: session.id,
-    user_id: session.userId,
-    content_id: session.contentId,
-    nonce: session.nonce,
-    gh: session.gh
+    jti: `ct_${params.sessionId}_${Date.now()}`,
+
+    // Session context
+    session_id: params.sessionId,
+    user_id: params.userId,
+    content_id: params.contentId,
+    nonce: params.nonce,
+    status: params.status,
+    
+    // Token type and permissions
+    token_type: params.tokenType,
+    permissions: {
+      can_publish: params.permissions?.can_publish ?? false,
+      can_generate: params.permissions?.can_generate ?? false,
+      can_manage: params.permissions?.can_manage ?? false,
+    },
+
+    // GitHub OIDC context
+    ...(params.gh && { gh: params.gh }),
+    
+    // Additional metadata
+    ...(params.metadata && { metadata: params.metadata }),
+    
+    // Progress tracking
+    ...(params.progress !== undefined && { progress: params.progress }),
+    ...(params.phase && { phase: params.phase }),
+    ...(params.message && { message: params.message }),
   };
 
-  debugLog('Generating token with payload', payload);
-  
+  debugLog('Generating token with payload', { 
+    payload: { ...payload, privateKey: '***' } 
+  });
+
   try {
     const token = await new SignJWT(payload as any)
-      .setProtectedHeader({ 
-        alg: ALG,
-        typ: 'JWT' 
-      })
+      .setProtectedHeader({ alg: ALG, typ: 'JWT' })
       .setIssuedAt()
       .setExpirationTime(exp)
       .setNotBefore(now)
-      .setSubject(session.id)
+      .setSubject(params.sessionId)
       .setAudience(audience)
-      .setJti(payload.jti!)
+      .setJti(payload.jti)
       .sign(privateKey);
 
     debugLog('Token generated successfully');
@@ -132,20 +196,23 @@ export async function verifyCombinedToken(
   token: string,
   audience: string
 ): Promise<CombinedTokenPayload> {
+  // This function only verifies Combined Tokens (EdDSA)
+  // Clerk tokens should be verified and converted to Combined Tokens at the auth boundary
+
   const { publicKey } = await getKeys();
   
-  debugLog('Verifying token', { token, audience });
+  debugLog('Verifying combined token', { token, audience });
   
   try {
     const { payload } = await jwtVerify(token, publicKey, {
-      algorithms: [ALG],
+      algorithms: ['EdDSA'],
       audience,
       clockTolerance: 30, // 30 seconds leeway for clock skew
       requiredClaims: ['exp', 'iat', 'sub', 'aud'],
       typ: 'JWT'
     });
 
-    debugLog('Token verified successfully', { payload });
+    debugLog('Combined token verified successfully', { payload });
     return payload as CombinedTokenPayload;
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
@@ -167,17 +234,38 @@ export async function verifyCombinedToken(
   }
 }
 
+// Clerk token verification should happen in the auth boundary
+// and issue a new Combined Token for API use
+
 // For testing purposes
 export async function testTokenFlow() {
-  const testPayload = {
-    id: 'test-session-123',
+  const testPayload: GenerateTokenParams = {
+    sessionId: 'test-session-123',
     userId: 'user-123',
     contentId: 'content-456',
     nonce: 'random-nonce-789',
+    tokenType: 'ci',
+    permissions: {
+      can_publish: true,
+      can_generate: true,
+      can_manage: false
+    },
     gh: {
       repository: 'test/repo',
-      run_id: '123456789'
-    }
+      run_id: '123456789',
+      run_number: '1',
+      workflow: 'test-workflow',
+      sha: 'test-sha',
+      actor: 'test-actor',
+      event_name: 'push',
+      ref: 'refs/heads/main',
+      head_ref: 'test-head-ref',
+      base_ref: 'test-base-ref'
+    },
+    status: 'active',
+    progress: 0,
+    phase: 'testing',
+    message: 'Test token generation'
   };
 
   try {

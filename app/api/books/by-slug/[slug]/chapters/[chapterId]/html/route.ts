@@ -3,9 +3,8 @@ import { db } from '@/db/drizzle';
 import { books, chapters } from '@/db/schema';
 import { and, eq, sql } from 'drizzle-orm';
 import { generateChapterHTML, generateCompleteDocumentHTML } from '@/lib/generateChapterHTML';
-import { withCombinedToken } from '@/lib/middleware/withCombinedToken';
+import { withOidcOnly } from '@/lib/middleware/withOidcOnly';
 import { logger } from '@/lib/logger';
-import { getSession } from '@/lib/redis/session';
 
 // Configuration
 export const dynamic = 'force-dynamic';
@@ -30,7 +29,7 @@ interface RouteParams {
 async function handler(
   request: NextRequest,
   { params }: { params: { slug: string; chapterId: string } },
-  session: { sessionId: string; userId: string }
+  oidcClaims: any
 ) {
   try {
     const { slug, chapterId } = params;
@@ -38,15 +37,14 @@ async function handler(
     
     console.log(`[${new Date().toISOString()}] Request for book: ${slug}, chapter: ${chapterId}`);
 
-    // Get the current session for additional context
-    const currentSession = await getSession(session.sessionId);
-    if (!currentSession) {
-      logger.warn('Session not found', { sessionId: session.sessionId });
-      return new NextResponse(
-        JSON.stringify({ error: 'Session expired or invalid' }),
-        { status: 401, headers: { 'Content-Type': 'application/json' } }
-      );
-    }
+    // Log OIDC context for audit
+    logger.info('OIDC-authenticated chapter HTML request', {
+      repository: oidcClaims.repository,
+      workflow: oidcClaims.workflow,
+      run_id: oidcClaims.run_id,
+      bookSlug: slug,
+      chapterId
+    });
 
     // Get the book with proper error handling and access control
     let book: BookWithChapters | undefined;
@@ -230,9 +228,5 @@ async function handler(
   }
 }
 
-// Export the handler wrapped with combined token middleware
-export const GET = withCombinedToken(handler, {
-  requireSession: true,
-  requireUser: true,
-  requireBookAccess: true
-});
+// Export the handler wrapped with OIDC-only middleware
+export const GET = withOidcOnly(handler);

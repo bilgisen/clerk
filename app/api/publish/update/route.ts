@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { withCombinedToken } from "@/lib/middleware/with-combined-token";
+import { withPublishAuth } from "@/lib/auth/withPublishAuth";
 import { updatePublishProgress, completePublishSession, failPublishSession } from "@/lib/session-utils";
 
 export const dynamic = 'force-dynamic';
@@ -17,20 +17,27 @@ export interface UpdatePublishRequest {
   };
 }
 
-export async function POST(request: Request) {
-  const handler = withCombinedToken(async (req, session) => {
-    try {
-      const { status, progress, message, phase, result, error } = 
-        await req.json() as UpdatePublishRequest;
+export const POST = withPublishAuth(async (request, _, claims) => {
+  try {
+    // Ensure this is an OIDC-authenticated request
+    if (claims.authType !== 'github-oidc') {
+      return NextResponse.json(
+        { error: 'This endpoint requires OIDC authentication' },
+        { status: 401 }
+      );
+    }
 
-      if (!session?.tokenPayload?.session_id) {
-        return NextResponse.json(
-          { error: "Invalid session", code: "INVALID_SESSION" },
-          { status: 400 }
-        );
-      }
+    const { status, progress, message, phase, result, error } = 
+      await request.json() as UpdatePublishRequest;
 
-      const sessionId = session.tokenPayload.session_id;
+    if (!claims.sid) {
+      return NextResponse.json(
+        { error: "Invalid session ID in token", code: "INVALID_SESSION" },
+        { status: 400 }
+      );
+    }
+
+    const sessionId = claims.sid;
       let updatedSession;
 
       switch (status) {
@@ -91,25 +98,22 @@ export async function POST(request: Request) {
         updatedAt: updatedSession.updatedAt
       });
 
-    } catch (error) {
-      console.error("Publish update error:", error);
-      
-      if (error instanceof Error) {
-        return NextResponse.json(
-          { 
-            error: error.message, 
-            code: error.name === 'Error' ? 'UPDATE_ERROR' : error.name 
-          },
-          { status: 400 }
-        );
-      }
-      
+  } catch (error) {
+    console.error("Publish update error:", error);
+    
+    if (error instanceof Error) {
       return NextResponse.json(
-        { error: "Internal server error", code: "INTERNAL_SERVER_ERROR" },
-        { status: 500 }
+        { 
+          error: error.message, 
+          code: error.name === 'Error' ? 'UPDATE_ERROR' : error.name 
+        },
+        { status: 400 }
       );
     }
-  });
-
-  return handler(request);
-}
+    
+    return NextResponse.json(
+      { error: "Internal server error", code: "INTERNAL_SERVER_ERROR" },
+      { status: 500 }
+    );
+  }
+});

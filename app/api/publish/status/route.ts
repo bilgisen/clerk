@@ -12,8 +12,15 @@ type StatusUpdate = {
   metadata?: Record<string, any>;
 };
 
-// Protected route that requires a valid combined token
+// Protected route that requires OIDC token
 export const POST = withPublishAuth(async (request, _, claims) => {
+  // Ensure this is an OIDC-authenticated request
+  if (claims.authType !== 'github-oidc') {
+    return NextResponse.json(
+      { error: 'This endpoint requires OIDC authentication' },
+      { status: 401 }
+    );
+  }
   try {
     const { status, message } = await request.json();
     
@@ -42,7 +49,7 @@ export const POST = withPublishAuth(async (request, _, claims) => {
   }
 });
 
-// Get the current status of a publish session
+// Get the current status of a publish session (public endpoint)
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);

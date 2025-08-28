@@ -3,7 +3,8 @@ import { db } from '@/db';
 import { books } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
-import { verifySecretToken } from '@/lib/auth/verifySecret';
+import { withOidcOnly } from '@/lib/middleware/withOidcOnly';
+import { logger } from '@/lib/logger';
 
 // Schema for request body validation
 const UpdateEpubSchema = z.object({
@@ -11,30 +12,37 @@ const UpdateEpubSchema = z.object({
 });
 
 // POST /api/books/by-id/[id]/epub
-// Protected by secret token. Called by CI after uploading EPUB to R2.
-// Headers: { Authorization: 'Bearer PAYLOAD_71y15GYgRYGMe16a4' }
+// Protected by GitHub OIDC. Called by CI after uploading EPUB to R2.
+// Headers: { Authorization: 'Bearer <github-oidc-token>' }
 // Body: { epubUrl: string }
-export async function POST(
+async function handler(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: { id: string } },
+  oidcClaims: any
 ) {
   try {
-    // Verify secret token
-    const isAuthenticated = await verifySecretToken(req);
-    if (!isAuthenticated) {
-      return NextResponse.json(
-        { error: 'unauthorized', message: 'Invalid or missing authentication token' },
-        { status: 401 }
-      );
-    }
+    // Log OIDC context for audit
+    logger.info('OIDC-authenticated EPUB update request', {
+      repository: oidcClaims.repository,
+      workflow: oidcClaims.workflow,
+      run_id: oidcClaims.run_id,
+      bookId: params.id
+    });
 
     // Extract book ID from params
     const { id } = params;
+    
+    if (!id) {
+      return NextResponse.json(
+        { error: 'missing_book_id', message: 'Book ID is required' },
+        { status: 400 }
+      );
+    }
 
     // Validate book ID format (should be a valid UUID)
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (!id || !uuidRegex.test(id)) {
-      console.error('Invalid book ID format:', id);
+      logger.error('Invalid book ID format', { bookId: id });
       return NextResponse.json(
         { error: 'invalid_book_id', message: 'Invalid book ID format' }, 
         { status: 400 }
@@ -61,7 +69,7 @@ export async function POST(
       
       body = validation.data;
     } catch (error) {
-      console.error('Error parsing request body:', error);
+      logger.error('Error updating EPUB URL', { error, bookId: id });
       return NextResponse.json(
         { error: 'invalid_json', message: 'Invalid JSON in request body' },
         { status: 400 }
@@ -120,3 +128,6 @@ export async function POST(
     );
   }
 }
+
+// Export the handler wrapped with OIDC-only middleware
+export const POST = withOidcOnly(handler);

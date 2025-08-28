@@ -1,10 +1,9 @@
 // app/api/books/by-id/[id]/payload/route.ts
 import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/db/drizzle';
-import { books, chapters } from '@/db/schema';
 import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
-import { withCombinedToken } from '@/lib/middleware/withCombinedToken';
+import { withOidcOnly } from '@/lib/middleware/withOidcOnly';
 import { logger } from '@/lib/logger';
 
 // Schema for query parameters
@@ -174,7 +173,7 @@ function getBaseUrl(request: NextRequest): string {
 async function handler(
   request: NextRequest,
   { params }: { params: { id: string } },
-  session: { sessionId: string; userId: string }
+  oidcClaims: any
 ) {
   try {
     // Parse and validate query parameters
@@ -186,23 +185,15 @@ async function handler(
     const baseUrl = getBaseUrl(request);
     const bookId = params.id;
 
-    // Get the book with user relation to verify ownership
+    // Get the book
     const book = await db.query.books.findFirst({
       where: (books, { eq }) => eq(books.id, bookId),
-      with: {
-        user: {
-          columns: {
-            id: true
-          }
-        }
-      }
     });
 
     if (!book) {
       logger.warn({
         message: 'Book not found',
         bookId,
-        userId: session.userId
       });
       return NextResponse.json(
         { 
@@ -210,23 +201,6 @@ async function handler(
           code: 'BOOK_NOT_FOUND'
         },
         { status: 404 }
-      );
-    }
-
-    // Verify the user has access to the book
-    if (book.user.id !== session.userId) {
-      logger.warn({
-        message: 'Unauthorized access attempt',
-        bookId, 
-        userId: session.userId,
-        bookOwnerId: book.user.id
-      });
-      return NextResponse.json(
-        { 
-          error: 'Unauthorized',
-          code: 'UNAUTHORIZED_ACCESS'
-        },
-        { status: 403 }
       );
     }
 
@@ -243,6 +217,14 @@ async function handler(
     const chapterTree = buildChapterTree(chapterResults);
     const flattenedChapters = flattenChapterTree(chapterTree, book.slug, baseUrl);
     
+    // Log the OIDC claims for auditing
+    logger.info('OIDC-authenticated request', {
+      repository: oidcClaims.repository,
+      workflow: oidcClaims.workflow,
+      run_id: oidcClaims.run_id,
+      bookId
+    });
+
     // Prepare the payload
     const payload: EbookPayload = {
       book: {
@@ -275,8 +257,6 @@ async function handler(
       message: 'Generated book payload',
       bookId,
       chapterCount: flattenedChapters.length,
-      userId: session.userId,
-      sessionId: session.sessionId
     });
     
     return NextResponse.json(payload);
@@ -290,8 +270,6 @@ async function handler(
       error: new Error(errorMessage),
       stack: errorStack,
       bookId: params.id,
-      userId: session?.userId,
-      sessionId: session?.sessionId
     });
     
     const status = error instanceof z.ZodError ? 400 : 500;
@@ -304,33 +282,5 @@ async function handler(
   }
 }
 
-// Helper function to verify book access
-async function verifyBookAccess(bookId: string, userId: string): Promise<boolean> {
-  try {
-    const book = await db.query.books.findFirst({
-      where: (books, { and, eq }) => and(
-        eq(books.id, bookId),
-        eq(books.userId, userId)
-      ),
-      columns: { id: true }
-    });
-    
-    return !!book;
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    logger.error({
-      message: 'Error verifying book access',
-      error: new Error(errorMessage),
-      bookId, 
-      userId 
-    });
-    return false;
-  }
-}
-
-// Export the handler wrapped with combined token middleware
-export const GET = withCombinedToken(handler, {
-  requireSession: true,
-  requireUser: true,
-  requireBookAccess: true
-});
+// Export the handler wrapped with OIDC-only middleware
+export const GET = withOidcOnly(handler);

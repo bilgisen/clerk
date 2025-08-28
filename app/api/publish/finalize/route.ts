@@ -21,6 +21,14 @@ type FinalizeRequest = {
 
 export const POST = withPublishAuth(async (request, _, claims) => {
   try {
+    // Ensure this is an OIDC-authenticated request
+    if (claims.authType !== 'github-oidc') {
+      return NextResponse.json(
+        { error: 'This endpoint requires OIDC authentication' },
+        { status: 401 }
+      );
+    }
+
     const { success, result, error } = (await request.json()) as FinalizeRequest;
     
     // Update the session in Redis as completed

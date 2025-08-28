@@ -3,9 +3,8 @@ import { db } from '@/db/drizzle';
 import { books } from '@/db/schema';
 import { and, eq } from 'drizzle-orm';
 import { generateImprintHTML } from '@/lib/generateChapterHTML';
-import { withCombinedToken } from '@/lib/middleware/withCombinedToken';
+import { withOidcOnly } from '@/lib/middleware/withOidcOnly';
 import { logger } from '@/lib/logger';
-import { getSession } from '@/lib/redis/session';
 
 // Configuration
 export const dynamic = 'force-dynamic';
@@ -18,27 +17,24 @@ type Book = typeof books.$inferSelect;
 async function handler(
   request: NextRequest,
   { params }: { params: { slug: string } },
-  session: { sessionId: string; userId: string }
+  oidcClaims: any
 ) {
   const requestStart = Date.now();
   const { searchParams } = new URL(request.url);
   const format = searchParams.get('format') || 'html';
   
-  // Get the current session for additional context
-  const currentSession = await getSession(session.sessionId);
-  if (!currentSession) {
-    logger.warn('Session not found', { sessionId: session.sessionId });
-    return NextResponse.json(
-      { error: 'Session expired or invalid' },
-      { status: 401 }
-    );
-  }
+  // Log OIDC context for audit
+  logger.info('OIDC-authenticated imprint request', {
+    repository: oidcClaims.repository,
+    workflow: oidcClaims.workflow,
+    run_id: oidcClaims.run_id,
+    bookSlug: params.slug
+  });
 
   if (format !== 'html' && format !== 'json') {
     logger.warn('Invalid format requested', { 
       format,
-      slug: params.slug,
-      userId: session.userId
+      slug: params.slug
     });
     
     return NextResponse.json(
@@ -199,9 +195,5 @@ async function handler(
   }
 }
 
-// Export the handler wrapped with combined token middleware
-export const GET = withCombinedToken(handler, {
-  requireSession: true,
-  requireUser: true,
-  requireBookAccess: true
-});
+// Export the handler wrapped with OIDC-only middleware
+export const GET = withOidcOnly(handler);

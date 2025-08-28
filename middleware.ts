@@ -1,32 +1,18 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { clerkMiddleware } from '@clerk/nextjs/server';
-import { verifyGithubOidc } from './lib/auth/github-oidc';
-import { verifySecretToken } from './lib/auth/verifySecret';
-import { verifyCombinedToken } from './lib/auth/combined';
+import { clerkMiddleware, auth as clerkAuth } from '@clerk/nextjs/server';
+import { authGateway, isAuthenticated } from './middleware/auth-gateway';
 
-declare module '@clerk/nextjs/server' {
-  interface AuthObject {
-    userId: string | null;
-    sessionId: string | null;
-    getToken: () => Promise<string | null>;
+declare module 'next/server' {
+  interface NextRequest {
+    authContext?: {
+      authType: 'clerk' | 'github-oidc' | 'unauthorized';
+      userId?: string;
+      sessionId?: string;
+      claims?: Record<string, any>;
+    };
   }
 }
-
-// Routes that allow secret token authentication
-const SECRET_TOKEN_ROUTES = [
-  '/api/debug/(.*)'
-];
-
-// Routes that require combined token authentication
-const COMBINED_TOKEN_ROUTES = [
-  '/api/books/by-id/(.*)/payload',
-  '/api/books/by-slug/(.*)/imprint',
-  '/api/books/by-slug/(.*)/chapters/(.*)/html',
-  '/api/books/by-slug/(.*)/chapters/(.*)/content',
-  '/api/books/by-id/(.*)/epub',
-  '/api/ci/process',
-];
 
 // Public routes that don't require authentication
 const PUBLIC_ROUTES = [
@@ -37,34 +23,18 @@ const PUBLIC_ROUTES = [
   '/favicon.ico',
   '/sign-in(.*)',
   '/sign-up(.*)',
+  '/api/webhook(.*)',
+  '/api/health',
 ];
 
-// Check if path matches any of the patterns
-const isPathMatching = (path: string, patterns: string[]): boolean => {
-  return patterns.some(pattern => {
-    try {
-      const regex = new RegExp(`^${pattern.replace(/\*/g, '.*')}$`);
-      return regex.test(path);
-    } catch (e) {
-      console.error(`Invalid regex pattern: ${pattern}`, e);
-      return false;
-    }
-  });
-};
+// Routes that should only use Clerk auth
+const CLERK_ONLY_ROUTES = [
+  '/api/books/by-slug/[^/]+/publish',
+];
 
 // Check if a path is a public route
 const isPublicRoute = (path: string): boolean => {
-  const publicRoutes = [
-    '/',
-    '/api/webhook(.*)',
-    '/api/health',
-    '/sign-in(.*)',
-    '/sign-up(.*)',
-    '/_next(.*)',
-    '/favicon.ico',
-  ];
-  
-  return publicRoutes.some(route => {
+  return PUBLIC_ROUTES.some(route => {
     try {
       const regex = new RegExp(`^${route.replace(/\*\*$/, '.*')}$`);
       return regex.test(path);
@@ -75,145 +45,85 @@ const isPublicRoute = (path: string): boolean => {
   });
 };
 
-// Create a matcher for protected routes
-const isProtectedRoute = (request: NextRequest): boolean => {
-  const { pathname } = request.nextUrl;
-  const combinedTokenRoutes = [
-    "/api/publish/status",
-    "/api/publish/finalize",
-    "/api/books/[id]/epub",
-    "/api/ci/process",
-  ];
-
-  const secretTokenRoutes = [
-    "/api/webhooks/github",
-  ];
-
-  const requiresCombinedToken = combinedTokenRoutes.some(route => {
-    const routeRegex = new RegExp(`^${route.replace(/\[.*?\]/g, '[^/]+')}(?:/.*)?$`);
-    return routeRegex.test(pathname);
-  });
-
-  const requiresSecretToken = secretTokenRoutes.some(route => {
-    const routeRegex = new RegExp(`^${route.replace(/\[.*?\]/g, '[^/]+')}(?:/.*)?$`);
-    return routeRegex.test(pathname);
-  });
-
-  return requiresCombinedToken || requiresSecretToken;
+// Check if a path requires authentication
+const requiresAuth = (path: string): boolean => {
+  // All API routes except public ones require auth
+  return path.startsWith('/api/') && !isPublicRoute(path);
 };
 
-// Handle secret token authentication for API routes
-async function handleSecretTokenAuth(request: NextRequest): Promise<NextResponse | null> {
-  const authHeader = request.headers.get('authorization');
-  const secretToken = authHeader?.split(' ')[1];
-
-  if (!secretToken) {
-    return NextResponse.json(
-      { error: 'Missing authorization token' },
-      { status: 401 }
-    ) as NextResponse<{ error: string }>;
-  }
-
-  try {
-    const isValid = await verifySecretToken(request);
-    if (!isValid) {
-      throw new Error('Invalid token');
+// Check if a path should use Clerk auth only
+const isClerkOnlyRoute = (path: string): boolean => {
+  return CLERK_ONLY_ROUTES.some(route => {
+    try {
+      const regex = new RegExp(`^/api/books/by-slug/[^/]+/publish$`);
+      return regex.test(path);
+    } catch (e) {
+      console.error(`Invalid route pattern: ${route}`, e);
+      return false;
     }
-    return null;
-  } catch (error) {
-    return NextResponse.json(
-      { error: 'Invalid or expired token' },
-      { status: 403 }
-    ) as NextResponse<{ error: string }>;
-  }
-}
+  });
+};
 
-// Handle combined token authentication for API routes
-async function handleCombinedTokenAuth(request: NextRequest): Promise<NextResponse> {
-  const authHeader = request.headers.get('authorization');
-  const token = authHeader?.split(' ')[1];
-
-  if (!token) {
-    return NextResponse.json(
-      { error: 'Authorization token required' },
-      { status: 401 }
-    ) as NextResponse<{ error: string }>;
-  }
-
-  try {
-    await verifyCombinedToken(token);
-    return NextResponse.next() as NextResponse;
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Invalid or expired token';
-    return NextResponse.json(
-      { error: errorMessage },
-      { status: 403 }
-    ) as NextResponse<{ error: string }>;
-  }
-}
-
-// Handle API authentication based on route
-async function handleApiAuth(request: NextRequest): Promise<NextResponse | null> {
+// Main middleware function
+export default async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  
-  try {
-    // Check for combined token routes
-    if (isPathMatching(pathname, COMBINED_TOKEN_ROUTES)) {
-      return await handleCombinedTokenAuth(request);
-    }
-    
-    // Fall back to secret token auth for other protected routes
-    if (isPathMatching(pathname, SECRET_TOKEN_ROUTES)) {
-      const result = await handleSecretTokenAuth(request);
-      return result;
-    }
-    
-    // No auth required for this route
-    return null;
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Authentication failed';
-    return NextResponse.json(
-      { error: errorMessage },
-      { status: 500 }
-    ) as NextResponse<{ error: string }>;
-  }
-}
 
-// Custom middleware function
-export default clerkMiddleware(async (auth, req) => {
-  const authResult = await auth();
-  const userId = authResult.userId;
-  const { pathname } = req.nextUrl;
-  
   // Skip middleware for public routes
   if (isPublicRoute(pathname)) {
     return NextResponse.next();
   }
-  
-  // Handle API authentication for protected routes
-  if (pathname.startsWith('/api/')) {
-    const apiResponse = await handleApiAuth(req);
-    if (apiResponse) {
-      return apiResponse;
-    }
-    
-    // If no specific API handler, ensure user is authenticated
-    if (!userId) {
+
+  // Handle Clerk-only routes
+  if (isClerkOnlyRoute(pathname)) {
+    try {
+      const session = await clerkAuth();
+      if (!session?.userId) {
+        return new NextResponse('Unauthorized', { status: 401 });
+      }
+      // Set auth context for Clerk
+      request.authContext = {
+        authType: 'clerk',
+        userId: session.userId,
+        sessionId: session.sessionId || undefined,
+      };
+      return NextResponse.next();
+    } catch (error) {
+      console.error('Clerk auth failed:', error);
       return new NextResponse('Unauthorized', { status: 401 });
     }
+  }
+
+  // Handle API routes with the auth gateway
+  if (pathname.startsWith('/api/')) {
+    const response = await authGateway(request);
+    if (response) {
+      return response;
+    }
     
+    // Ensure the request is authenticated
+    if (!isAuthenticated(request)) {
+      return new NextResponse('Unauthorized', { status: 401 });
+    }
+
     return NextResponse.next();
   }
-  
-  // Handle protected client-side routes
-  if (!userId) {
-    const signInUrl = new URL('/sign-in', req.url);
+
+  // Handle client-side routes with Clerk
+  try {
+    const { userId } = await clerkAuth();
+    if (!userId) {
+      const signInUrl = new URL('/sign-in', request.url);
+      signInUrl.searchParams.set('redirect_url', pathname);
+      return NextResponse.redirect(signInUrl);
+    }
+    return NextResponse.next();
+  } catch (error) {
+    console.error('Clerk authentication error:', error);
+    const signInUrl = new URL('/sign-in', request.url);
     signInUrl.searchParams.set('redirect_url', pathname);
     return NextResponse.redirect(signInUrl);
   }
-  
-  return NextResponse.next();
-});
+}
 
 export const config = {
   matcher: [

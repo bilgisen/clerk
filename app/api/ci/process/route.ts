@@ -1,6 +1,6 @@
 // app/api/ci/process/route.ts
 import { NextResponse, NextRequest } from 'next/server';
-import { verifySecretToken } from '@/lib/auth/verifySecret';
+import { withPublishAuth } from '@/lib/auth/withPublishAuth';
 
 // Basic in-memory idempotency cache (replace with Redis in production)
 const IDEMPOTENCY_TTL_MS = 10 * 60 * 1000; // 10 minutes
@@ -30,18 +30,17 @@ async function readJsonSafe(body: ReadableStream<Uint8Array> | null): Promise<an
 }
 
 // POST /api/ci/process
-// Protected by secret token. Called by CI to trigger content processing.
+// Protected by OIDC token. Called by CI to trigger content processing.
 // Headers: { 
-//   Authorization: 'Bearer PAYLOAD_71y15GYgRYGMe16a4',
+//   Authorization: 'Bearer <OIDC_TOKEN>',
 //   'Idempotency-Key': 'unique-request-id'
 // }
 // Body: { contentId: string, mode?: string }
-export async function POST(req: NextRequest) {
-  // Verify secret token first
-  const isAuthenticated = await verifySecretToken(req);
-  if (!isAuthenticated) {
+export const POST = withPublishAuth(async (req, _, claims) => {
+  // Ensure this is an OIDC-authenticated request
+  if (claims.authType !== 'github-oidc') {
     return NextResponse.json(
-      { error: 'unauthorized', message: 'Invalid or missing authentication token' },
+      { error: 'unauthorized', message: 'This endpoint requires OIDC authentication' },
       { status: 401 }
     );
   }
@@ -105,7 +104,13 @@ export async function POST(req: NextRequest) {
       },
       _links: {
         status: { href: `/api/jobs/${jobId}` },
-        cancel: { href: `/api/jobs/${jobId}`, method: 'DELETE' }
+        cancel: { 
+          href: `/api/jobs/${jobId}`, 
+          method: 'DELETE', 
+          headers: {
+            Authorization: 'Bearer <OIDC_TOKEN>'
+          } 
+        }
       }
     };
 
@@ -121,7 +126,7 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     );
   }
-}
+});
 
 // GET /api/ci/process/health
 // Public health check endpoint

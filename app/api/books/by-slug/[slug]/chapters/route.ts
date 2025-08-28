@@ -13,12 +13,16 @@ export async function GET(
   request: Request,
   context: { params: Promise<{ slug: string }> }
 ) {
-  const { slug } = await context.params;
-
   try {
+    const { slug } = await context.params;
+    
+    // Ensure user is authenticated with Clerk
     const user = await currentUser();
     if (!user) {
-      return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+      return NextResponse.json(
+        { error: 'Authentication required' }, 
+        { status: 401 }
+      );
     }
 
     const [dbUser] = await db
@@ -31,6 +35,7 @@ export async function GET(
       return NextResponse.json({ error: 'User not found in database' }, { status: 404 });
     }
 
+    // Verify the book exists and belongs to the user
     const book = await db.query.books.findFirst({
       where: (booksTable, { eq, and: andFn }) => {
         return andFn(
@@ -129,12 +134,17 @@ export async function POST(
   request: Request,
   context: { params: Promise<{ slug: string }> }
 ) {
-  const { slug } = await context.params;
-
   try {
+    const { slug } = await context.params;
+    const body = await request.json();
+    
+    // Ensure user is authenticated with Clerk
     const user = await currentUser();
     if (!user) {
-      return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+      return NextResponse.json(
+        { error: 'Authentication required' }, 
+        { status: 401 }
+      );
     }
 
     const [dbUser] = await db
@@ -147,20 +157,26 @@ export async function POST(
       return NextResponse.json({ error: 'User not found in database' }, { status: 404 });
     }
 
+    // Verify the book exists and belongs to the user
     const book = await db.query.books.findFirst({
       where: (booksTable, { eq, and: andFn }) => {
         return andFn(
           eq(booksTable.slug, slug as string),
           eq(booksTable.userId, dbUser.id)
         );
-      }
+      },
+      columns: {
+        id: true,
+      },
     });
 
     if (!book) {
-      return NextResponse.json({ error: 'Book not found' }, { status: 404 });
+      return NextResponse.json(
+        { error: 'Book not found or access denied' }, 
+        { status: 404 }
+      );
     }
 
-    const body = await request.json();
     const { title, content, parentChapterId, order, level = 0 } = body;
 
     if (!title) {
@@ -181,7 +197,13 @@ export async function POST(
 
     return NextResponse.json(newChapter[0]);
   } catch (error) {
-    console.error('Error creating chapter:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    console.error('Error in POST /api/books/by-slug/[slug]/chapters:', error);
+    return NextResponse.json(
+      { 
+        error: 'An unexpected error occurred',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      },
+      { status: 500 }
+    );
   }
 }

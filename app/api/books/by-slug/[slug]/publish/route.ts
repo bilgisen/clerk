@@ -38,7 +38,7 @@ export async function POST(
     // Deduct 10 credits for EPUB publishing
     const creditResult = await creditService.spendCredits({
       userId: user.id,
-      amount: 10,
+      amount: 200,
       reason: 'epub_publish',
       idempotencyKey: `publish-epub:${user.id}:${Date.now()}`,
       ref: slug,

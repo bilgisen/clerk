@@ -44,10 +44,18 @@ export async function GET(
     });
     if (!chapter) return NextResponse.json({ error: 'Chapter not found' }, { status: 404 });
 
+    // Return the chapter data
     return NextResponse.json(chapter);
-  } catch (err) {
-    console.error('Error fetching chapter:', err);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    
+  } catch (error) {
+    console.error('Error in GET /api/books/by-slug/[slug]/chapters/[chapterId]:', error);
+    return NextResponse.json(
+      { 
+        error: 'An unexpected error occurred',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      }, 
+      { status: 500 }
+    );
   }
 }
 
@@ -57,13 +65,21 @@ export async function PATCH(
   context: { params: { slug: string; chapterId: string } }
 ) {
   try {
+    // Ensure user is authenticated with Clerk
     const user = await currentUser();
-    if (!user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+    if (!user) {
+      return NextResponse.json(
+        { error: 'Authentication required' }, 
+        { status: 401 }
+      );
+    }
 
-    // Await params before destructuring
-    const { slug, chapterId } = await context.params;
+    const { slug, chapterId } = context.params;
     if (!slug || !chapterId) {
-      return NextResponse.json({ error: 'Book slug and chapter ID are required' }, { status: 400 });
+      return NextResponse.json(
+        { error: 'Book slug and chapter ID are required' }, 
+        { status: 400 }
+      );
     }
 
     const [dbUser] = await db.select({ id: users.id }).from(users).where(eq(users.clerkId, user.id)).limit(1);
@@ -99,20 +115,35 @@ export async function PATCH(
     if (order !== undefined) updateData.order = order;
     if (level !== undefined) updateData.level = level;
 
-    const [updatedChapter] = await db
+    // Update the chapter if it belongs to the book
+    const [chapter] = await db
       .update(chapters)
       .set(updateData)
-      .where(and(eq(chapters.id, chapterId), eq(chapters.bookId, book.id)))
+      .where(
+        and(
+          eq(chapters.id, chapterId), 
+          eq(chapters.bookId, book.id)
+        )
+      )
       .returning();
 
-    if (!updatedChapter) {
-      return NextResponse.json({ error: 'Chapter not found or not updated' }, { status: 404 });
+    if (!chapter) {
+      return NextResponse.json(
+        { error: 'Chapter not found or access denied' }, 
+        { status: 404 }
+      );
     }
 
-    return NextResponse.json(updatedChapter);
-  } catch (err) {
-    console.error('Error updating chapter:', err);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json(chapter);
+  } catch (error) {
+    console.error('Error in PATCH /api/books/by-slug/[slug]/chapters/[chapterId]:', error);
+    return NextResponse.json(
+      { 
+        error: 'An unexpected error occurred',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      }, 
+      { status: 500 }
+    );
   }
 }
 
@@ -122,13 +153,21 @@ export async function DELETE(
   context: { params: { slug: string; chapterId: string } }
 ) {
   try {
+    // Ensure user is authenticated with Clerk
     const user = await currentUser();
-    if (!user) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+    if (!user) {
+      return NextResponse.json(
+        { error: 'Authentication required' }, 
+        { status: 401 }
+      );
+    }
 
-    // Await params before destructuring
-    const { slug, chapterId } = await context.params;
+    const { slug, chapterId } = context.params;
     if (!slug || !chapterId) {
-      return NextResponse.json({ error: 'Book slug and chapter ID are required' }, { status: 400 });
+      return NextResponse.json(
+        { error: 'Book slug and chapter ID are required' }, 
+        { status: 400 }
+      );
     }
 
     const [dbUser] = await db.select({ id: users.id }).from(users).where(eq(users.clerkId, user.id)).limit(1);
@@ -144,15 +183,33 @@ export async function DELETE(
     });
     if (!chapter) return NextResponse.json({ error: 'Chapter not found' }, { status: 404 });
 
-    await db.delete(chapters).where(and(eq(chapters.id, chapterId), eq(chapters.bookId, book.id)));
+    // Delete the chapter if it belongs to the book
+    const [deletedChapter] = await db
+      .delete(chapters)
+      .where(
+        and(
+          eq(chapters.id, chapterId), 
+          eq(chapters.bookId, book.id)
+        )
+      )
+      .returning();
 
-    return NextResponse.json({
-      success: true,
-      message: 'Chapter deleted successfully',
-      deletedChapterId: chapterId,
-    });
-  } catch (err) {
-    console.error('Error deleting chapter:', err);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    if (!deletedChapter) {
+      return NextResponse.json(
+        { error: 'Chapter not found or access denied' }, 
+        { status: 404 }
+      );
+    }
+
+    return new NextResponse(null, { status: 204 });
+  } catch (error) {
+    console.error('Error in DELETE /api/books/by-slug/[slug]/chapters/[chapterId]:', error);
+    return NextResponse.json(
+      { 
+        error: 'An unexpected error occurred',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      }, 
+      { status: 500 }
+    );
   }
 }
