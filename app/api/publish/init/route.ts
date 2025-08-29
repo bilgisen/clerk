@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { withClerkAuth } from "@/middleware/auth";
-import { initializePublishSession } from "@/lib/session-utils";
+import { initializePublishSession } from '@/lib/publish/session-utils';
 import { PublishStatus } from "@/lib/store/redis";
 import { logger } from "@/lib/logger";
 import type { NextRequest } from "next/server";

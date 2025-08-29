@@ -1,21 +1,29 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { auth, currentUser } from '@clerk/nextjs/server';
+import { auth, currentUser, type User as ClerkUser } from '@clerk/nextjs/server';
 import { verifyGitHubOidcToken } from './github-oidc';
 
 export type AuthType = 'clerk' | 'github-oidc' | 'unauthorized';
 
 interface ClerkSession {
-  userId: string;
-  sessionId: string;
+  userId: string | null;
+  sessionId: string | null;
   getToken: () => Promise<string | null>;
 }
+
+// Define a type that represents the shape of Clerk user data we want to expose
+type ClerkUserClaims = {
+  id: string;
+  externalId: string | null;
+  // Add other Clerk user properties as needed
+  [key: string]: unknown;
+};
 
 export interface ClerkAuthContext {
   type: 'clerk';
   userId: string;
   sessionId: string;
-  claims?: Record<string, unknown>;
+  claims: ClerkUserClaims;
 }
 
 export interface GitHubOidcAuthContext {
@@ -31,7 +39,21 @@ export interface GitHubOidcAuthContext {
   runId: string;
 }
 
-export type AuthContextUnion = ClerkAuthContext | GitHubOidcAuthContext | { type: 'unauthorized' };
+export interface UnauthorizedContext {
+  type: 'unauthorized';
+}
+
+export type AuthContextUnion = ClerkAuthContext | GitHubOidcAuthContext | UnauthorizedContext;
+
+// Type guards
+const isClerkAuthContext = (context: AuthContextUnion): context is ClerkAuthContext => 
+  context.type === 'clerk';
+
+const isGitHubOidcAuthContext = (context: AuthContextUnion): context is GitHubOidcAuthContext => 
+  context.type === 'github-oidc';
+
+const isUnauthorizedContext = (context: AuthContextUnion): context is UnauthorizedContext =>
+  context.type === 'unauthorized';
 
 export interface HandlerWithAuth {
   (req: NextRequest, context: { 
@@ -102,24 +124,46 @@ export function withGithubOidcAuth(handler: HandlerWithAuth) {
 export function withClerkAuth(handler: HandlerWithAuth) {
   return async function (req: NextRequest, context: { params?: Record<string, string> } = {}) {
     try {
-      const session = auth();
+      const session = await auth();
       const user = await currentUser();
       
-      if (!session || !user) {
-        return createErrorResponse(401, 'unauthorized', 'Authentication required');
+      // Validate session and user
+      if (!session?.userId || !user) {
+        return createErrorResponse(
+          401, 
+          'unauthorized', 
+          'Authentication required',
+          { sessionExists: !!session, userExists: !!user }
+        );
       }
+
+      // Create a safe claims object with the properties we need
+      const { id, externalId, ...rest } = user;
+      const userClaims: ClerkUserClaims = {
+        id,
+        externalId,
+        ...rest,
+      };
 
       const authContext: ClerkAuthContext = {
         type: 'clerk',
         userId: user.id,
-        sessionId: session.sessionId || 'unknown',
-        claims: user,
+        sessionId: session.sessionId || `temp_${Date.now()}`,
+        claims: userClaims,
       };
 
-      return handler(req, { ...context, authContext });
+      return handler(req, { 
+        ...context, 
+        authContext 
+      });
     } catch (error) {
       console.error('Clerk auth failed:', error);
-      return createErrorResponse(401, 'authentication_failed', 'Authentication failed');
+      return createErrorResponse(
+        401, 
+        'authentication_failed', 
+        'Authentication failed',
+        { error: error instanceof Error ? error.message : 'Unknown error' }
+      );
     }
   };
 }
@@ -128,22 +172,38 @@ export function withClerkAuth(handler: HandlerWithAuth) {
 export function withOptionalAuth(handler: HandlerWithAuth) {
   return async function (req: NextRequest, context: { params?: Record<string, string> } = {}) {
     try {
-      const session = auth();
+      const session = await auth();
       const user = await currentUser();
       
-      const authContext: AuthContextUnion = (session && user)
-        ? { 
-            type: 'clerk', 
-            userId: user.id, 
-            sessionId: session.sessionId || 'unknown',
-            claims: user
-          }
-        : { type: 'unauthorized' };
+      let authContext: AuthContextUnion = { type: 'unauthorized' };
 
-      return handler(req, { ...context, authContext });
+      if (session?.userId && user) {
+        // Create a properly typed claims object
+        const { id, externalId, ...rest } = user;
+        const userClaims: ClerkUserClaims = {
+          id,
+          externalId,
+          ...rest,
+        };
+        
+        authContext = { 
+          type: 'clerk', 
+          userId: user.id,
+          sessionId: session.sessionId || `temp_${Date.now()}`,
+          claims: userClaims
+        };
+      }
+
+      return handler(req, { 
+        ...context, 
+        authContext 
+      });
     } catch (error) {
-      // If auth fails, continue as unauthorized
-      return handler(req, { ...context, authContext: { type: 'unauthorized' } });
+      console.error('Optional auth check failed, continuing as unauthorized:', error);
+      return handler(req, { 
+        ...context, 
+        authContext: { type: 'unauthorized' } 
+      });
     }
   };
 }

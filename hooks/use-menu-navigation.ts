@@ -1,15 +1,15 @@
 "use client"
 
 import * as React from "react"
-import type { Editor } from "@tiptap/react"
+import { LexicalEditor } from "lexical"
 
 type Orientation = "horizontal" | "vertical" | "both"
 
 interface MenuNavigationOptions<T> {
   /**
-   * The Tiptap editor instance, if using with a Tiptap editor.
+   * The Lexical editor instance, if using with a Lexical editor.
    */
-  editor?: Editor | null
+  editor?: LexicalEditor | null
   /**
    * Reference to the container element for handling keyboard events.
    */
@@ -46,7 +46,7 @@ interface MenuNavigationOptions<T> {
  * Hook that implements keyboard navigation for dropdown menus and command palettes.
  *
  * Handles arrow keys, tab, home/end, enter for selection, and escape to close.
- * Works with both Tiptap editors and regular DOM elements.
+ * Works with both Lexical editors and regular DOM elements.
  *
  * @param options - Configuration options for the menu navigation
  * @returns Object containing the selected index and a setter function
@@ -155,12 +155,14 @@ export function useMenuNavigation<T>({
     let targetElement: HTMLElement | null = null
 
     if (editor) {
-      targetElement = editor.view.dom
+      // Get the root element of the Lexical editor
+      targetElement = editor.getRootElement()
     } else if (containerRef?.current) {
       targetElement = containerRef.current
     }
 
     if (targetElement) {
+      // Use capture phase to ensure we catch the event before Lexical
       targetElement.addEventListener("keydown", handleKeyboardNavigation, true)
 
       return () => {

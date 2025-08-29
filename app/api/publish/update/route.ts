@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { withGithubOidcAuth } from '@/middleware/auth';
-import { updatePublishProgress, completePublishSession, failPublishSession } from "@/lib/session-utils";
+import { updatePublishProgress, completePublishSession, failPublishSession } from '@/lib/publish/session-utils';
 
 export const dynamic = 'force-dynamic';
 

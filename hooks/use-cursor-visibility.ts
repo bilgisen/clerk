@@ -1,12 +1,12 @@
 import * as React from "react"
-import type { Editor } from "@tiptap/react"
+import { LexicalEditor } from "lexical"
 import { useWindowSize } from "@/hooks/use-window-size"
 
 export interface CursorVisibilityOptions {
   /**
-   * The Tiptap editor instance
+   * The Lexical editor instance
    */
-  editor?: Editor | null
+  editor?: LexicalEditor | null
   /**
    * Reference to the toolbar element that may obscure the cursor
    */
@@ -16,14 +16,14 @@ export interface CursorVisibilityOptions {
 export type RectState = Omit<DOMRect, "toJSON">
 
 /**
- * Custom hook that ensures the cursor remains visible when typing in a Tiptap editor.
+ * Custom hook that ensures the cursor remains visible when typing in a Lexical editor.
  * Automatically scrolls the window when the cursor would be hidden by the toolbar.
  *
  * This is particularly useful for long-form content editing where the cursor
  * might move out of the visible area as the user types.
  *
  * @param options Configuration options for cursor visibility behavior
- * @param options.editor The Tiptap editor instance
+ * @param options.editor The Lexical editor instance
  * @param options.overlayHeight Reference to the toolbar element that may obscure the cursor
  * @returns void
  */
@@ -72,38 +72,43 @@ export function useCursorVisibility({
     const ensureCursorVisibility = () => {
       if (!editor) return
 
-      const { state, view } = editor
+      // Get the root element of the editor
+      const rootElement = editor.getRootElement()
+      if (!rootElement) return
 
-      if (!view.hasFocus()) return
+      // Check if editor has focus
+      if (!rootElement.contains(document.activeElement)) return
 
-      // Get current cursor position coordinates
-      const { from } = state.selection
-      const cursorCoords = view.coordsAtPos(from)
+      // Get the selection from the editor
+      const selection = window.getSelection()
+      if (!selection || selection.rangeCount === 0) return
 
-      if (windowHeight < rect.height) {
-        if (cursorCoords) {
-          // Check if there's enough space between cursor and bottom of window
-          const availableSpace = windowHeight - cursorCoords.top
+      // Get the current selection range
+      const range = selection.getRangeAt(0)
+      const rect = range.getBoundingClientRect()
 
-          // If not enough space, scroll to position cursor in the middle of viewport
-          if (availableSpace < overlayHeight) {
-            // Calculate target scroll position to center cursor in viewport
-            // Account for overlay height to ensure cursor is not hidden
-            const targetCursorY = Math.max(windowHeight / 2, overlayHeight)
+      // Get cursor position relative to the viewport
+      const cursorTop = rect.top + window.scrollY
+      const cursorBottom = rect.bottom + window.scrollY
 
-            // Get current scroll position and cursor's absolute position
-            const currentScrollY = window.scrollY
-            const cursorAbsoluteY = cursorCoords.top + currentScrollY
+      // Calculate the visible area considering the overlay
+      const toolbarHeight = overlayHeight || 0
+      const visibleTop = window.scrollY + toolbarHeight
+      const visibleBottom = window.scrollY + window.innerHeight
 
-            // Calculate new scroll position
-            const newScrollY = cursorAbsoluteY - targetCursorY
-
-            window.scrollTo({
-              top: Math.max(0, newScrollY),
-              behavior: "smooth",
-            })
-          }
-        }
+      // If cursor is above the visible area (behind the toolbar)
+      if (cursorTop < visibleTop) {
+        window.scrollTo({
+          top: cursorTop - toolbarHeight - 20, // 20px padding
+          behavior: 'smooth',
+        })
+      }
+      // If cursor is below the visible area
+      else if (cursorBottom > visibleBottom) {
+        window.scrollTo({
+          top: cursorBottom - window.innerHeight + 20, // 20px padding
+          behavior: 'smooth',
+        })
       }
     }
 

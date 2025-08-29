@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { getSession } from "@/lib/store/redis";
+import { getPublishSession } from "@/lib/publish/session-utils";
 import { withGithubOidcAuth } from "@/middleware/auth";
 import { logger } from "@/lib/logger";
 
