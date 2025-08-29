@@ -5,7 +5,8 @@ import { uploadImage } from '@/actions/upload-image';
 export async function POST(request: Request) {
   try {
     const formData = await request.formData();
-    const { url } = await uploadImage(formData as any);
+    const { userId } = getAuth(request as unknown as Request);
+    const { url } = await uploadImage(formData);
     return NextResponse.json({ success: true, url });
   } catch (error) {
     console.error('Upload error:', error);

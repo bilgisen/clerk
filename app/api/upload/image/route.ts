@@ -7,7 +7,7 @@ export const runtime = 'nodejs';
 
 export async function POST(request: Request) {
   try {
-    const { userId } = getAuth(request as any);
+    const { userId } = getAuth(request as unknown as Request);
     if (!userId) {
       return new NextResponse('Unauthorized', { status: 401 });
     }

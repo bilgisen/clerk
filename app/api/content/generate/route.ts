@@ -23,8 +23,10 @@ interface ContentGenerationResponse {
 }
 
 // GitHub Actions Service
+import { Octokit } from '@octokit/rest';
+
 class GitHubActionsService {
-  private static octokit = new (require('@octokit/rest').Octokit)({
+  private static octokit = new Octokit({
     auth: process.env.GITHUB_TOKEN,
   });
 

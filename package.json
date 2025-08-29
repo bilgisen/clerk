@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "lint:quiet": "next lint --quiet",
     "test": "jest"
   },
   "dependencies": {

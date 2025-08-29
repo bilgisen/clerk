@@ -91,7 +91,7 @@ export async function POST(
     };
 
     // Trigger the workflow
-    const response = await octokit.actions.createWorkflowDispatch({
+    await octokit.actions.createWorkflowDispatch({
       owner,
       repo,
       workflow_id: workflowId,

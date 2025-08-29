@@ -74,7 +74,7 @@ export function useR2ImageUpload() {
       setIsUploading(false);
       setTimeout(() => setProgress(0), 500);
     }
-  }, []);
+  }, [setIsUploading, setProgress, toast]);
 
   return {
     uploadImage,

@@ -163,7 +163,7 @@ export async function DELETE(
     const creditService = new CreditService();
     
     // Delete the book and all related data in a transaction
-    await db.transaction(async (tx: any) => {
+    await db.transaction(async (tx: typeof db) => {
       // Delete all media associated with the book
       await tx.delete(media).where(eq(media.bookId, id));
       

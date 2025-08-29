@@ -1,12 +1,9 @@
 import { type NextRequest, NextResponse } from 'next/server';
 import { db } from '@/db/drizzle';
 import { books, chapters } from '@/db/schema';
-import { and, eq } from 'drizzle-orm';
-import { generateChapterHTML, generateCompleteDocumentHTML } from '@/lib/generateChapterHTML';
+import { eq } from 'drizzle-orm';
+import { generateCompleteDocumentHTML } from '@/lib/generateChapterHTML';
 import { withGithubOidcAuth, type AuthContextUnion, type HandlerWithAuth } from '@/middleware/old/auth';
-import { logger } from '@/lib/logger';
-
-type GitHubOidcContext = Extract<AuthContextUnion, { type: 'github-oidc' }>;
 
 // Configuration
 export const dynamic = 'force-dynamic';
@@ -15,11 +12,6 @@ export const runtime = 'nodejs';
 
 // Types
 type Chapter = typeof chapters.$inferSelect;
-type Book = typeof books.$inferSelect;
-
-interface BookWithChapters extends Omit<Book, 'chapters'> {
-  chapters: Chapter[];
-}
 
 const handleRequest: HandlerWithAuth = async (
   request: NextRequest,

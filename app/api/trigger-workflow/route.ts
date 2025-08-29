@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, type NextRequest } from 'next/server';
 import { GitHubActionsService } from '@/lib/services/github-actions.service';
 import { getAuth } from '@clerk/nextjs/server';
 import { logger } from '@/lib/logger';
@@ -6,7 +6,7 @@ import { logger } from '@/lib/logger';
 // Type definitions for the request and response
 type TriggerWorkflowRequest = {
   contentId: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 };
 
 type TriggerWorkflowResponse = {
@@ -16,12 +16,12 @@ type TriggerWorkflowResponse = {
   sessionId?: string;
   error?: string;
   code?: string;
-  details?: any;
+  details?: unknown;
 };
 
 export const dynamic = 'force-dynamic';
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   const startTime = Date.now();
   const requestId = crypto.randomUUID();
   
@@ -29,7 +29,7 @@ export async function POST(request: Request) {
     logger.info('Triggering workflow', { requestId });
     
     // Get the authenticated user
-    const { userId } = getAuth(request as any);
+    const { userId } = getAuth(request);
     
     if (!userId) {
       logger.warn('Unauthorized workflow trigger attempt', { requestId });

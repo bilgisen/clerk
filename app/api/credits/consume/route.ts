@@ -94,8 +94,9 @@ export async function POST(req: Request) {
           ref,
         },
       });
-    } catch (error: any) {
-      if (error.message === "INSUFFICIENT_CREDITS") {
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+      if (errorMessage === "INSUFFICIENT_CREDITS") {
         return new NextResponse(
           JSON.stringify({ 
             success: false, 
@@ -107,7 +108,7 @@ export async function POST(req: Request) {
         );
       }
       
-      console.error("Error spending credits:", error);
+      console.error("Error consuming credits:", errorMessage);
       return new NextResponse(
         JSON.stringify({ 
           success: false, 

@@ -30,11 +30,28 @@ const DEFAULT_LANGUAGE = 'en';
 const MAX_CONTENT_LENGTH = 10 * 1024 * 1024; // 10MB
 
 // Types
+interface GitHubOidcClaims {
+  sub: string;
+  iss: string;
+  aud: string;
+  exp: number;
+  iat: number;
+  repository: string;
+  repository_owner: string;
+  run_id: string;
+  workflow: string;
+  actor: string;
+  ref: string;
+  sha: string;
+  event_name: string;
+  [key: string]: unknown;
+}
+
 interface Chapter {
   id: string;
   bookId: string;
   title: string;
-  content: any;
+  content: unknown;
   order: number;
   parentChapterId: string | null;
   level?: number;
@@ -173,7 +190,7 @@ function getBaseUrl(request: NextRequest): string {
 async function handler(
   request: NextRequest,
   { params }: { params: { id: string } },
-  oidcClaims: any
+  oidcClaims: GitHubOidcClaims
 ) {
   try {
     // Parse and validate query parameters

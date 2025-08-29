@@ -8,7 +8,7 @@ import { creditService } from "@/lib/services/credits/credit-service";
 
 const logWebhook = (
   eventType: string,
-  data: Record<string, any>,
+  data: Record<string, unknown>,
   message: string,
   level: 'info' | 'error' | 'warn' = 'info'
 ) => {
@@ -53,7 +53,19 @@ export async function POST(req: Request) {
   try {
     switch (currentEventType) {
       case 'user.created': {
-        const data = evt.data as any;
+        interface ClerkUserData {
+          id: string;
+          email_addresses?: Array<{
+            id: string;
+            email_address: string;
+          }>;
+          first_name: string | null;
+          last_name: string | null;
+          image_url: string;
+          primary_email_address_id: string | null;
+        }
+        
+        const data = evt.data as ClerkUserData;
         const { 
           id: clerkUserId, 
           email_addresses = [], 
@@ -67,7 +79,7 @@ export async function POST(req: Request) {
         let email: string | null = null;
         if (Array.isArray(email_addresses) && email_addresses.length > 0) {
           email =
-            email_addresses.find((e: any) => e.id === primary_email_address_id)?.email_address ||
+            email_addresses.find((e) => e.id === primary_email_address_id)?.email_address ||
             email_addresses[0]?.email_address ||
             null;
         }
@@ -82,9 +94,9 @@ export async function POST(req: Request) {
         const result = await createOrGetUser({
           clerkId: clerkUserId,
           email: email || `${clerkUserId}@no-email.local`,
-          name: first_name && last_name ? `${first_name} ${last_name}` : first_name || last_name,
-          firstName: first_name,
-          lastName: last_name,
+          name: first_name && last_name ? `${first_name} ${last_name}` : first_name || last_name || undefined,
+          firstName: first_name || undefined,
+          lastName: last_name || undefined,
           imageUrl: image_url,
         });
 

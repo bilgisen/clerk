@@ -51,7 +51,7 @@ const handler = async (
   }
 ): Promise<NextResponse> => {
   const { params = {}, authContext } = context || {};
-  const oidcClaims = authContext as any;
+  const oidcClaims = authContext as AuthContextUnion & { type: 'github-oidc' };
   const id = params?.id;
   
   if (!id) {

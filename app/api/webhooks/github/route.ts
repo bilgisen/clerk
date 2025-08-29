@@ -3,28 +3,21 @@ import { Webhooks } from "@octokit/webhooks";
 import { 
   getSession, 
   updateSession, 
-  PublishStatus,
-  PublishSession 
+  type PublishSession,
+  PublishStatus as PublishStatusValue
 } from "@/lib/store/redis";
-import type { SessionUpdateData } from "@/lib/store/types";
+import { GitHubJob } from '@/lib/store/github-types';
+import { SessionUpdateData } from '@/lib/store/types';
 
 // Extend the PublishSession type with our additional fields
 type Session = PublishSession & {
-  gh?: PublishSession['gh'] & {
-    job?: {
-      id: string;
-      name: string;
-      status: string;
-      conclusion?: string;
-      started_at?: string;
-      completed_at?: string;
-      steps?: Array<{
-        name: string;
-        status: string;
-        conclusion?: string;
-        number: number;
-      }>;
-    };
+  gh?: {
+    repository?: string;
+    run_id?: string;
+    run_number?: string;
+    workflow?: string;
+    sha?: string;
+    job?: GitHubJob;
   };
   workflowRunId?: string;
 };
@@ -81,7 +74,49 @@ export async function POST(req: Request) {
   }
 }
 
-async function handleWorkflowRun(payload: any) {
+interface GitHubWorkflowRunPayload {
+  action: string;
+  workflow_run: {
+    id: number;
+    name: string;
+    run_number: number;
+    status: string;
+    conclusion: string | null;
+    created_at: string;
+    updated_at: string;
+    head_sha: string;
+    repository: {
+      full_name: string;
+    };
+    workflow_id: number;
+    workflow_url: string;
+    actor: {
+      login: string;
+    };
+    html_url: string;
+  };
+}
+
+interface GitHubWorkflowJobPayload {
+  action: string;
+  workflow_job: {
+    id: number;
+    run_id: number;
+    name: string;
+    status: 'queued' | 'in_progress' | 'completed';
+    conclusion: string | null;
+    started_at: string;
+    completed_at: string | null;
+    steps?: Array<{
+      name: string;
+      status: string;
+      conclusion: string | null;
+      number: number;
+    }>;
+  };
+}
+
+async function handleWorkflowRun(payload: GitHubWorkflowRunPayload) {
   const { action, workflow_run: run } = payload;
   if (!run || !run.id) return;
   
@@ -132,7 +167,7 @@ async function handleWorkflowRun(payload: any) {
   await updateSession(sessionId, updates);
 }
 
-async function handleWorkflowJob(payload: any) {
+async function handleWorkflowJob(payload: GitHubWorkflowJobPayload) {
   const { action, workflow_job: job } = payload;
   if (!job || !job.run_id) return;
   
@@ -140,36 +175,45 @@ async function handleWorkflowJob(payload: any) {
   if (sessions.length === 0) return;
   
   const session = sessions[0];
-  // Create updates object with SessionUpdateData type
-  const updates: SessionUpdateData & { gh?: any } = {
-    gh: {
+  // Create a properly typed updates object that matches SessionUpdateData
+  const updates: SessionUpdateData & {
+    gh: NonNullable<SessionUpdateData['gh']> & {
+      job: GitHubJob;
+    };
+    status: 'processing' | 'completed' | 'failed'; // Matches PublishStatus values
+    progress: number;
+  } = {
+gh: {
       ...session.gh,
       job: {
-        id: job.id,
+        id: job.id.toString(),
         name: job.name,
-        status: job.status,
-        conclusion: job.conclusion,
+        status: job.status as 'queued' | 'in_progress' | 'completed',
+        conclusion: job.conclusion || null,
         started_at: job.started_at,
-        completed_at: job.completed_at,
-        steps: job.steps?.map((step: any) => ({
+        completed_at: job.completed_at || null,
+        steps: job.steps?.map(step => ({
           name: step.name,
           status: step.status,
-          conclusion: step.conclusion,
-          number: step.number,
-        })),
-      },
+          conclusion: step.conclusion || null,
+          number: step.number
+        }))
+      }
     },
+    status: (session.status as 'processing' | 'completed' | 'failed') || 'processing',
+    progress: 0 // Will be updated below
   };
 
   // Update progress based on job steps
   if (job.steps?.length) {
     const completedSteps = job.steps.filter(
-      (step: any) => step.conclusion === "success"
+      (step) => step.conclusion === "success"
     ).length;
     updates.progress = Math.round((completedSteps / job.steps.length) * 100);
   }
 
   if (session.id) {
+    // The updates object now properly matches SessionUpdateData
     await updateSession(session.id, updates);
   }
 }

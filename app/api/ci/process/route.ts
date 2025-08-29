@@ -4,6 +4,11 @@ import { withGithubOidcAuth } from '@/middleware/old/auth';
 import type { NextRequest } from 'next/server';
 import type { AuthContextUnion } from '@/types/auth';
 
+interface ProcessRequest {
+  contentId: string;
+  mode?: string;
+}
+
 // Basic in-memory idempotency cache (replace with Redis in production)
 const IDEMPOTENCY_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const MAX_CACHE = 500;
@@ -22,10 +27,11 @@ function gcCache() {
   }
 }
 
-async function readJsonSafe(body: ReadableStream<Uint8Array> | null): Promise<any> {
+async function readJsonSafe<T>(body: ReadableStream<Uint8Array> | null): Promise<T | undefined> {
   if (!body) return undefined;
   try {
-    return await new Response(body).json();
+    const result = await new Response(body).json();
+    return result as T;
   } catch {
     return undefined;
   }
@@ -92,9 +98,16 @@ export const POST = withGithubOidcAuth(async (request) => {
   cache.set(idempotencyKey, { at: Date.now() });
 
   // Parse and validate request body
-  const body = await readJsonSafe(req.body);
-  const contentId = typeof body?.contentId === 'string' ? body.contentId : undefined;
-  const mode = typeof body?.mode === 'string' ? body.mode : 'default';
+  const body = await readJsonSafe<ProcessRequest>(req.body);
+  
+  if (!body || typeof body !== 'object') {
+    return NextResponse.json(
+      { error: 'invalid_request', message: 'Invalid request body' },
+      { status: 400 }
+    );
+  }
+  
+  const { contentId, mode = 'default' } = body as ProcessRequest;
   
   if (!contentId || !/^[a-zA-Z0-9_\-\/.]{1,200}$/.test(contentId)) {
     return NextResponse.json(

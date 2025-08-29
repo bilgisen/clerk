@@ -103,7 +103,15 @@ export async function PATCH(
       return NextResponse.json({ error: 'At least one field must be updated' }, { status: 400 });
     }
 
-    const updateData: Record<string, any> = {
+    const updateData: {
+      updatedAt: Date;
+      title?: string;
+      content?: string;
+      isDraft?: boolean;
+      order?: number;
+      level?: number;
+      parentChapterId?: string | null;
+    } = {
       updatedAt: new Date(),
     };
     if (title) updateData.title = title;

@@ -46,7 +46,7 @@ export function usePolar() {
         setIsLoading(false);
       }
     },
-    [userId, user]
+    [userId, user?.emailAddresses, setError, setIsLoading]
   );
 
   const redirectToCustomerPortal = useCallback(async (returnUrl: string = window.location.href) => {
@@ -73,7 +73,7 @@ export function usePolar() {
     } finally {
       setIsLoading(false);
     }
-  }, [userId]);
+  }, [userId, setError, setIsLoading]);
 
   return {
     redirectToCheckout,

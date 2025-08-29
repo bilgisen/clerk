@@ -33,9 +33,15 @@ export async function PUT(
     const result = await updateChapterOrder(body.chapters, slug);
 
     if (!result.success) {
+      type ErrorResponse = {
+        error: string;
+        details?: unknown;
+        status?: number;
+      };
+      
       return NextResponse.json(
-        { error: result.error, details: (result as any).details },
-        { status: result.status || 500 }
+        { error: result.error, details: (result as ErrorResponse).details },
+        { status: (result as ErrorResponse).status || 500 }
       );
     }
 

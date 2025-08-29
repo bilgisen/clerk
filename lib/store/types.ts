@@ -1,4 +1,14 @@
 import { PublishStatus } from './redis';
+import { GitHubContext } from './github-types';
+
+export interface PublishSession {
+  id: string;
+  userId: string;
+  status: PublishStatus;
+  progress: number;
+  gh?: GitHubContext;
+  [key: string]: unknown;
+}
 
 export interface SessionFilterOptions {
   status?: PublishStatus[];
@@ -22,13 +32,7 @@ export interface SessionUpdateData {
     details?: unknown;
   };
   metadata?: Record<string, unknown>;
-  gh?: {
-    repository?: string;
-    run_id?: string;
-    run_number?: string;
-    workflow?: string;
-    sha?: string;
-  };
+  gh?: GitHubContext;
 }
 
 export interface SessionCreateData {
@@ -40,12 +44,6 @@ export interface SessionCreateData {
   message?: string;
   progress?: number;
   phase?: string;
-  gh?: {
-    repository?: string;
-    run_id?: string;
-    run_number?: string;
-    workflow?: string;
-    sha?: string;
-  };
+  gh?: GitHubContext;
   metadata?: Record<string, unknown>;
 }

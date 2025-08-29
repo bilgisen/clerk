@@ -45,10 +45,9 @@ export function useCursorVisibility({
 
   const updateRect = React.useCallback(() => {
     const element = document.body
-
     const DOMRect = element.getBoundingClientRect()
     setRect(DOMRect)
-  }, [])
+  }, [setRect])
 
   React.useEffect(() => {
     const element = document.body
@@ -66,11 +65,12 @@ export function useCursorVisibility({
       resizeObserver.disconnect()
       window.removeEventListener("scroll", updateRect)
     }
-  }, [updateRect])
+  }, [updateRect, editor, overlayHeight])
 
   React.useEffect(() => {
+    if (!editor) return;
+    
     const ensureCursorVisibility = () => {
-      if (!editor) return
 
       // Get the root element of the editor
       const rootElement = editor.getRootElement()
