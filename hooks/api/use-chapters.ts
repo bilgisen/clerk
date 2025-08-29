@@ -94,7 +94,7 @@ const fetchChapterBySlug = async (bookSlug: string, chapterId: string, getToken:
       throw new Error('Not authenticated');
     }
     
-    const response = await fetch(`/api/books/by-slug/${bookSlug}/chapters/${chapterId}`, {
+    const response = await fetch(`/api/chapters/${chapterId}`, {
       headers: {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json',
@@ -187,7 +187,7 @@ const deleteChapter = async (id: string, getToken: () => Promise<string | null>)
       throw new Error('Not authenticated');
     }
     
-    const response = await fetch(`/api/books/${id.split('_')[0]}/chapters/${id}`, {
+    const response = await fetch(`/api/chapters/${id}`, {
       method: 'DELETE',
       headers: {
         'Authorization': `Bearer ${token}`,

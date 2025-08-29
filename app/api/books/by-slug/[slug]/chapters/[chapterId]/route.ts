@@ -1,3 +1,4 @@
+// app/api/books/by-slug/[slug]/chapters/[chapterId]/route.ts
 import { NextResponse } from 'next/server';
 import { currentUser } from '@clerk/nextjs/server';
 import { db } from '@/db/drizzle';
@@ -111,6 +112,7 @@ export async function PATCH(
       order?: number;
       level?: number;
       parentChapterId?: string | null;
+      wordCount?: number;
     } = {
       updatedAt: new Date(),
     };

@@ -17,12 +17,20 @@ const clerkConfig = {
 const nextConfig: NextConfig = {
   reactStrictMode: false,
   typescript: {
-    ignoreBuildErrors: true,
+    // We'll handle type checking in CI
+    ignoreBuildErrors: false,
   },
   eslint: {
     // Only show warnings during build, don't fail the build
     ignoreDuringBuilds: true,
   },
+  transpilePackages: [
+    '@radix-ui/react-slot',
+    'class-variance-authority',
+    'clsx',
+    'tailwind-merge',
+    'tailwindcss-animate'
+  ],
   
   // Add security headers
   async headers() {

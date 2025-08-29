@@ -1,35 +1,73 @@
-// app/api/books/by-id/[id]/payload/route.ts
 import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/db/drizzle';
 import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
-import { withGithubOidcAuth } from '@/middleware/old/auth';
+import { withGithubOidcAuth, type HandlerWithAuth, type AuthContextUnion } from '@/middleware/old/auth';
 import { logger } from '@/lib/logger';
+import { books, chapters } from '@/db/schema';
 
-// Schema for query parameters
-const queryParamsSchema = z.object({
-  format: z.enum(['epub']).default('epub'),
-  generate_toc: z.string().default('true').transform(val => val === 'true'),
-  include_imprint: z.string().default('true').transform(val => val === 'true'),
-  style: z.string().default('default'),
-  toc_depth: z.string().default('3').transform(Number).refine(n => n >= 1 && n <= 6, {
-    message: 'TOC depth must be between 1 and 6',
-  }),
-  language: z.string().optional(),
-});
-
-type QueryParams = z.infer<typeof queryParamsSchema>;
-
-// Configuration
+// Constants
 export const dynamic = 'force-dynamic';
 export const dynamicParams = true;
 export const runtime = 'nodejs';
 
-// Constants
-const DEFAULT_LANGUAGE = 'en';
-const MAX_CONTENT_LENGTH = 10 * 1024 * 1024; // 10MB
+// Types and Schemas
+const PublishOptionsSchema = z.object({
+  // Format options
+  format: z.enum(['epub']).default('epub'),
+  
+  // Content inclusion
+  includeMetadata: z.boolean().default(true),
+  includeCover: z.boolean().default(true),
+  includeTOC: z.boolean().default(true),
+  tocLevel: z.number().int().min(1).max(5).default(3),
+  includeImprint: z.boolean().default(true),
+  language: z.string().default('en'),
+  
+  // Legacy parameters (for backward compatibility)
+  generate_toc: z.boolean().optional(),
+  include_imprint: z.boolean().optional(),
+  toc_depth: z.number().int().min(1).max(5).optional(),
+}).transform(data => ({
+  // Normalize options
+  format: data.format,
+  includeMetadata: data.includeMetadata,
+  includeCover: data.includeCover,
+  includeTOC: data.generate_toc ?? data.includeTOC,
+  tocLevel: data.toc_depth ?? data.tocLevel,
+  includeImprint: data.include_imprint ?? data.includeImprint,
+  language: data.language,
+}));
 
-// Types
+type PublishOptions = z.infer<typeof PublishOptionsSchema>;
+
+// Data Types
+interface ChapterNode {
+  id: string;
+  bookId: string;
+  title: string;
+  content: unknown;
+  order: number;
+  parentChapterId: string | null;
+  level?: number;
+  isDraft?: boolean;
+  publishedAt?: Date | null;
+  slug: string;
+  children: ChapterNode[];
+}
+
+interface PayloadChapter {
+  id: string;
+  title: string;
+  slug: string;
+  url: string;
+  content_url: string;
+  content: string;
+  order: number;
+  parent: string | null;
+  title_tag: 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6';
+}
+
 interface GitHubOidcClaims {
   sub: string;
   iss: string;
@@ -45,36 +83,6 @@ interface GitHubOidcClaims {
   sha: string;
   event_name: string;
   [key: string]: unknown;
-}
-
-interface Chapter {
-  id: string;
-  bookId: string;
-  title: string;
-  content: unknown;
-  order: number;
-  parentChapterId: string | null;
-  level?: number;
-  isDraft?: boolean;
-  publishedAt?: Date | null;
-  slug?: string;
-}
-
-interface ChapterNode extends Chapter {
-  children: ChapterNode[];
-  slug: string;
-}
-
-interface PayloadChapter {
-  id: string;
-  title: string;
-  slug: string;
-  url: string;
-  content_url: string;
-  content: string;
-  order: number;
-  parent: string | null;
-  title_tag: 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6';
 }
 
 interface EbookPayload {
@@ -97,39 +105,65 @@ interface EbookPayload {
     include_imprint: boolean;
     cover: boolean;
   };
-  metadata?: {
+  metadata: {
     generated_at: string;
     generated_by: string;
     workflow_run_id?: string;
+    repository?: string;
+    repository_owner?: string;
+    workflow?: string;
   };
 }
 
-// Helper function to build a tree structure from flat chapter list
-function buildChapterTree(chapters: Chapter[]): ChapterNode[] {
+// Helper Functions
+function getBaseUrl(request: NextRequest): string {
+  const protocol = request.headers.get('x-forwarded-proto') || 'https';
+  const host = request.headers.get('host') || 'editor.bookshall.com';
+  return `${protocol}://${host}`;
+}
+
+async function buildChapterTree(bookId: string): Promise<ChapterNode[]> {
+  const allChapters = await db.query.chapters.findMany({
+    where: and(
+      eq(chapters.bookId, bookId),
+      eq(chapters.isDraft, false)
+    ),
+    orderBy: (chapters, { asc }) => [asc(chapters.order)],
+  });
+
   const chapterMap = new Map<string, ChapterNode>();
   const rootChapters: ChapterNode[] = [];
 
   // First pass: create all nodes
-  for (const chapter of chapters) {
+  for (const chapter of allChapters) {
     const node: ChapterNode = {
       ...chapter,
-      slug: chapter.slug || `chapter-${chapter.id.slice(0, 8)}`,
+      slug: `chapter-${chapter.id}`, // Generate slug since it's not in the DB
       children: [],
     };
     chapterMap.set(chapter.id, node);
   }
 
   // Second pass: build the tree
-  for (const chapter of chapterMap.values()) {
-    if (chapter.parentChapterId && chapterMap.has(chapter.parentChapterId)) {
-      const parent = chapterMap.get(chapter.parentChapterId)!;
-      parent.children.push(chapter);
-    } else {
-      rootChapters.push(chapter);
+  for (const chapter of allChapters) {
+    const node = chapterMap.get(chapter.id);
+    if (!node) continue;
+
+    if (chapter.parentChapterId) {
+      const parent = chapterMap.get(chapter.parentChapterId);
+      if (parent) {
+        node.level = (parent.level || 1) + 1;
+        parent.children.push(node);
+        continue;
+      }
     }
+    
+    // If no parent or parent not found, add to root
+    node.level = 1;
+    rootChapters.push(node);
   }
 
-  // Sort children by order
+  // Sort chapters by order
   const sortChapters = (nodes: ChapterNode[]): ChapterNode[] => {
     return nodes
       .sort((a, b) => a.order - b.order)
@@ -142,7 +176,6 @@ function buildChapterTree(chapters: Chapter[]): ChapterNode[] {
   return sortChapters(rootChapters);
 }
 
-// Helper function to flatten chapter tree for payload
 function flattenChapterTree(
   chapters: ChapterNode[],
   bookSlug: string,
@@ -150,154 +183,147 @@ function flattenChapterTree(
   level = 1,
   parentId: string | null = null
 ): PayloadChapter[] {
-  const result: PayloadChapter[] = [];
+  let result: PayloadChapter[] = [];
   
   for (const chapter of chapters) {
-    const tag = (['h1', 'h2', 'h3', 'h4', 'h5', 'h6'] as const)[Math.min(level - 1, 5)];
-    const slug = chapter.slug || `chapter-${chapter.id.slice(0, 8)}`;
-    const url = `${baseUrl}/books/${bookSlug}/chapters/${slug}`;
-    const contentUrl = `${url}/content`;
-
+    const slug = chapter.slug || `chapter-${chapter.id}`;
+    const url = `${baseUrl}/books/${bookSlug}/${slug}`;
+    const contentUrl = `${baseUrl}/api/chapters/${chapter.id}/content`;
+    
     const payloadChapter: PayloadChapter = {
       id: chapter.id,
       title: chapter.title,
       slug,
       url,
       content_url: contentUrl,
-      content: chapter.content || '',
+      content: typeof chapter.content === 'string' ? chapter.content : JSON.stringify(chapter.content || ''),
       order: chapter.order,
       parent: parentId,
-      title_tag: tag,
+      title_tag: `h${Math.min(level, 6)}` as 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6',
     };
-
+    
     result.push(payloadChapter);
-
+    
+    // Add children recursively
     if (chapter.children.length > 0) {
-      result.push(...flattenChapterTree(chapter.children, bookSlug, baseUrl, level + 1, chapter.id));
+      result = result.concat(
+        flattenChapterTree(chapter.children, bookSlug, baseUrl, level + 1, chapter.id)
+      );
     }
   }
-
+  
   return result;
 }
 
-// Helper function to get base URL
-function getBaseUrl(request: NextRequest): string {
-  const protocol = request.headers.get('x-forwarded-proto') || 'https';
-  const host = request.headers.get('host') || 'clerko.com';
-  return `${protocol}://${host}`;
-}
-
-async function handler(
+// Main Handler
+const handler = async (
   request: NextRequest,
-  { params }: { params: { id: string } },
-  oidcClaims: GitHubOidcClaims
-) {
+  context: { 
+    params?: Record<string, string>;
+    authContext: AuthContextUnion;
+  }
+): Promise<NextResponse> => {
+  const { params, authContext } = context;
+  
+  // Ensure we have a GitHub OIDC context
+  if (authContext.type !== 'github-oidc') {
+    return NextResponse.json(
+      { error: 'Invalid authentication context' },
+      { status: 401 }
+    );
+  }
+  
+  const { runId, repository, repositoryOwner, workflow } = authContext;
+  
+  if (!params?.id) {
+    return NextResponse.json(
+      { error: 'Book ID is required' },
+      { status: 400 }
+    );
+  }
+  
+  const bookId = params.id;
   try {
-    // Parse and validate query parameters
-    const searchParams = Object.fromEntries(request.nextUrl.searchParams);
-    const { format, generate_toc, include_imprint, style, toc_depth, language } = 
-      queryParamsSchema.parse(searchParams);
-
-    // Get the base URL for generating absolute URLs
-    const baseUrl = getBaseUrl(request);
-    const bookId = params.id;
-
-    // Get the book
+    // 1. Parse and validate query parameters
+    const queryParams = Object.fromEntries(request.nextUrl.searchParams);
+    const options = PublishOptionsSchema.parse({
+      ...queryParams,
+      // Map legacy parameter names if needed
+      toc_depth: queryParams.toc_depth || queryParams.tocLevel,
+      include_imprint: queryParams.include_imprint || queryParams.includeImprint,
+      generate_toc: queryParams.generate_toc || queryParams.includeTOC,
+    });
+    
+    // 2. Fetch the book
     const book = await db.query.books.findFirst({
-      where: (books, { eq }) => eq(books.id, bookId),
+      where: eq(books.id, bookId),
     });
 
     if (!book) {
-      logger.warn({
-        message: 'Book not found',
-        bookId,
-      });
       return NextResponse.json(
-        { 
-          error: 'Book not found',
-          code: 'BOOK_NOT_FOUND'
-        },
+        { error: 'Book not found' },
         { status: 404 }
       );
     }
 
-    // Get all published chapters for the book
-    const chapterResults = await db.query.chapters.findMany({
-      where: (chapters, { eq, and }) => and(
-        eq(chapters.bookId, bookId),
-        eq(chapters.isDraft, false)
-      ),
-      orderBy: (chapters, { asc }) => [asc(chapters.order)]
-    });
-    
-    // Build chapter tree and flatten for payload
-    const chapterTree = buildChapterTree(chapterResults);
-    const flattenedChapters = flattenChapterTree(chapterTree, book.slug, baseUrl);
-    
-    // Log the OIDC claims for auditing
-    logger.info('OIDC-authenticated request', {
-      repository: oidcClaims.repository,
-      workflow: oidcClaims.workflow,
-      run_id: oidcClaims.run_id,
-      bookId
-    });
+    // 3. Build chapter tree and flatten for payload
+    const chapterTree = await buildChapterTree(bookId);
+    const baseUrl = getBaseUrl(request);
+    const payloadChapters = flattenChapterTree(chapterTree, book.slug, baseUrl);
 
-    // Prepare the payload
+    // 4. Generate output filename
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const outputFilename = `${book.slug}-${timestamp}.epub`;
+
+    // 5. Construct final payload
     const payload: EbookPayload = {
       book: {
         slug: book.slug,
         title: book.title,
-        author: book.author,
-        language: language || book.language || DEFAULT_LANGUAGE,
-        output_filename: `${book.slug}.${format}`,
-        cover_url: book.coverImageUrl ? new URL(book.coverImageUrl, baseUrl).toString() : '',
-        stylesheet_url: `${baseUrl}/styles/ebook-${style}.css`,
-        ...(book.subtitle && { subtitle: book.subtitle }),
-        ...(book.description && { description: book.description }),
-        chapters: flattenedChapters,
+        author: book.author || 'Unknown Author',
+        language: options.language,
+        description: book.description || undefined,
+        subtitle: book.subtitle || undefined,
+        output_filename: outputFilename,
+        cover_url: book.coverImageUrl || '',
+        stylesheet_url: `${baseUrl}/styles/epub.css`,
+        chapters: payloadChapters,
       },
       options: {
-        generate_toc,
-        toc_depth,
-        embed_metadata: true,
-        include_imprint,
-        cover: !!book.coverImageUrl,
+        generate_toc: options.includeTOC,
+        toc_depth: options.tocLevel,
+        embed_metadata: options.includeMetadata,
+        include_imprint: options.includeImprint,
+        cover: options.includeCover,
       },
       metadata: {
         generated_at: new Date().toISOString(),
-        generated_by: 'api',
+        generated_by: 'bookshall-epub-generator',
+        workflow_run_id: runId,
+        repository,
+        repository_owner: repositoryOwner,
+        workflow,
       },
     };
-    
-    // Log successful payload generation
-    logger.info({
-      message: 'Generated book payload',
-      bookId,
-      chapterCount: flattenedChapters.length,
-    });
-    
+
+    // 6. Return the payload
     return NextResponse.json(payload);
-    
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    const errorStack = error instanceof Error ? error.stack : undefined;
+    logger.error('Error generating payload', { error });
     
-    logger.error({
-      message: 'Error generating book payload',
-      error: new Error(errorMessage),
-      stack: errorStack,
-      bookId: params.id,
-    });
-    
-    const status = error instanceof z.ZodError ? 400 : 500;
-    const message = status === 500 ? 'Internal server error' : errorMessage;
+    if (error instanceof z.ZodError) {
+      return NextResponse.json(
+        { error: 'Invalid parameters', details: error.issues },
+        { status: 400 }
+      );
+    }
     
     return NextResponse.json(
-      { error: message, code: 'PAYLOAD_GENERATION_ERROR' },
-      { status: status as number }
+      { error: 'Failed to generate payload' },
+      { status: 500 }
     );
   }
-}
+};
 
-// Export the handler wrapped with GitHub OIDC auth middleware
-export const GET = withGithubOidcAuth(handler);
+// Export the handler with proper typing
+export const GET = withGithubOidcAuth(handler as HandlerWithAuth);

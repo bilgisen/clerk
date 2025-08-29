@@ -1,7 +1,7 @@
 // app/dashboard/books/[slug]/chapters/[chapterId]/edit/page.tsx
 "use client";
 
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { useAuth } from '@clerk/nextjs';
 import { debounce } from 'lodash';
@@ -16,61 +16,56 @@ import { useChapter, useUpdateChapter } from '@/hooks/useChapter';
 import { useChaptersBySlug } from '@/hooks/api/use-chapters';
 import type { Chapter } from '@/types/chapter';
 
+interface EditChapterPageProps {
+  // Add any props if needed
+}
+
 export default function EditChapterPage() {
   const router = useRouter();
   const { slug: bookSlug, chapterId } = useParams() as { slug: string; chapterId: string };
   const { getToken } = useAuth();
-  
+
   // Fetch chapter data using the new hook
   const { 
     data: chapter, 
     isLoading: isChapterLoading, 
     error: chapterError 
   } = useChapter(chapterId);
-  
+
   // Fetch all chapters for the book
   const { 
-    data: chaptersData = [], 
+    data: chaptersData, 
     isLoading: isChaptersLoading,
     error: chaptersError
   } = useChaptersBySlug(bookSlug);
-  
+
   // Update chapter mutation
   const { mutateAsync: updateChapter, isPending: isUpdating } = useUpdateChapter();
-  
+
   // State management
   const [isSaving, setIsSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
-  
+
   // Refs
   const formRef = useRef<HTMLFormElement>(null);
   const formDataRef = useRef<ChapterFormValues | null>(null);
-  
+
   // Debounced autosave function
   const debouncedSave = useCallback(
     debounce(async (data: ChapterFormValues) => {
-      if (!chapterId || !chapter) return;
-      
+      if (!chapterId) return;
+
       try {
-        // Prepare the data for update, mapping form values to API expected format
-        const updateData = {
-          ...data,
-          parent_chapter_id: data.parent_chapter_id || null,
-          is_published: data.is_published ?? false,
-          // Ensure all required fields are included
-          id: chapterId,
-          book_id: chapter.book_id,
-          user_id: chapter.user_id,
-          created_at: chapter.created_at,
-          updated_at: new Date().toISOString()
-        };
-        
         await updateChapter({
           chapterId,
-          data: updateData
+          data: {
+            ...data,
+            parent_chapter_id: data.parent_chapter_id || null,
+            is_published: data.is_published ?? false
+          }
         });
-        
+
         setLastSaved(new Date());
       } catch (error) {
         console.error('Autosave error:', error);
@@ -88,7 +83,7 @@ export default function EditChapterPage() {
       debouncedSave.cancel();
     };
   }, [debouncedSave]);
-  
+
   // Handle form changes for autosave
   const handleFormChange = useCallback((data: ChapterFormValues) => {
     formDataRef.current = data;
@@ -102,25 +97,18 @@ export default function EditChapterPage() {
     
     try {
       setIsSaving(true);
-      // Prepare the data for update, mapping form values to API expected format
-      const updateData = {
-        ...values,
-        parent_chapter_id: values.parent_chapter_id || null,
-        is_published: values.is_published ?? false,
-        // Ensure all required fields are included
-        id: chapterId,
-        book_id: chapter?.book_id || '',
-        user_id: chapter?.user_id || ''
-      };
-      
       await updateChapter({
         chapterId,
-        data: updateData
+        data: {
+          ...values,
+          parent_chapter_id: values.parent_chapter_id || null,
+          is_published: values.is_published ?? false
+        }
       });
-      
+
       toast.success('Chapter saved successfully');
       setLastSaved(new Date());
-      
+
       return { 
         success: true,
         redirectUrl: `/dashboard/books/${bookSlug}/chapters/${chapterId}`
@@ -139,7 +127,6 @@ export default function EditChapterPage() {
     if (chapter) {
       setLastSaved(new Date(chapter.updated_at));
       // Initialize form data
-      // Map chapter data to form values (only include fields defined in ChapterFormValues)
       formDataRef.current = {
         title: chapter.title,
         content: chapter.content || '',
@@ -148,11 +135,7 @@ export default function EditChapterPage() {
         parent_chapter_id: chapter.parent_chapter_id || null,
         is_published: !chapter.is_draft,
         book_id: chapter.book_id,
-        slug: chapter.slug,
-        // Only include fields that exist in ChapterFormValues
-        id: chapter.id,
-        // Note: user_id, created_at, and updated_at are not part of ChapterFormValues
-        // so they are not included here
+        slug: chapter.slug
       };
     }
   }, [chapter]);
@@ -194,19 +177,6 @@ export default function EditChapterPage() {
     );
   }
 
-  // Filter out current chapter and map to expected format for ParentChapterSelect
-  const availableParentChapters = useMemo(() => 
-    (chaptersData || [])
-      .filter((c: Chapter) => c.id !== chapterId)
-      .map((ch: Chapter) => ({
-        id: ch.id,
-        title: ch.title,
-        level: ch.level || 0,
-        disabled: false
-      })),
-    [chaptersData, chapterId]
-  );
-
   return (
     <div className="container mx-auto p-6 max-w-6xl">
       <div className="flex items-center justify-between mb-6">
@@ -228,7 +198,7 @@ export default function EditChapterPage() {
             </span>
           ) : lastSaved ? (
             <span className="text-sm text-muted-foreground">
-              Last saved: {lastSaved.toLocaleTimeString()}
+              Last saved: {new Date(lastSaved).toLocaleTimeString()}
             </span>
           ) : null}
           <Button
@@ -264,17 +234,21 @@ export default function EditChapterPage() {
               onSubmit={handleSubmit}
               loading={isUpdating}
               disabled={isUpdating}
-              parentChapters={availableParentChapters}
+              parentChapters={(chaptersData || []).filter((c: Chapter) => c?.id !== chapter?.id).map(ch => ({
+                id: ch.id,
+                title: ch.title,
+                level: ch.level,
+                parent_chapter_id: ch.parent_chapter_id || null
+              }))}
               currentChapterId={chapterId}
               bookSlug={bookSlug}
-              submitButtonText="Save Changes"
             />
           )}
         </div>
         
         <div className="lg:col-span-1">
           <div className="sticky top-6 space-y-6">
-            <BooksMenu slug={bookSlug} bookId={chapter?.book_id || ''} />
+            <BooksMenu slug={bookSlug} currentChapterId={chapterId} />
             
             <div className="bg-muted p-4 rounded-lg">
               <h3 className="font-medium mb-2">Chapter Details</h3>
@@ -290,13 +264,176 @@ export default function EditChapterPage() {
                 {chapter.parent_chapter_id && (
                   <div>
                     <span className="text-muted-foreground">Parent Chapter:</span>{' '}
-                    {chaptersData.find((c: Chapter) => c.id === chapter.parent_chapter_id)?.title || 'N/A'}
+                    {(chaptersData || []).find(c => c.id === chapter.parent_chapter_id)?.title || 'N/A'}
                   </div>
                 )}
               </div>
             </div>
           </div>
         </div>
+      </div>
+    </div>
+  );
+        }
+      });
+    }
+    return result;
+  }, [chapter, childrenMap]);
+
+  const parentChapters = useMemo(() => {
+    if (!chapter || !Array.isArray(chapters)) return [];
+    return chapters
+      .filter((c: Chapter) => c?.id !== chapter?.id && !descendants.has(c.id))
+      .map((ch: Chapter) => ({
+        id: ch.id,
+        title: ch.title,
+        level: ch.level,
+        parent_chapter_id: ch.parent_chapter_id
+      }));
+  }, [chapters, chapter, descendants]);
+
+  const handleFormChange = useCallback((data: ChapterFormValues) => {
+    formDataRef.current = data;
+    if (!isSaving) {
+      setIsSaving(true);
+      debouncedSave(data);
+    }
+  }, [debouncedSave, isSaving]);
+
+  const handleSubmit = async (formData: ChapterFormValues): Promise<{ success: boolean; redirectUrl?: string }> => {
+    if (!userId) return { success: false };
+    
+    try {
+      setIsSubmitting(true);
+      setError(null);
+      
+      const token = await getToken();
+      const response = await fetch(`/api/chapters/${chapterId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(formData),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || 'Failed to update chapter');
+      }
+
+      const updatedChapter = await response.json();
+      setChapter(updatedChapter);
+      setLastSaved(new Date());
+      
+      // Show success message and prepare for redirect
+      toast.success('Chapter updated successfully', {
+        duration: 2000,
+        onAutoClose: () => {
+          // Redirect after the toast is closed
+          router.push(`/dashboard/books/${bookSlug}/chapters/${chapterId}`);
+          router.refresh(); // Ensure the latest data is shown
+        }
+      });
+      
+      return { 
+        success: true,
+        redirectUrl: `/dashboard/books/${bookSlug}/chapters/${chapterId}`
+      };
+    } catch (error) {
+      console.error('Error updating chapter:', error);
+      setError('Failed to update chapter');
+      return { success: false };
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-64 flex-col space-y-4">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <span className="text-muted-foreground">Loading chapter data...</span>
+        <div className="text-sm text-muted-foreground">
+          <p>Book: {bookSlug}</p>
+          <p>Chapter ID: {chapterId}</p>
+        </div>
+      </div>
+    );
+  }
+  
+  if (!chapter) {
+    return (
+      <div className="flex flex-col items-center justify-center h-64 space-y-4">
+        <AlertCircle className="h-12 w-12 text-destructive" />
+        <p className="text-lg font-medium">Chapter not found</p>
+        <Button variant="outline" onClick={() => router.back()}>
+          <ArrowLeft className="mr-2 h-4 w-4" /> Go back
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-full max-w-full mx-auto p-4 md:p-8">
+      <div className="flex flex-col space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-2xl font-bold"><span className="text-muted-foreground">Edit:</span> {chapter.title}</h1>
+              {isSaving ? (
+                <span className="text-sm text-muted-foreground">Saving...</span>
+              ) : lastSaved ? (
+                <span className="text-sm text-muted-foreground">
+                  Saved at {lastSaved.toLocaleTimeString()}
+                </span>
+              ) : null}
+            </div>
+            <p className="text-sm text-muted-foreground">Book: {bookSlug}</p>
+          </div>
+          <BooksMenu 
+            slug={bookSlug}
+            bookId={chapter?.book_id || ''}
+            onView={() => router.push(`/dashboard/books/${bookSlug}/chapters/${chapterId}`)}
+          />
+        </div>
+
+        <Separator />
+
+        <div className="relative">
+          {isSubmitting && (
+            <div className="absolute inset-0 bg-background/80 z-10 flex items-center justify-center">
+              <div className="flex items-center gap-2 bg-background p-4 rounded-lg shadow-lg border">
+                <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                <span>Saving changes...</span>
+              </div>
+            </div>
+          )}
+          <ChapterContentForm
+            ref={formRef}
+            onSubmit={handleSubmit}
+            onChange={handleFormChange}
+            initialData={{
+              title: chapter.title,
+              content: chapter.content || '',
+              parent_chapter_id: chapter.parent_chapter_id,
+              book_id: chapter.book_id,
+              order: chapter.order,
+              level: chapter.level,
+              slug: chapter.slug,
+            }}
+            parentChapters={parentChapters}
+            loading={isSubmitting}
+            bookSlug={bookSlug}
+            currentChapterId={chapterId}
+          />
+        </div>
+
+        {formError && (
+          <div className="mt-4 p-4 text-sm text-destructive bg-destructive/10 rounded-md">
+            {formError}
+          </div>
+        )}
       </div>
     </div>
   );

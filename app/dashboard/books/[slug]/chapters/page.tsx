@@ -155,8 +155,8 @@ export default function BookDetailPage({ params, searchParams }: PageProps) {
                     throw new Error('No authentication token found');
                   }
                   
-                  console.log(`Deleting chapter ${chapter.id} from book ${slug}`);
-                  const response = await fetch(`/api/books/by-slug/${slug}/chapters/${chapter.id}`, {
+                  console.log(`Deleting chapter ${chapter.id}`);
+                  const response = await fetch(`/api/chapters/${chapter.id}`, {
                     method: 'DELETE',
                     headers: { 
                       'Authorization': `Bearer ${token}`,

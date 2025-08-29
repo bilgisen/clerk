@@ -1,39 +1,70 @@
 name: Publish Content
 
-# This workflow is called by the backend with session-based authentication
 on:
   workflow_call:
     inputs:
-      session_id:
-        description: 'Publish session ID from the backend'
+      book_id:
+        description: 'ID of the book to publish'
         required: true
         type: string
-      nonce:
-        description: 'One-time nonce for this publish session'
+      user_id:
+        description: 'ID of the user triggering the publish'
+        required: true
+        type: string
+      session_id:
+        description: 'Session ID for tracking the publish process'
         required: true
         type: string
       content_id:
         description: 'Content ID for the book'
         required: true
         type: string
-      slug:
-        description: 'Slug for the book (optional)'
+      include_metadata:
+        description: 'Whether to include metadata in the EPUB'
         required: false
-        type: string
+        type: boolean
+        default: true
+      include_cover:
+        description: 'Whether to include the cover image'
+        required: false
+        type: boolean
+        default: true
+      include_toc:
+        description: 'Whether to include table of contents'
+        required: false
+        type: boolean
+        default: true
+      toc_level:
+        description: 'Depth of the table of contents (1-6)'
+        required: false
+        type: number
+        default: 3
+      include_imprint:
+        description: 'Whether to include imprint page'
+        required: false
+        type: boolean
+        default: true
       metadata:
         description: 'Additional metadata (JSON string)'
         required: false
         type: string
+        default: '{}'
 
 # Required permissions
 permissions:
   contents: read    # Checkout repo
   actions: read     # For workflow run information
+  id-token: write   # For OIDC token generation
 
 # Environment variables
 env:
   NODE_ENV: production
   BACKEND_URL: ${{ vars.BACKEND_URL || 'https://editor.bookshall.com' }}
+  # Set default values for required environment variables
+  BOOK_ID: ${{ inputs.book_id }}
+  USER_ID: ${{ inputs.user_id }}
+  SESSION_ID: ${{ inputs.session_id }}
+  CONTENT_ID: ${{ inputs.content_id }}
 
 jobs:
   build-epub:
@@ -58,23 +89,76 @@ jobs:
           sudo apt-get install -y curl jq pandoc
 
       - name: Validate inputs
+        id: validate_inputs
+        env:
+          TOC_LEVEL: ${{ inputs.toc_level || 3 }}
         run: |
-          if [ -z "${{ inputs.session_id }}" ] || [ -z "${{ inputs.nonce }}" ] || [ -z "${{ inputs.content_id }}" ]; then
-            echo "Missing required inputs"
+          set -e
+          
+          # Validate required inputs
+          if [ -z "$BOOK_ID" ]; then
+            echo "::error::book_id is required"
             exit 1
           fi
           
-          # Set environment variables from inputs
-          echo "SESSION_ID=${{ inputs.session_id }}" >> $GITHUB_ENV
-          echo "NONCE=${{ inputs.nonce }}" >> $GITHUB_ENV
-          echo "CONTENT_ID=${{ inputs.content_id }}" >> $GITHUB_ENV
-          
-          if [ -n "${{ inputs.slug }}" ]; then
-            echo "SLUG=${{ inputs.slug }}" >> $GITHUB_ENV
+          if [ -z "$USER_ID" ]; then
+            echo "::error::user_id is required"
+            exit 1
           fi
           
+          if [ -z "$SESSION_ID" ]; then
+            echo "::error::session_id is required"
+            exit 1
+          fi
+          
+          if [ -z "$CONTENT_ID" ]; then
+            echo "::error::content_id is required"
+            exit 1
+          fi
+          
+          # Validate TOC level
+          if [[ "$TOC_LEVEL" -lt 1 || "$TOC_LEVEL" -gt 6 ]]; then
+            echo "::warning::toc_level must be between 1 and 6, defaulting to 3"
+            TOC_LEVEL=3
+          fi
+          
+          # Set default values for optional inputs
+          INCLUDE_METADATA=${inputs.include_metadata:-true}
+          INCLUDE_COVER=${inputs.include_cover:-true}
+          INCLUDE_TOC=${inputs.include_toc:-true}
+          INCLUDE_IMPRINT=${inputs.include_imprint:-true}
+          
+          # Parse and validate metadata
+          METADATA='{}'
+          if [ -n "${{ inputs.metadata }}" ]; then
+            if ! echo '${{ inputs.metadata }}' | jq -e . >/dev/null 2>&1; then
+              echo "::warning::Invalid JSON in metadata, using empty object"
+            else
+              METADATA='${{ inputs.metadata }}'
+              # Extract slug from metadata if available
+              SLUG=$(echo "$METADATA" | jq -r '.slug // empty')
+              if [ -n "$SLUG" ]; then
+                echo "SLUG=$SLUG" >> $GITHUB_ENV
+              fi
+            fi
+          fi
+          
+          # Export environment variables
+          echo "INCLUDE_METADATA=$INCLUDE_METADATA" >> $GITHUB_ENV
+          echo "INCLUDE_COVER=$INCLUDE_COVER" >> $GITHUB_ENV
+          echo "INCLUDE_TOC=$INCLUDE_TOC" >> $GITHUB_ENV
+          echo "TOC_LEVEL=$TOC_LEVEL" >> $GITHUB_ENV
+          echo "INCLUDE_IMPRINT=$INCLUDE_IMPRINT" >> $GITHUB_ENV
+          echo "METADATA='$METADATA'" >> $GITHUB_ENV
+          
           # Mask sensitive values
-          echo "::add-mask::${{ secrets.COMBINED_TOKEN }}"
+          echo "::add-mask::${{ secrets.GITHUB_TOKEN }}"
+          if [ -n "${{ secrets.R2_ACCESS_KEY_ID }}" ]; then
+            echo "::add-mask::${{ secrets.R2_ACCESS_KEY_ID }}"
+          fi
+          if [ -n "${{ secrets.R2_SECRET_ACCESS_KEY }}" ]; then
+            echo "::add-mask::${{ secrets.R2_SECRET_ACCESS_KEY }}"
+          fi
 
       - name: Update status (started)
         id: update_status_started
@@ -170,7 +254,7 @@ jobs:
           echo "Downloading chapters..."
           jq -r '.chapters[] | .id' ./book-content/payload.json | while read -r chapterId; do
             echo "  - Downloading chapter $chapterId"
-            make_request "$BASE_URL/api/books/by-id/$CONTENT_ID/chapters/$chapterId/html" "./book-content/chapters/chapter-$chapterId.xhtml"
+            make_request "$BASE_URL/api/chapters/$chapterId/html" "./book-content/chapters/chapter-$chapterId.xhtml"
           done
           
           # Download styles
@@ -188,8 +272,14 @@ jobs:
       - name: Generate EPUB
         id: generate_epub
         env:
-          SESSION_ID: ${{ inputs.session_id }}
-          CONTENT_ID: ${{ inputs.content_id }}
+          BOOK_ID: ${{ env.BOOK_ID }}
+          USER_ID: ${{ env.USER_ID }}
+          INCLUDE_METADATA: ${{ env.INCLUDE_METADATA }}
+          INCLUDE_COVER: ${{ env.INCLUDE_COVER }}
+          INCLUDE_TOC: ${{ env.INCLUDE_TOC }}
+          TOC_LEVEL: ${{ env.TOC_LEVEL }}
+          INCLUDE_IMPRINT: ${{ env.INCLUDE_IMPRINT }}
+          METADATA: ${{ env.METADATA || '{}' }}
         run: |
           set -e
           

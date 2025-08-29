@@ -2,10 +2,22 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { GitHubActionsService } from '@/lib/services/github-actions.service';
 import { getAuth } from '@clerk/nextjs/server';
 import { logger } from '@/lib/logger';
+import { db } from '@/db';
+import { books } from '@/db/schema';
+import { eq } from 'drizzle-orm';
 
 // Type definitions for the request and response
+type PublishOptions = {
+  includeMetadata: boolean;
+  includeCover: boolean;
+  includeTOC: boolean;
+  tocLevel: number;
+  includeImprint: boolean;
+};
+
 type TriggerWorkflowRequest = {
-  contentId: string;
+  bookId: string;
+  options: PublishOptions;
   metadata?: Record<string, unknown>;
 };
 
@@ -59,52 +71,59 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { contentId, metadata = {} } = requestBody;
+    const { bookId, options, metadata = {} } = requestBody;
 
-    if (!contentId) {
-      logger.warn('Missing contentId in request', { requestId });
+    if (!bookId) {
+      logger.warn('Missing bookId in request', { requestId });
       return NextResponse.json(
         { 
           success: false,
-          error: 'Content ID is required',
+          error: 'Book ID is required',
+          code: 'VALIDATION_ERROR'
+        },
+        { status: 400 }
+      );
+    }
+    
+    // Validate options
+    if (!options || typeof options !== 'object') {
+      return NextResponse.json(
+        { 
+          success: false,
+          error: 'Invalid options provided',
           code: 'VALIDATION_ERROR'
         },
         { status: 400 }
       );
     }
 
-    logger.info('Initializing publish session', { 
+    logger.info('Triggering EPUB generation', { 
       requestId, 
-      contentId,
-      userId 
+      bookId,
+      userId,
+      options
     });
 
-    // First, initialize a publish session
-    const initResponse = await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/publish/init`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.CLERK_SECRET_KEY}`,
-        'X-Request-ID': requestId
-      },
-      body: JSON.stringify({
-        contentId,
-        metadata: {
-          ...metadata,
-          userId,
-          requestId,
-          timestamp: new Date().toISOString(),
-          userAgent: request.headers.get('user-agent'),
-          ip: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip')
-        }
-      })
+    // Trigger the GitHub Actions workflow
+    const githubService = new GitHubActionsService();
+    const workflowResponse = await githubService.triggerWorkflow({
+      bookId,
+      options,
+      userId,
+      metadata: {
+        ...metadata,
+        requestId,
+        timestamp: new Date().toISOString(),
+        userAgent: request.headers.get('user-agent'),
+        ip: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip')
+      }
     });
 
-    if (!initResponse.ok) {
-      const error = await initResponse.json().catch(() => ({}));
-      logger.error('Failed to initialize publish session', { 
+    if (!workflowResponse.ok) {
+      const error = await workflowResponse.json().catch(() => ({}));
+      logger.error('Failed to trigger workflow', { 
         requestId, 
-        status: initResponse.status,
+        status: workflowResponse.status,
         error 
       });
       
@@ -115,7 +134,7 @@ export async function POST(request: NextRequest) {
           code: error.code || 'SESSION_INIT_FAILED',
           details: error.details
         },
-        { status: initResponse.status || 500 }
+        { status: workflowResponse.status || 500 }
       );
     }
 
@@ -173,6 +192,31 @@ export async function POST(request: NextRequest) {
         },
         { status: 500 }
       );
+    }
+
+    // Save workflow ID to the database
+    if (result.workflowRunId) {
+      try {
+        await db.update(books)
+          .set({ 
+            workflowId: result.workflowRunId,
+            updatedAt: new Date()
+          })
+          .where(eq(books.id, bookId));
+        
+        logger.info('Updated book with workflow ID', { 
+          requestId,
+          bookId,
+          workflowRunId: result.workflowRunId 
+        });
+      } catch (dbError) {
+        logger.error('Failed to update book with workflow ID', { 
+          error: dbError, 
+          bookId, 
+          workflowRunId: result.workflowRunId 
+        });
+        // Continue even if this fails
+      }
     }
 
     const response: TriggerWorkflowResponse = {

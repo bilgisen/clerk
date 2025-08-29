@@ -7,7 +7,8 @@ import { useAuth } from "@clerk/nextjs";
 import dynamic from 'next/dynamic';
 import { Button } from "@/components/ui/button";
 import { Loader2, ArrowLeft, Edit, BookOpen, RefreshCw } from "lucide-react";
-import { useChapter, useChaptersBySlug } from "@/hooks/api/use-chapters";
+import { useChapter } from "@/hooks/useChapter";
+import { useChaptersBySlug } from "@/hooks/api/use-chapters";
 import Link from "next/link";
 
 const LexicalRenderer = dynamic(
@@ -52,7 +53,7 @@ export default function ChapterDetailPage() {
     isLoading: isChapterLoading, 
     error: chapterError, 
     refetch: refetchChapter 
-  } = useChapter(bookSlug, chapterId, { enabled: !!bookSlug && !!chapterId });
+  } = useChapter(chapterId, { enabled: !!chapterId });
   
   const { 
     data: chaptersData, 

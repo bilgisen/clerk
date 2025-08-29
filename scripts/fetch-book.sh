@@ -1,33 +1,47 @@
 #!/bin/bash
-set -e  # Exit on error
+set -euo pipefail  # Exit on error and undefined variables
 
 # ANSI color codes for better output
 readonly RED='\033[0;31m'
 readonly GREEN='\033[0;32m'
 readonly YELLOW='\033[1;33m'
+readonly BLUE='\033[0;34m'
 readonly NC='\033[0m' # No Color
 
 # Set default values
-BASE_URL="${BASE_URL:-https://editor.bookshall.com}"
+BASE_URL="${NEXT_PUBLIC_APP_URL:-https://editor.bookshall.com}"
+API_URL="${API_URL:-$BASE_URL/api}"
 
 # Validate required environment variables
-if [ -z "$CONTENT_ID" ]; then
-  echo -e "${RED}[ERROR] CONTENT_ID is not set${NC}" >&2
-  exit 1
-fi
-
-if [ -z "$COMBINED_TOKEN" ]; then
-  echo -e "${RED}[ERROR] COMBINED_TOKEN is not set${NC}" >&2
-  exit 1
-fi
+required_vars=("BOOK_ID" "GITHUB_TOKEN")
+for var in "${required_vars[@]}"; do
+  if [ -z "${!var:-}" ]; then
+    echo -e "${RED}[ERROR] $var is not set${NC}" >&2
+    exit 1
+  fi
+done
 
 # Set API headers
-AUTH_HEADER="Authorization: Bearer $COMBINED_TOKEN"
-ACCEPT_HEADER="Accept: application/json"
+AUTH_HEADER="Authorization: Bearer $GITHUB_TOKEN"
+ACCEPT_HEADER="Accept: application/vnd.github+json"
 CONTENT_TYPE_HEADER="Content-Type: application/json"
+GITHUB_API_HEADER="X-GitHub-Api-Version: 2022-11-28"
 
 # Create required directories
-mkdir -p ./book-content ./output
+WORKDIR="./work"
+OUTPUT_DIR="${WORKDIR}/output"
+PAYLOAD_DIR="${WORKDIR}/payload"
+
+cleanup() {
+  echo -e "${BLUE}[CLEANUP] Cleaning up working directory...${NC}"
+  rm -rf "${WORKDIR}"
+}
+
+# Set up trap for cleanup
+trap cleanup EXIT
+
+# Create working directories
+mkdir -p "${WORKDIR}" "${OUTPUT_DIR}" "${PAYLOAD_DIR}"
 
 # Logging functions
 log_info() {
@@ -195,9 +209,56 @@ download_with_retry() {
   return 1
 }
 
-# Make the request to fetch book data
-echo -e "${GREEN}📥 Fetching book data for content ID: $CONTENT_ID${NC}"
-mkdir -p ./book-content
+# Function to make authenticated API requests
+make_request() {
+  local url="$1"
+  local method="${2:-GET}"
+  local data="${3:-}"
+  
+  local curl_cmd=(
+    curl -sSfL \
+      -H "${AUTH_HEADER}" \
+      -H "${CONTENT_TYPE_HEADER}" \
+      -H "${ACCEPT_HEADER}" \
+      -X "${method}"
+  )
+  
+  [ -n "${data}" ] && curl_cmd+=(-d "${data}")
+  
+  "${curl_cmd[@]}" "${url}"
+}
+
+# Fetch book data
+echo -e "${GREEN}📥 Fetching book data for book ID: ${BOOK_ID}${NC}"
+
+# Get the workflow run details
+WORKFLOW_RUN_URL="${API_URL}/workflows/${GITHUB_RUN_ID}"
+workflow_data=$(make_request "${WORKFLOW_RUN_URL}")
+book_id=$(echo "${workflow_data}" | jq -r '.inputs.book_id // empty')
+
+if [ -z "${book_id}" ]; then
+  echo -e "${RED}[ERROR] Could not determine book ID from workflow${NC}" >&2
+  exit 1
+fi
+
+# Fetch the book payload
+PAYLOAD_URL="${API_URL}/books/by-id/${book_id}/payload?${WORKFLOW_OPTIONS}"
+payload_data=$(make_request "${PAYLOAD_URL}")
+
+# Save payload to file
+echo "${payload_data}" > "${PAYLOAD_DIR}/payload.json"
+
+# Extract book metadata
+BOOK_TITLE=$(echo "${payload_data}" | jq -r '.metadata.title // "Untitled Book"')
+BOOK_AUTHOR=$(echo "${payload_data}" | jq -r '.metadata.author // "Unknown Author"')
+BOOK_LANG=$(echo "${payload_data}" | jq -r '.metadata.language // "en"')
+
+# Create output filename with timestamp
+TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+OUTPUT_FILENAME="${BOOK_TITLE// /_}-${TIMESTAMP}.epub"
+
+# Log book info
+echo -e "${GREEN}📚 Book: ${BOOK_TITLE} by ${BOOK_AUTHOR} (${BOOK_LANG})${NC}"
 
 # Make the request with verbose output and save debug info
 set -x
@@ -372,7 +433,7 @@ for ((i=0; i<TOTAL_CHAPTERS; i+=BATCH_SIZE)); do
     fi
     
     # Construct the full URL for the chapter
-    FULL_URL="${BASE_URL}/api/books/by-id/${CONTENT_ID}/chapters/${CHAPTER_ID}/html"
+    FULL_URL="${BASE_URL}/api/chapters/${CHAPTER_ID}/html"
     echo -e "  📄 Chapter $ORDER: ${CHAPTER_ID:0:30}..."
     
     # Create a temporary file for the chapter content

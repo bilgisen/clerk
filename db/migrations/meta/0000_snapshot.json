@@ -1,5 +1,5 @@
 {
-  "id": "a3f56cdb-95a2-4fbf-a4d1-8aa7858970d0",
+  "id": "6d7ceb10-0832-4bbd-a373-1d1db04e4aa0",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -220,6 +220,12 @@
         },
         "epub_url": {
           "name": "epub_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "workflow_id": {
+          "name": "workflow_id",
           "type": "text",
           "primaryKey": false,
           "notNull": false

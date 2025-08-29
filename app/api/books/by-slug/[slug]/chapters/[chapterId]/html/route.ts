@@ -1,9 +1,11 @@
+// app/api/books/by-slug/[slug]/chapters/[chapterId]/html/route.ts
 import { type NextRequest, NextResponse } from 'next/server';
 import { db } from '@/db/drizzle';
 import { books, chapters } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { generateCompleteDocumentHTML } from '@/lib/generateChapterHTML';
 import { withGithubOidcAuth, type AuthContextUnion, type HandlerWithAuth } from '@/middleware/old/auth';
+import { logger } from '@/lib/logger';
 
 // Configuration
 export const dynamic = 'force-dynamic';
@@ -51,87 +53,52 @@ const handleRequest: HandlerWithAuth = async (
     const bookWithChapters = await db.query.books.findFirst({
       where: and(
         eq(books.slug, slug),
-        eq(books.userId, userId)
+        // Add any additional conditions here if needed
       ),
       with: {
         chapters: {
-          where: eq(chapters.id, chapterId)
+          where: eq(chapters.bookId, books.id),
+          orderBy: [chapters.order]
         }
       }
     });
 
     if (!bookWithChapters) {
-      logger.warn('Book not found or access denied', { slug, userId });
+      logger.warn('Book not found', { slug });
       return new NextResponse(
-        JSON.stringify({ error: 'Book not found or access denied' }), 
+        JSON.stringify({ error: 'Book not found' }),
         { status: 404, headers: { 'Content-Type': 'application/json' } }
       );
     }
 
-    // Get the requested chapter
-    const chapter = bookWithChapters.chapters[0];
-    if (!chapter) {
-      logger.warn('Chapter not found', { chapterId, bookId: bookWithChapters.id, userId });
-      return new NextResponse(
-        JSON.stringify({ error: 'Chapter not found or access denied' }), 
-        { status: 404, headers: { 'Content-Type': 'application/json' } }
-      );
-    }
-
-    // Get all chapters for the book
-    const allChapters = await db.query.chapters.findMany({
-      where: eq(chapters.bookId, bookWithChapters.id),
-      orderBy: (chapters, { asc }) => [asc(chapters.order)]
-    });
-
-    // Find the requested chapter with case-insensitive comparison
-    const requestedChapter = allChapters.find(c => c.id.toLowerCase() === chapterId.toLowerCase());
+    const requestedChapter = bookWithChapters.chapters.find(c => c.id === chapterId);
     if (!requestedChapter) {
-      logger.warn('Chapter not found in full chapter list', { 
-        chapterId, 
-        bookId: bookWithChapters.id,
-        userId,
-        availableChapters: allChapters.map(c => ({ id: c.id, title: c.title }))
-      });
-      
+      logger.warn('Chapter not found', { bookId: bookWithChapters.id, chapterId });
       return new NextResponse(
-        JSON.stringify({ error: 'Chapter not found' }), 
+        JSON.stringify({ error: 'Chapter not found' }),
         { status: 404, headers: { 'Content-Type': 'application/json' } }
       );
     }
-
-    // Check if the book is published or user has access
-    if (!bookWithChapters.publishedAt && bookWithChapters.userId !== userId) {
-      logger.warn('Book not published or access denied', { slug, userId });
-      return new NextResponse(
-        JSON.stringify({ error: 'Book not published or access denied' }), 
-        { status: 403, headers: { 'Content-Type': 'application/json' } }
-      );
-    }
-
-    // Get direct child chapters
-    const childChapters = allChapters.filter(c => 
-      c.parentChapterId && c.parentChapterId.toLowerCase() === requestedChapter.id.toLowerCase()
-    );
 
     // Generate the HTML content
-    const chapterHTML = generateChapterHTML(requestedChapter, childChapters, bookWithChapters);
-    const completeHTML = generateCompleteDocumentHTML(
-      `${bookWithChapters.title || 'Untitled Book'} - ${requestedChapter.title || 'Untitled Chapter'}`,
-      chapterHTML,
-      {
-        book: bookWithChapters.title || 'Untitled Book',
-        chapter_id: requestedChapter.id,
-        order: requestedChapter.order || 0,
-        level: requestedChapter.level || 1,
-        title_tag: `h${Math.min((requestedChapter.level || 1) + 1, 6)}`,
-        title: requestedChapter.title || 'Untitled Chapter',
-        ...(requestedChapter.parentChapterId ? { parent_chapter: requestedChapter.parentChapterId } : {})
-      }
-    );
+    const title = requestedChapter.title || 'Untitled Chapter';
+    const content = typeof requestedChapter.content === 'string' 
+      ? requestedChapter.content 
+      : '';
+    const metadata = {
+      book: bookWithChapters.title || 'Untitled Book',
+      chapter_id: `ch-${requestedChapter.id}`,
+      order: requestedChapter.order,
+      level: requestedChapter.level,
+      title_tag: `h${Math.min(requestedChapter.level, 6)}`,
+      title: requestedChapter.title || 'Untitled Chapter',
+      parent_chapter: requestedChapter.parentChapterId || undefined
+    };
+    
+    const completeHTML = generateCompleteDocumentHTML(title, content, metadata);
 
     // Log successful response
-    logger.info('Generated chapter HTML', {
+    logger.info('Successfully generated chapter HTML', {
       bookId: bookWithChapters.id,
       chapterId: requestedChapter.id,
       durationMs: Date.now() - requestStart,
@@ -147,40 +114,32 @@ const handleRequest: HandlerWithAuth = async (
         'X-Frame-Options': 'DENY',
         'X-XSS-Protection': '1; mode=block',
         'Referrer-Policy': 'strict-origin-when-cross-origin',
-        'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
-      },
+        'Content-Security-Policy': "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https:;"
+      }
     });
+
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    const errorStack = error instanceof Error ? error.stack : undefined;
-    const statusCode = errorMessage.includes('authentication') ? 401 : 
-                      errorMessage.includes('not found') ? 404 : 500;
-                      
-    logger.error('Unexpected error in chapter HTML handler', {
-      error: errorMessage,
-      stack: errorStack,
+    logger.error('Error generating chapter HTML', {
+      error: error instanceof Error ? error.message : 'Unknown error',
+      stack: error instanceof Error ? error.stack : undefined,
       bookSlug: slug,
       chapterId,
       userId,
-      timestamp: new Date().toISOString()
+      durationMs: Date.now() - requestStart
     });
-    
+
     return new NextResponse(
       JSON.stringify({ 
-        error: 'An unexpected error occurred',
-        code: 'INTERNAL_SERVER_ERROR'
-      }), { 
-        status: statusCode,
-        headers: {
-          'Content-Type': 'application/json',
-          'Cache-Control': 'no-store, no-cache, must-revalidate',
-          'Pragma': 'no-cache',
-        },
+        error: 'Internal server error',
+        requestId: request.headers.get('x-request-id') || crypto.randomUUID()
+      }),
+      { 
+        status: 500,
+        headers: { 'Content-Type': 'application/json' }
       }
     );
   }
-}
+};
 
 // Export the wrapped handler
-// Wrap the handler with GitHub OIDC authentication
 export const GET = withGithubOidcAuth(handleRequest);

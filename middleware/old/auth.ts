@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest, NextFetchEvent } from 'next/server';
 import { auth, currentUser } from '@clerk/nextjs/server';
 import { verifyGitHubOidcToken } from './github-oidc';
-import { AuthType, ClerkAuthContext, GitHubOidcAuthContext, GitHubOidcClaims } from '../lib/types/auth';
+import { AuthType, ClerkAuthContext, GitHubOidcAuthContext, GitHubOidcClaims } from '../../lib/types/auth';
 
 export type AuthContextUnion = ClerkAuthContext | GitHubOidcAuthContext | { type: 'unauthorized' };
 

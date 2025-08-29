@@ -1,15 +1,25 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import { useState } from 'react';
+import { useParams, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { useAuth } from '@clerk/nextjs';
-import { Loader2, CheckCircle2, AlertCircle, Download } from 'lucide-react';
+import { Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Progress } from '@/components/ui/progress';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
+import { Slider } from '@/components/ui/slider';
 
-type PublishStatus = 'idle' | 'initializing' | 'ready' | 'publishing' | 'processing' | 'completed' | 'failed';
+type PublishStatus = 'idle' | 'publishing' | 'completed' | 'failed';
+
+interface PublishOptions {
+  includeMetadata: boolean;
+  includeCover: boolean;
+  includeTOC: boolean;
+  tocLevel: number;
+  includeImprint: boolean;
+}
 
 interface BookData {
   id: string;
@@ -17,295 +27,331 @@ interface BookData {
   epubUrl?: string;
   coverImageUrl?: string;
   author?: string;
+  publishStatus?: 'DRAFT' | 'GENERATING' | 'PUBLISHED' | 'FAILED';
+  publishError?: string | null;
 }
-
-// Polling interval in milliseconds
-const POLL_INTERVAL = 5000; // 5 seconds
 
 export default function GenerateEbookPage() {
   const { slug } = useParams();
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const { getToken, userId } = useAuth();
+  const { getToken } = useAuth();
   
   // State management
-  const [status, setStatus] = useState<PublishStatus>('initializing');
-  const [sessionId, setSessionId] = useState<string | null>(null);
-  const [authToken, setAuthToken] = useState<string | null>(null);
-  const [bookData, setBookData] = useState<BookData | null>(null);
-  const [progress, setProgress] = useState(0);
-  const [message, setMessage] = useState('Initializing...');
+  const [status, setStatus] = useState<PublishStatus>('idle');
+  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
+  
+  // Publish options
+  const [options, setOptions] = useState<PublishOptions>({
+    includeMetadata: true,
+    includeCover: true,
+    includeTOC: true,
+    tocLevel: 3,
+    includeImprint: true
+  });
 
-  // Initialize component
-  useEffect(() => {
-    const init = async () => {
-      try {
-        // Get session ID from URL or create a new one
-        const urlSessionId = searchParams.get('sessionId');
-        if (urlSessionId) {
-          setSessionId(urlSessionId);
-          setStatus('ready');
-          setMessage('Ready to generate EPUB');
-        } else {
-          setStatus('initializing');
-          setMessage('Initializing new session...');
+  // Poll workflow status with retry logic
+  const pollWorkflowStatus = async (workflowRunId: string, retryCount = 0): Promise<{status: string; epubUrl?: string; error?: string}> => {
+    const MAX_RETRIES = 3;
+    const RETRY_DELAY = 5000; // 5 seconds
+    
+    try {
+      const response = await fetch(`/api/workflows/${workflowRunId}/status`, {
+        headers: {
+          'Authorization': `Bearer ${await getToken()}`,
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0'
         }
+      });
+      
+      if (!response.ok) {
+        if (response.status === 401) {
+          throw new Error('Session expired. Please refresh the page and try again.');
+        }
+        throw new Error(`Failed to check workflow status: ${response.statusText}`);
+      }
+      
+      return await response.json();
+      
+    } catch (error) {
+      // If we have retries left, wait and try again
+      if (retryCount < MAX_RETRIES) {
+        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+        return pollWorkflowStatus(workflowRunId, retryCount + 1);
+      }
+      
+      // If we're out of retries, rethrow the error
+      console.error('Max retries reached while polling workflow status:', error);
+      throw error;
+    }
+  };
 
-        // Get auth token
-        const token = await getToken();
-        if (!token) throw new Error('No session token available');
-        setAuthToken(token);
-
-        // Fetch book data
-        if (slug) {
-          const bookSlug = Array.isArray(slug) ? slug[0] : slug;
-          const res = await fetch(`/api/books/by-slug/${bookSlug}`, { 
-            headers: { Authorization: `Bearer ${token}` }
-          });
+  // Start polling with exponential backoff
+  const startPolling = (workflowRunId: string, baseInterval = 5000, maxInterval = 30000) => {
+    let polling = true;
+    let attempt = 0;
+    
+    const checkStatus = async () => {
+      if (!polling) return;
+      
+      try {
+        const { status, epubUrl, error } = await pollWorkflowStatus(workflowRunId);
+        
+        if (status === 'completed') {
+          setStatus('completed');
+          setIsLoading(false);
+          polling = false;
           
-          if (res.ok) {
-            const book = await res.json();
-            setBookData(book);
-            
-            // If EPUB already exists, update status
-            if (book.epubUrl) {
-              setDownloadUrl(book.epubUrl);
-              setStatus('completed');
-              setMessage('EPUB already generated');
-            } else if (status === 'initializing') {
-              setStatus('ready');
-              setMessage('Ready to generate EPUB');
+          if (epubUrl) {
+            toast.success('EPUB generated successfully!', {
+              action: {
+                label: 'Download',
+                onClick: () => window.open(epubUrl, '_blank')
+              }
+            });
+          }
+          return;
+        } 
+        
+        if (status === 'failed') {
+          throw new Error(error || 'EPUB generation failed');
+        }
+        
+        // If still in progress, schedule next check with exponential backoff
+        if (polling) {
+          attempt++;
+          const delay = Math.min(baseInterval * Math.pow(1.5, attempt), maxInterval);
+          setTimeout(checkStatus, delay);
+        }
+        
+      } catch (error) {
+        setStatus('failed');
+        setIsLoading(false);
+        polling = false;
+        
+        const errorMessage = error instanceof Error ? error.message : 'Failed to generate EPUB';
+        setError(errorMessage);
+        
+        toast.error('EPUB Generation Failed', {
+          description: errorMessage,
+          action: {
+            label: 'Retry',
+            onClick: () => {
+              setStatus('idle');
+              setError(null);
+              handleSubmit(new Event('retry') as unknown as React.FormEvent);
             }
           }
-        }
-      } catch (error) {
-        console.error('Initialization error:', error);
-        setError('Failed to initialize. Please refresh the page.');
-        setStatus('failed');
-        toast.error('Initialization failed', {
-          description: 'Could not load book data. Please try again.'
         });
       }
     };
+    
+    // Start the polling
+    checkStatus();
+    
+    // Return a cleanup function to stop polling
+    return () => {
+      polling = false;
+    };
+  };
 
-    init();
-  }, [getToken, searchParams, slug]);
-
-  // Handle EPUB generation
-  const handleGenerateEPUB = async () => {
-    if (!bookData?.id || !authToken) {
-      toast.error('Missing required information');
-      return;
-    }
-
+  // Handle form submission
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
     try {
+      setIsLoading(true);
       setStatus('publishing');
       setError(null);
-      setMessage('Starting EPUB generation...');
-      setProgress(0);
-
-      // Create or update session
-      const sessionResponse = await fetch('/api/publish/init', {
+      
+      // Show loading toast
+      const toastId = toast.loading('Starting EPUB generation...');
+      
+      const response = await fetch(`/api/books/by-slug/${slug}/publish`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${authToken}`
+          'Authorization': `Bearer ${await getToken()}`
         },
-        body: JSON.stringify({ 
-          bookId: bookData.id,
-          format: 'epub'
+        body: JSON.stringify({
+          format: 'epub',
+          options
         })
       });
-
-      if (!sessionResponse.ok) {
-        throw new Error('Failed to initialize publishing session');
-      }
-
-      const { sessionId: newSessionId } = await sessionResponse.json();
-      setSessionId(newSessionId);
-
-      // Trigger EPUB generation
-      const response = await fetch('/api/publish/trigger', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${authToken}`
-        },
-        body: JSON.stringify({ 
-          sessionId: newSessionId,
-          bookId: bookData.id,
-          format: 'epub'
-        })
-      });
-
+      
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to start EPUB generation');
+        throw new Error(errorData.error || 'Failed to start publishing');
       }
-
-      // Start polling for updates
-      startPolling(newSessionId);
       
-      toast.success('EPUB generation started', {
-        description: 'Your EPUB is being generated. This may take a few minutes.'
+      const { workflowRunId, workflowUrl } = await response.json();
+      
+      // Update toast
+      toast.loading('Generating EPUB. This may take a few minutes...', {
+        id: toastId,
+        action: {
+          label: 'View Progress',
+          onClick: () => window.open(workflowUrl, '_blank')
+        }
       });
+      
+      // Start polling for status
+      startPolling(workflowRunId);
+      
     } catch (error) {
-      console.error('Error generating EPUB:', error);
+      console.error('Publish error:', error);
       setStatus('failed');
-      setError(error instanceof Error ? error.message : 'Failed to generate EPUB');
-      toast.error('Generation failed', {
-        description: 'Could not start EPUB generation. Please try again.'
+      setError(error instanceof Error ? error.message : 'Failed to start publishing');
+      toast.error('Failed to start publishing', {
+        description: error instanceof Error ? error.message : 'An unknown error occurred'
       });
+      setIsLoading(false);
     }
   };
-
-  // Poll for status updates
-  const startPolling = (sessionId: string) => {
-    const poll = async () => {
-      if (status === 'completed' || status === 'failed') return;
-
-      try {
-        const response = await fetch(`/api/publish/status?sessionId=${sessionId}`, {
-          headers: {
-            'Authorization': `Bearer ${authToken}`
-          }
-        });
-
-        if (!response.ok) throw new Error('Failed to fetch status');
-        
-        const data = await response.json();
-        
-        // Update status and progress
-        if (data.status) setStatus(data.status);
-        if (data.progress) setProgress(data.progress);
-        if (data.message) setMessage(data.message);
-        
-        // Handle completion
-        if (data.status === 'completed' && data.downloadUrl) {
-          setDownloadUrl(data.downloadUrl);
-          setStatus('completed');
-          setMessage('EPUB generation complete!');
-          setProgress(100);
-          return;
-        }
-        
-        // Continue polling if still in progress
-        if (data.status !== 'completed' && data.status !== 'failed') {
-          setTimeout(poll, POLL_INTERVAL);
-        }
-      } catch (error) {
-        console.error('Polling error:', error);
-        // Retry after delay
-        setTimeout(poll, POLL_INTERVAL);
-      }
-    };
-
-    poll();
+  
+  // Handle option changes
+  const handleOptionChange = (key: keyof PublishOptions, value: any) => {
+    setOptions(prev => ({
+      ...prev,
+      [key]: value
+    }));
   };
 
-  // Render status UI
-  const renderStatus = () => {
-    switch (status) {
-      case 'initializing':
-        return (
-          <div className="flex flex-col items-center justify-center py-8">
-            <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
-            <p className="text-muted-foreground">{message}</p>
-          </div>
-        );
-      
-      case 'ready':
-        return (
-          <div className="flex flex-col items-center py-8">
-            <p className="mb-6 text-center text-muted-foreground">
-              Click the button below to generate an EPUB version of your book.
-            </p>
-            <Button 
-              onClick={handleGenerateEPUB}
-              disabled={!bookData}
-              className="w-48"
-            >
-              Generate EPUB
-            </Button>
-          </div>
-        );
-      
-      case 'publishing':
-      case 'processing':
-        return (
-          <div className="flex flex-col items-center py-8 space-y-4">
-            <Loader2 className="h-8 w-8 animate-spin text-primary" />
-            <p className="text-muted-foreground">{message}</p>
-            <Progress value={progress} className="w-full max-w-md" />
-            <p className="text-sm text-muted-foreground">{progress}% complete</p>
-          </div>
-        );
-      
-      case 'completed':
-        return (
-          <div className="flex flex-col items-center py-8 space-y-4">
-            <div className="rounded-full bg-green-100 p-3">
-              <CheckCircle2 className="h-8 w-8 text-green-600" />
-            </div>
-            <h3 className="text-lg font-medium">EPUB Generated Successfully!</h3>
-            <p className="text-muted-foreground text-center">
-              Your EPUB file is ready to download.
-            </p>
-            {downloadUrl && (
-              <a
-                href={downloadUrl}
-                download
-                className="mt-4"
-              >
-                <Button>
-                  <Download className="mr-2 h-4 w-4" />
-                  Download EPUB
-                </Button>
-              </a>
-            )}
-          </div>
-        );
-      
-      case 'failed':
-        return (
-          <div className="flex flex-col items-center py-8 space-y-4">
-            <div className="rounded-full bg-red-100 p-3">
-              <AlertCircle className="h-8 w-8 text-red-600" />
-            </div>
-            <h3 className="text-lg font-medium">Generation Failed</h3>
-            <p className="text-muted-foreground text-center">
-              {error || 'An unknown error occurred'}
-            </p>
-            <Button 
-              onClick={handleGenerateEPUB}
-              variant="outline"
-              className="mt-4"
-            >
-              Try Again
-            </Button>
-          </div>
-        );
-      
-      default:
-        return null;
-    }
-  };
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="text-center space-y-4">
+          <Loader2 className="h-12 w-12 animate-spin mx-auto text-primary" />
+          <p className="text-muted-foreground">Processing your request...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="container mx-auto py-8 px-4 max-w-4xl">
-      <Card>
-        <CardHeader className="border-b">
-          <CardTitle>Generate EPUB</CardTitle>
-          <CardDescription>
-            {bookData ? `Generate an EPUB version of "${bookData.title}"` : 'Loading book details...'}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="pt-6">
-          {renderStatus()}
-        </CardContent>
-      </Card>
+    <div className="container mx-auto py-8 max-w-4xl">
+      <form onSubmit={handleSubmit}>
+        <Card>
+          <CardHeader>
+            <CardTitle>Publish as EPUB</CardTitle>
+            <CardDescription>
+              Configure the EPUB generation options below
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-6">
+              {/* Publishing Options */}
+              <div className="space-y-4">
+                <div className="flex items-center space-x-2">
+                  <Checkbox 
+                    id="includeMetadata" 
+                    checked={options.includeMetadata}
+                    onCheckedChange={(checked) => handleOptionChange('includeMetadata', checked)}
+                  />
+                  <Label htmlFor="includeMetadata">Include Metadata</Label>
+                </div>
+
+                <div className="flex items-center space-x-2">
+                  <Checkbox 
+                    id="includeCover" 
+                    checked={options.includeCover}
+                    onCheckedChange={(checked) => handleOptionChange('includeCover', checked)}
+                  />
+                  <Label htmlFor="includeCover">Include Cover</Label>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center space-x-2">
+                    <Checkbox 
+                      id="includeTOC" 
+                      checked={options.includeTOC}
+                      onCheckedChange={(checked) => handleOptionChange('includeTOC', checked)}
+                    />
+                    <Label htmlFor="includeTOC">Include Table of Contents</Label>
+                  </div>
+                  
+                  {options.includeTOC && (
+                    <div className="pl-6 space-y-2">
+                      <Label htmlFor="tocLevel">TOC Level: {options.tocLevel}</Label>
+                      <Slider
+                        id="tocLevel"
+                        min={1}
+                        max={5}
+                        step={1}
+                        value={[options.tocLevel]}
+                        onValueChange={([value]) => handleOptionChange('tocLevel', value)}
+                        className="w-full max-w-md"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex items-center space-x-2">
+                  <Checkbox 
+                    id="includeImprint" 
+                    checked={options.includeImprint}
+                    onCheckedChange={(checked) => handleOptionChange('includeImprint', checked)}
+                  />
+                  <Label htmlFor="includeImprint">Include Imprint Page</Label>
+                </div>
+              </div>
+
+              {/* Status and Actions */}
+              <div className="space-y-4 pt-4">
+                {status !== 'idle' && (
+                  <div className="flex items-center space-x-2">
+                    {status === 'publishing' && (
+                      <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                    )}
+                    {status === 'completed' && (
+                      <CheckCircle2 className="h-5 w-5 text-green-500" />
+                    )}
+                    {status === 'failed' && (
+                      <AlertCircle className="h-5 w-5 text-destructive" />
+                    )}
+                    <p className="text-sm font-medium">
+                      {status === 'publishing' && 'Generating your EPUB...'}
+                      {status === 'completed' && 'Your EPUB is ready!'}
+                      {status === 'failed' && 'Failed to generate EPUB'}
+                    </p>
+                  </div>
+                )}
+
+                {error && (
+                  <div className="p-4 bg-destructive/10 text-destructive rounded-md text-sm">
+                    {error}
+                  </div>
+                )}
+
+                <div className="flex justify-end space-x-2 pt-4">
+                  <Button 
+                    variant="outline" 
+                    type="button"
+                    onClick={() => router.push(`/dashboard/books/${slug}`)}
+                  >
+                    Cancel
+                  </Button>
+                  
+                  <Button 
+                    type="submit"
+                    disabled={isLoading}
+                  >
+                    {isLoading ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Processing...
+                      </>
+                    ) : (
+                      'Generate EPUB'
+                    )}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </form>
     </div>
   );
 }

@@ -199,7 +199,7 @@ function ChapterItem({ chapter, bookSlug, level }: ChapterItemProps) {
     
     try {
       const token = await getToken();
-      const response = await fetch(`/api/books/by-slug/${bookSlug}/chapters/${chapter.id}`, {
+      const response = await fetch(`/api/chapters/${chapter.id}`, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${token}`,

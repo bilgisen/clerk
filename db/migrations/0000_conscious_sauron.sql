@@ -32,6 +32,7 @@ CREATE TABLE "books" (
 	"language" text DEFAULT 'tr',
 	"cover_image_url" text,
 	"epub_url" text,
+	"workflow_id" text,
 	"is_published" boolean DEFAULT false NOT NULL,
 	"is_featured" boolean DEFAULT false NOT NULL,
 	"view_count" integer DEFAULT 0 NOT NULL,

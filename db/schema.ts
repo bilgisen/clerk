@@ -120,6 +120,7 @@ export const books = pgTable('books', {
   // Media
   coverImageUrl: text('cover_image_url'),
   epubUrl: text('epub_url'),
+  workflowId: text('workflow_id'),
 
   // Metadata
   isPublished: boolean('is_published').default(false).notNull(),
@@ -133,6 +134,7 @@ export const books = pgTable('books', {
 }, (table) => ({
   userIdIdx: { columns: [table.userId] },
   slugIdx: { columns: [table.slug] },
+  workflowIdIdx: { columns: [table.workflowId] },
   authorIdx: { columns: [table.author] },
   genreIdx: { columns: [table.genre] },
   publishedIdx: { columns: [table.isPublished, table.publishedAt] },
