@@ -43,32 +43,20 @@ const nextConfig: NextConfig = {
     ];
   },
   
-  // Webpack and experimental features configuration
-  experimental: {
-    // Enable server components external packages
-    serverComponentsExternalPackages: ['@upstash/redis'],
-    // Enable server actions with allowed origins
-    serverActions: {
-      bodySizeLimit: '2mb',
-      allowedOrigins: [
-        'localhost:3000',
-        'editor.bookshall.com',
-        'clerk.editor.bookshall.com',
-        // Add other production domains as needed
-      ],
-    },
-    // Enable middleware (implicitly enabled by Next.js when using middleware.ts)
-  },
+  // Webpack configuration
   webpack: (config, { isServer }) => {
     // Only apply these changes for client-side bundles
     if (!isServer) {
       // Set fallbacks for Node.js core modules
       config.resolve.fallback = {
         ...config.resolve.fallback,
+        // Crypto and related polyfills
+        crypto: require.resolve('crypto-browserify'),
+        stream: require.resolve('stream-browserify'),
+        buffer: require.resolve('buffer/'),
+        // Disable other Node.js core modules
         net: false,
         tls: false,
-        crypto: false,
-        stream: false,
         fs: false,
         dns: false,
         http2: false,
@@ -78,6 +66,19 @@ const nextConfig: NextConfig = {
       };
     }
     return config;
+  },
+  
+  // Experimental features configuration
+  experimental: {
+    // Enable server actions with allowed origins
+    serverActions: {
+      bodySizeLimit: '2mb',
+      allowedOrigins: [
+        'localhost:3000',
+        'editor.bookshall.com',
+        'clerk.editor.bookshall.com',
+      ],
+    },
   },
 
   // Environment variables

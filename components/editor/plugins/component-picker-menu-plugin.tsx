@@ -84,7 +84,7 @@ export function ComponentPickerMenuPlugin({
   return (
     <>
       {modal}
-      {/* @ts-ignore */}
+      {/* @ts-expect-error - LexicalTypeaheadMenuPlugin generic type needs update */}
       <LexicalTypeaheadMenuPlugin<ComponentPickerOption>
         onQueryChange={setQueryString}
         onSelectOption={onSelectOption}

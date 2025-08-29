@@ -70,8 +70,8 @@ const ChapterContentForm = React.forwardRef<HTMLFormElement, ChapterContentFormP
   };
 
   const form = useForm<ChapterFormValues>({
-    // @ts-ignore - TypeScript has issues with the resolver type
-    resolver: zodResolver(chapterFormSchema) as any,
+    // @ts-expect-error - TypeScript has issues with the resolver type from zod
+    resolver: zodResolver(chapterFormSchema),
     defaultValues,
     mode: 'onChange',
   });

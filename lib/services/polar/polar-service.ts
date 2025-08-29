@@ -1,4 +1,6 @@
 // Environment variables are accessed directly from process.env in Next.js API routes
+import crypto from 'crypto';
+
 const POLAR_API_URL = process.env.NEXT_PUBLIC_POLAR_API_URL || "https://api.polar.sh";
 
 interface PolarCheckoutSession {
@@ -116,7 +118,6 @@ export class PolarService {
    * Verify a webhook signature
    */
   public verifyWebhookSignature(payload: string, signature: string): boolean {
-    const crypto = require('crypto');
     const secret = process.env.POLAR_WEBHOOK_SECRET;
     
     if (!secret) {

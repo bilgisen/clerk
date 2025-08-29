@@ -12,11 +12,11 @@ export function caretFromPoint(
     }
     return {
       node: range.startContainer,
-      offset: range.startOffset,
+      offset: rangeOffset,
     }
-    // @ts-ignore
+    // @ts-expect-error - caretPositionFromPoint is not in TypeScript's DOM types
   } else if (document.caretPositionFromPoint !== "undefined") {
-    // @ts-ignore FF - no types
+    // @ts-expect-error - caretPositionFromPoint is not in TypeScript's DOM types
     const range = document.caretPositionFromPoint(x, y)
     if (range === null) {
       return null

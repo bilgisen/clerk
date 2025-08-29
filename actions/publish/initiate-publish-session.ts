@@ -1,9 +1,9 @@
 'use server';
 
-import { auth } from '@clerk/nextjs';
+import { auth } from '@clerk/nextjs/server';
 import { revalidatePath } from 'next/cache';
 import { generateId } from '@/lib/utils';
-import { redis } from '@/lib/redis/client';
+import { getRedisClient } from '@/lib/redis/client';
 
 interface InitiatePublishSessionParams {
   bookId: string;
@@ -20,7 +20,9 @@ export async function initiatePublishSession({
   format,
   metadata,
 }: InitiatePublishSessionParams): Promise<{ sessionId: string }> {
-  const { userId, orgId } = auth();
+  const session = await auth();
+  const userId = session.userId;
+  const orgId = session.orgId;
   
   if (!userId) {
     throw new Error('You must be signed in to publish a book');
@@ -48,11 +50,13 @@ export async function initiatePublishSession({
   };
 
   try {
-    // Store session in Redis with 24-hour expiration
+    // Store the session in Redis
+    const redis = getRedisClient();
     await redis.set(
-      `publish:${sessionId}`, 
+      `publish:${sessionId}`,
       JSON.stringify(sessionData),
-      { ex: 60 * 60 * 24 } // 24 hours
+      'EX',
+      60 * 60 * 24 // 24 hours
     );
     
     // Update user's recent sessions
@@ -73,6 +77,7 @@ export async function initiatePublishSession({
 // Helper function to get session data
 export async function getPublishSession(sessionId: string) {
   try {
+    const redis = getRedisClient();
     const sessionData = await redis.get(`publish:${sessionId}`);
     return sessionData ? JSON.parse(sessionData) : null;
   } catch (error) {
@@ -87,6 +92,7 @@ export async function updatePublishSession(
   updates: Record<string, any>
 ) {
   try {
+    const redis = getRedisClient();
     const session = await getPublishSession(sessionId);
     if (!session) {
       throw new Error('Session not found');
@@ -101,7 +107,8 @@ export async function updatePublishSession(
     await redis.set(
       `publish:${sessionId}`, 
       JSON.stringify(updatedSession),
-      { ex: 60 * 60 * 24 } // Reset TTL to 24 hours
+      'EX',
+      60 * 60 * 24 // Reset TTL to 24 hours
     );
     
     return updatedSession;

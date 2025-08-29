@@ -36,8 +36,9 @@ export function FontFormatToolbarPlugin({
 
   const $updateToolbar = (selection: BaseSelection) => {
     if ($isRangeSelection(selection) || $isTableSelection(selection)) {
-      // @ts-ignore
-      setIsSelected(selection.hasFormat(format as TextFormatType))
+      // Type assertion to access hasFormat
+      const rangeSelection = selection as unknown as { hasFormat: (format: string) => boolean };
+      setIsSelected(rangeSelection.hasFormat(format as string));
     }
   }
 

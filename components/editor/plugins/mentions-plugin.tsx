@@ -640,7 +640,7 @@ export function MentionsPlugin(): JSX.Element | null {
   )
 
   return (
-    // @ts-ignore
+    // @ts-expect-error - LexicalTypeaheadMenuPlugin generic type needs update
     <LexicalTypeaheadMenuPlugin<MentionTypeaheadOption>
       onQueryChange={setQueryString}
       onSelectOption={onSelectOption}

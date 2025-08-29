@@ -17,10 +17,10 @@ export function SubSuperToolbarPlugin() {
 
   const $updateToolbar = (selection: BaseSelection) => {
     if ($isRangeSelection(selection) || $isTableSelection(selection)) {
-      // @ts-ignore
-      setIsSubscript(selection.hasFormat("subscript"))
-      // @ts-ignore
-      setIsSuperscript(selection.hasFormat("superscript"))
+      // Type assertion to access hasFormat
+      const rangeSelection = selection as unknown as { hasFormat: (format: string) => boolean };
+      setIsSubscript(rangeSelection.hasFormat("subscript"));
+      setIsSuperscript(rangeSelection.hasFormat("superscript"));
     }
   }
 
