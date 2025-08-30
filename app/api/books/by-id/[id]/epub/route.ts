@@ -15,26 +15,23 @@ const UpdateEpubSchema = z.object({
 // Protected by GitHub OIDC. Called by CI after uploading EPUB to R2.
 // Headers: { Authorization: 'Bearer <github-oidc-token>' }
 // Body: { epubUrl: string }
-// Define the handler with explicit types
-const handler = async (
+const handler: HandlerWithAuth = async (
   req: NextRequest,
-  context: {
-    params?: Record<string, string>;
-    authContext: AuthContextUnion;
-  } = { 
-    authContext: { 
-      type: 'github-oidc',
+  context = {
+    params: { id: '' },
+    authContext: {
+      type: 'github-oidc' as const,
       userId: 'system',
-      claims: { 
+      claims: {
         sub: 'system',
         iss: 'https://token.actions.githubusercontent.com',
         aud: 'https://api.clerko.com',
-        exp: Math.floor(Date.now() / 1000) + 3600, // 1 hour from now
+        exp: Math.floor(Date.now() / 1000) + 3600,
         iat: Math.floor(Date.now() / 1000),
         repository: 'system/repo',
         repository_owner: 'system',
-        run_id: '1',
         workflow: 'system-workflow',
+        run_id: '1',
         actor: 'system',
         ref: 'refs/heads/main',
         sha: 'a1b2c3d4e5f6g7h8i9j0',
@@ -42,46 +39,36 @@ const handler = async (
       },
       repository: 'system/repo',
       repositoryOwner: 'system',
+      workflow: 'system-workflow',
+      runId: '1',
       actor: 'system',
       ref: 'refs/heads/main',
-      sha: 'a1b2c3d4e5f6g7h8i9j0',
-      workflow: 'system-workflow',
-      runId: '1'
-    } 
+      sha: 'a1b2c3d4e5f6g7h8i9j0'
+    }
   }
-): Promise<NextResponse> => {
-  const { params = {}, authContext } = context || {};
-  const oidcClaims = authContext as AuthContextUnion & { type: 'github-oidc' };
-  const id = params?.id;
-  
-  if (!id) {
-    return NextResponse.json(
-      { error: 'Book ID is required' },
-      { status: 400 }
-    );
-  }
+) => {
   try {
-    // Log OIDC context for audit
-    logger.info('OIDC-authenticated EPUB update request', {
-      repository: oidcClaims.repository,
-      workflow: oidcClaims.workflow,
-      run_id: oidcClaims.run_id,
-      bookId: params.id
-    });
-
-    // Extract book ID from params
-    const { id } = params;
+    const { id } = context.params || {};
+    const oidcClaims = context.authContext as AuthContextUnion & { type: 'github-oidc' };
     
     if (!id) {
       return NextResponse.json(
-        { error: 'missing_book_id', message: 'Book ID is required' },
+        { error: 'book_id_required', message: 'Book ID is required' },
         { status: 400 }
       );
     }
 
+    // Log OIDC context for audit
+    logger.info('OIDC-authenticated EPUB update request', {
+      repository: oidcClaims.repository,
+      workflow: oidcClaims.workflow,
+      runId: oidcClaims.runId,
+      bookId: id
+    });
+
     // Validate book ID format (should be a valid UUID)
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    if (!id || !uuidRegex.test(id)) {
+    if (!uuidRegex.test(id)) {
       logger.error('Invalid book ID format', { bookId: id });
       return NextResponse.json(
         { error: 'invalid_book_id', message: 'Invalid book ID format' }, 
@@ -96,7 +83,7 @@ const handler = async (
       const validation = UpdateEpubSchema.safeParse(body);
       
       if (!validation.success) {
-        console.error('Validation error:', validation.error);
+        logger.error('Validation error', { error: validation.error });
         return NextResponse.json(
           { 
             error: 'validation_error', 
@@ -109,7 +96,7 @@ const handler = async (
       
       body = validation.data;
     } catch (error) {
-      logger.error('Error updating EPUB URL', { error, bookId: id });
+      logger.error('Error parsing request body', { error });
       return NextResponse.json(
         { error: 'invalid_json', message: 'Invalid JSON in request body' },
         { status: 400 }
@@ -128,14 +115,14 @@ const handler = async (
         .returning();
 
       if (!updated) {
-        console.error('Book not found or not updated:', id);
+        logger.error('Book not found or not updated', { bookId: id });
         return NextResponse.json(
           { error: 'book_not_found', message: 'Book not found or could not be updated' }, 
           { status: 404 }
         );
       }
 
-      console.log('Successfully updated book with EPUB URL:', {
+      logger.info('Successfully updated book with EPUB URL', {
         bookId: updated.id,
         epubUrl: updated.epubUrl
       });
@@ -146,7 +133,7 @@ const handler = async (
         epubUrl: updated.epubUrl
       });
     } catch (dbError) {
-      console.error('Database error during update:', dbError);
+      logger.error('Database error during update', { error: dbError });
       return NextResponse.json(
         { 
           error: 'database_error', 
@@ -156,19 +143,18 @@ const handler = async (
         { status: 500 }
       );
     }
-  } catch (err) {
-    console.error('Unexpected error in EPUB callback:', err);
+  } catch (error) {
+    logger.error('Unexpected error in EPUB callback', { error });
     return NextResponse.json(
       { 
         error: 'internal_server_error', 
         message: 'An unexpected error occurred',
-        details: err instanceof Error ? err.message : String(err)
+        details: error instanceof Error ? error.message : String(error)
       }, 
       { status: 500 }
     );
   }
-}
+};
 
 // Export the handler wrapped with GitHub OIDC auth middleware
-// Export the handler wrapped with GitHub OIDC auth middleware
-export const POST = withGithubOidcAuth(handler as HandlerWithAuth);
+export const POST = withGithubOidcAuth(handler as unknown as HandlerWithAuth);

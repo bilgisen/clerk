@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { CheckCircle2, Loader2 } from "lucide-react";
 import Link from "next/link";
-import { verifyAndUpdateCredits } from './actions';
 
 export default function SuccessPage() {
   const searchParams = useSearchParams();
@@ -25,16 +24,24 @@ export default function SuccessPage() {
       }
 
       try {
-        const result = await verifyAndUpdateCredits(checkoutId);
-        if (result.success) {
-          setStatus('success');
-        } else {
-          setError(result.error || 'An unknown error occurred');
-          setStatus('error');
+        const response = await fetch('/api/credits/verify', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ checkoutId }),
+        });
+
+        const result = await response.json();
+        
+        if (!response.ok) {
+          throw new Error(result.error || 'Failed to verify payment');
         }
+        
+        setStatus('success');
       } catch (err) {
         console.error('Error processing checkout:', err);
-        setError('Failed to process your payment. Please try again or contact support.');
+        setError(err instanceof Error ? err.message : 'Failed to process your payment. Please try again or contact support.');
         setStatus('error');
       }
     };

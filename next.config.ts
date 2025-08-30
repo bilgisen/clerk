@@ -81,17 +81,7 @@ const nextConfig: NextConfig = {
   },
   
   // Experimental features configuration
-  experimental: {
-    // Enable server actions with allowed origins
-    serverActions: {
-      bodySizeLimit: '2mb',
-      allowedOrigins: [
-        'localhost:3000',
-        'editor.bookshall.com',
-        'clerk.editor.bookshall.com',
-      ],
-    },
-  },
+  experimental: {},
 
   // Environment variables
   env: {

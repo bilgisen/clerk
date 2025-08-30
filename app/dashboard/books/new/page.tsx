@@ -1,57 +1,40 @@
 // app/dashboard/books/new/page.tsx
 "use client";
 
-export const dynamic = 'force-dynamic';
-
-import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { createBook } from "@/actions/books/create-book";
-import { BookInfoForm, BookFormValues } from "@/components/books/forms/book-info-form";
+import { BookInfoForm, type BookFormValues } from "@/components/books/forms/book-info-form";
 import { Separator } from "@/components/ui/separator";
 import { BooksMenu } from "@/components/books/books-menu";
+import { useCreateBook, type CreateBookInput } from "@/hooks/api/use-books";
+import type { Book } from "@/types/book";
 
 export default function NewBookPage() {
   const router = useRouter();
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const { mutate: createBook, isPending: isSubmitting } = useCreateBook();
 
-  const handleSubmit = async (data: BookFormValues) => {
-    setIsSubmitting(true);
-    
-    try {
-      const formData = new FormData();
-      
-      // Append all form fields to FormData
-      Object.entries(data).forEach(([key, value]) => {
-        // Skip undefined, null, and empty strings
-        if (value === undefined || value === null || value === '') return;
-        
-        // Handle arrays (like tags)
-        if (Array.isArray(value)) {
-          value.forEach(item => formData.append(key, item));
-        } else {
-          formData.append(key, value.toString());
-        }
-      });
+  const handleSubmit = (formData: BookFormValues) => {
+    // Convert form data to CreateBookInput type
+    const bookData: CreateBookInput = {
+      title: formData.title,
+      description: formData.description || undefined,
+      // Add any other fields as needed
+    };
 
-      const result = await createBook(formData);
-      
-      if (result.success) {
-        toast.success(result.message || "Book created successfully!");
-        if (result.redirectTo) {
-          router.push(result.redirectTo);
+    createBook(bookData, {
+      onSuccess: (response) => {
+        toast.success("Book created successfully!");
+        if (response?.data?.id) {
+          router.push(`/dashboard/books/${response.data.id}`);
         } else {
-          router.push(`/dashboard/books/${result.bookId}`);
+          router.push('/dashboard/books');
         }
-      } else {
-        toast.error(result.message || "Failed to create book. Please try again.");
-      }
-    } catch (error) {
-      console.error("Error creating book:", error);
-      toast.error("An unexpected error occurred. Please try again.");
-    } finally {
-      setIsSubmitting(false);
-    }
+      },
+      onError: (error: Error) => {
+        console.error("Error creating book:", error);
+        toast.error(error.message || "Failed to create book. Please try again.");
+      },
+    });
   };
 
   return (

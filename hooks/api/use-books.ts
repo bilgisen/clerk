@@ -51,7 +51,7 @@ export function useBooks() {
 }
 
 // Fetch a single book by ID
-export function useBook(id: string) {
+export function useBook(id: string, options?: { enabled?: boolean }) {
   return useQuery<Book>({
     queryKey: ['books', id],
     queryFn: async (): Promise<Book> => {
@@ -63,7 +63,8 @@ export function useBook(id: string) {
       const result: BookResponse = await response.json();
       return result.data;
     },
-    enabled: !!id, // Only run the query if the ID exists
+    enabled: options?.enabled !== false && !!id, // Only run the query if enabled is not false and ID exists
+    ...options, // Spread any additional options
   });
 }
 
