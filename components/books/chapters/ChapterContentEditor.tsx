@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import React, { useState, useEffect } from "react"
 import { SerializedEditorState } from "lexical"
 import { cn } from "@/lib/services/utils"
 import { Editor } from "@/components/blocks/editor-x/editor"
@@ -177,10 +177,10 @@ function ChapterContentEditorComponent({
                       try {
                         if (!value) return initialValue;
                         // Skip validation during pasting for better performance
-                        if (isPasting) return value;
+                        if (isPasting) return value as SerializedEditorState;
                         
                         const parsed = typeof value === 'string' ? JSON.parse(value) : value;
-                        return validateAndNormalizeState(parsed);
+                        return validateAndNormalizeState(parsed) as SerializedEditorState;
                       } catch (e) {
                         console.error('Error parsing editor content:', e);
                         return initialValue;
@@ -220,7 +220,7 @@ function ChapterContentEditorComponent({
   )
 }
 
-export default function ChapterContentEditor({ className, ...props }: ChapterContentEditorProps) {
+const ChapterContentEditor = ({ className, ...props }: ChapterContentEditorProps) => {
   const [isMounted, setIsMounted] = useState(false)
 
   useEffect(() => {
@@ -233,3 +233,7 @@ export default function ChapterContentEditor({ className, ...props }: ChapterCon
 
   return <ChapterContentEditorComponent className={className} {...props} />
 }
+
+// Export the component as default and export the props type
+export type { ChapterContentEditorProps as ChapterContentEditorPropsType };
+export default ChapterContentEditor;

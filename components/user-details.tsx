@@ -1,5 +1,6 @@
 "use client";
 
+import React from 'react';
 import { useOrganization, useSession, useUser } from "@clerk/nextjs";
 
 function Row({

@@ -1,15 +1,11 @@
 // lib/convert-chapters.ts
 import { TreeViewItem } from "@/components/tree-view";
-import { Chapter } from "@/types/chapter";
+import { Chapter, ChapterWithChildren } from "@/types/chapter";
 import { ChapterOrderUpdate } from "@/types/dnd";
 
 type ChapterWithOrder = Chapter & {
   originalOrder?: number;
   children?: ChapterWithOrder[];
-};
-
-type ChapterWithChildren = Chapter & {
-  children: ChapterWithChildren[];
 };
 
 /**

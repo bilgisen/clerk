@@ -5,16 +5,19 @@ import { useState, useEffect } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
 import dynamic from 'next/dynamic';
+
+interface ChapterData {
+  id: string;
+  content: string | Record<string, any> | null;
+  // Add other chapter properties as needed
+  [key: string]: any;
+}
 import { Button } from "@/components/ui/button";
 import { Loader2, ArrowLeft, Edit, BookOpen, RefreshCw } from "lucide-react";
 import { useChapter } from "@/hooks/useChapter";
 import { useChaptersBySlug } from "@/hooks/api/use-chapters";
 import Link from "next/link";
-
-const LexicalRenderer = dynamic(
-  () => import('@/components/editor/lexical-renderer').then((mod) => mod.LexicalRenderer),
-  { ssr: false }
-);
+import LexicalRenderer from "@/components/editor/LexicalRendererWrapper";
 
 function getPreviewText(content: unknown, max = 200) {
   try {
@@ -53,7 +56,7 @@ export default function ChapterDetailPage() {
     isLoading: isChapterLoading, 
     error: chapterError, 
     refetch: refetchChapter 
-  } = useChapter(chapterId, { enabled: !!chapterId });
+  } = useChapter<ChapterData>(chapterId as string);
   
   const { 
     data: chaptersData, 
@@ -226,15 +229,14 @@ export default function ChapterDetailPage() {
 
         <div className="prose-lg dark:prose-invert max-w-none">
           {(() => {
-            const contentForRenderer =
-              typeof chapterData.content === "string"
-                ? chapterData.content
-                : chapterData.content
-                ? JSON.stringify(chapterData.content)
-                : "";
+            const contentForRenderer = chapterData?.content 
+              ? typeof chapterData.content === "string" 
+                ? chapterData.content 
+                : JSON.stringify(chapterData.content)
+              : "";
 
             return contentForRenderer ? (
-              <LexicalRenderer content={chapterData.content as any} />
+              <LexicalRenderer content={contentForRenderer} />
             ) : (
               <div className="text-muted-foreground italic">
                 No content available for this chapter.

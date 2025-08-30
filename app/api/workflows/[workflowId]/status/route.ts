@@ -1,13 +1,22 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import { db } from '@/db';
-import { eq, SQL } from 'drizzle-orm';
-import { books } from '@/db/schema';
-import { Octokit } from '@octokit/rest';
 
-const octokit = new Octokit({
-  auth: process.env.GITHUB_TOKEN
-});
+// Initialize Octokit with dynamic import
+let Octokit: any;
+let octokit: any;
+
+// Load Octokit dynamically
+if (process.env.GITHUB_TOKEN) {
+  import('@octokit/rest').then(module => {
+    Octokit = module.Octokit;
+    octokit = new Octokit({
+      auth: process.env.GITHUB_TOKEN
+    });
+  }).catch(error => {
+    console.error('Failed to load @octokit/rest:', error);
+  });
+}
 
 export async function GET(
   request: Request,

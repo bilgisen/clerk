@@ -71,12 +71,19 @@ const getColumns = (onDelete?: (bookId: string) => void): ColumnDef<Book>[] => [
         <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
           <BooksMenu
             slug={book.slug}
+            bookId={book.id}
             onView={() => router.push(`/dashboard/books/${book.slug}`)}
             onEdit={() => router.push(`/dashboard/books/${book.slug}/edit`)}
-            onDelete={() => {
+            onDelete={async () => {
               if (onDelete) {
-                onDelete(book.id);
+                try {
+                  await onDelete(book.id);
+                  return { success: true };
+                } catch (error) {
+                  return { success: false, error: error instanceof Error ? error.message : 'Failed to delete book' };
+                }
               }
+              return { success: false, error: 'No delete handler provided' };
             }}
           />
         </div>

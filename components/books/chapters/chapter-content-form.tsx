@@ -2,25 +2,20 @@
 
 import React, { useState, useEffect } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useForm, Controller, type SubmitHandler } from "react-hook-form";
+import { useForm, Controller, type SubmitHandler, type UseFormReturn } from "react-hook-form";
 import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
+import { toast } from "sonner";
 
 import { chapterFormSchema } from "@/schemas/chapter-schema";
 import type { ChapterFormValues } from "@/schemas/chapter-schema";
-import {
-  Form,
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from "@/components/ui/form";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { ParentChapterSelect } from "./ParentChapterSelect";
+import ParentChapterSelect from "./ParentChapterSelect";
 import ChapterContentEditor from './ChapterContentEditor';
-import { toast } from "sonner";
+
+type UnsubscribeFn = () => void;
 
 export type Chapter = {
   id: string;
@@ -70,23 +65,27 @@ const ChapterContentForm = React.forwardRef<HTMLFormElement, ChapterContentFormP
   };
 
   const form = useForm<ChapterFormValues>({
-    // @ts-expect-error - TypeScript has issues with the resolver type from zod
-    resolver: zodResolver(chapterFormSchema),
+    resolver: zodResolver(chapterFormSchema as any),
     defaultValues,
-    mode: 'onChange',
   });
+  
+  const { handleSubmit, control, setValue } = form;
 
   // Notify parent component of changes
   useEffect(() => {
     if (typeof onChange === 'function') {
       const subscription = form.watch((value) => {
-        onChange(value as ChapterFormValues);
+        if (value) {
+          onChange(value as ChapterFormValues);
+        }
       });
-      return () => subscription.unsubscribe();
+      return () => {
+        if (subscription && typeof subscription.unsubscribe === 'function') {
+          (subscription as { unsubscribe: UnsubscribeFn }).unsubscribe();
+        }
+      };
     }
   }, [form, onChange]);
-
-  const { control, setValue, handleSubmit } = form;
 
   const handleFormSubmit: SubmitHandler<ChapterFormValues> = async (formData: ChapterFormValues) => {
     try {
@@ -119,16 +118,19 @@ const ChapterContentForm = React.forwardRef<HTMLFormElement, ChapterContentFormP
     [parentChapters, currentChapterId]
   );
 
-  const onSubmit = React.useCallback((e: React.FormEvent) => {
-    e.preventDefault();
-    handleSubmit(handleFormSubmit)(e);
-  }, [handleSubmit, handleFormSubmit]);
+  const onSubmit = React.useCallback(async (data: ChapterFormValues) => {
+    try {
+      await handleFormSubmit(data);
+    } catch (error) {
+      console.error('Form submission error:', error);
+    }
+  }, [handleFormSubmit]);
 
   return (
     <Form {...form}>
       <form 
         ref={ref}
-        onSubmit={onSubmit}
+        onSubmit={handleSubmit(onSubmit)}
         className="space-y-6"
       >
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

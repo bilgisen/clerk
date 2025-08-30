@@ -1,8 +1,25 @@
 import { type NextRequest, NextResponse } from 'next/server';
-import { db } from '@/db/drizzle';
-import { chapters } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import { neon } from '@neondatabase/serverless';
 import { generateCompleteDocumentHTML } from '@/lib/generateChapterHTML';
+
+// Create a Neon client
+const sql = neon(process.env.DATABASE_URL!);
+
+// Define types for our database tables
+interface Chapter {
+  id: string;
+  title: string;
+  content: string | null;
+  order: number | null;
+  level: number | null;
+  parent_chapter_id: string | null;
+  book_id: string;
+}
+
+interface Book {
+  id: string;
+  title: string;
+}
 
 type RouteParams = {
   params: {
@@ -17,13 +34,19 @@ export async function GET(
   try {
     const { chapterId } = params;
 
-    // Fetch chapter with its book relation
-    const chapter = await db.query.chapters.findFirst({
-      where: eq(chapters.id, chapterId),
-      with: {
-        book: true
-      }
-    });
+    // Fetch chapter with its book relation using raw SQL
+    const [chapter] = (await sql`
+      SELECT 
+        c.*,
+        json_build_object(
+          'id', b.id,
+          'title', b.title
+        ) as book
+      FROM chapters c
+      LEFT JOIN books b ON c.book_id = b.id
+      WHERE c.id = ${chapterId}
+      LIMIT 1`
+    ) as Array<Chapter & { book: Book }>;
 
     if (!chapter) {
       return NextResponse.json(
@@ -32,19 +55,21 @@ export async function GET(
       );
     }
 
+    // Convert the book from JSON string to object if needed
+    const book = typeof chapter.book === 'string' ? JSON.parse(chapter.book) : chapter.book;
+
     // Generate HTML with complete metadata
     const html = generateCompleteDocumentHTML(
       chapter.title,
       chapter.content || '',
       {
-        book: chapter.book?.title || 'Untitled Book',
+        book: book?.title || 'Untitled Book',
         chapter_id: chapter.id,
         order: chapter.order || 0,
         level: chapter.level || 1,
         title_tag: `h${chapter.level || 1}`,
         title: chapter.title,
-        parent_chapter: chapter.parentChapterId || undefined,
-        // Add any other required properties from ChapterMetadata interface
+        parent_chapter: chapter.parent_chapter_id || ''
       }
     );
 

@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
-import { Octokit } from '@octokit/rest';
 import { creditService } from '@/lib/services/credits/credit-service';
 import { db } from '@/db';
 import { users } from '@/db/schema';
@@ -10,6 +9,9 @@ export async function POST(
   request: Request,
   context: { params: { slug: string } }
 ) {
+  // Dynamic import for ES module
+  const { Octokit } = await import('@octokit/rest');
+  
   // Get params safely
   const { slug } = context.params;
   try {

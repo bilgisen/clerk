@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { deleteBook } from "@/actions/books/delete-book";
+import { useEffect, useState } from "react";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -10,19 +10,21 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
-import { MoreVertical } from "lucide-react";
-import { useEffect, useState } from "react";
+import { MoreVertical, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 
-type BooksMenuProps = {
+interface BooksMenuProps {
   slug: string;  // Book slug for navigation
   bookId: string; // Book ID for API calls
   onView?: () => void;
   onEdit?: () => void;
-  onDelete?: () => Promise<{success: boolean; error?: string}>;
+  onDelete?: () => Promise<{ success: boolean; error?: string }>;
   onAddChapter?: () => void;
   hideEdit?: boolean; // New prop to hide Edit Book menu item
   activeTab?: string; // Active tab for highlighting
-};
+  success?: boolean; // Success state for delete operation
+  error?: string; // Error message for delete operation
+}
 
 export function BooksMenu({
   slug,
@@ -54,6 +56,47 @@ export function BooksMenu({
     router.push(path);
   };
 
+  const handleDelete = async () => {
+    if (!confirm('Are you sure you want to delete this book? This action cannot be undone.')) {
+      return;
+    }
+
+    try {
+      if (onDelete) {
+        // If onDelete is provided, use it
+        const result = await onDelete();
+        if (result.success) {
+          toast.success('Book deleted successfully');
+          router.push('/dashboard/books');
+          router.refresh();
+        } else {
+          const errorMessage = result.error || 'Failed to delete book';
+          console.error('Delete book error:', errorMessage);
+          toast.error(`Error: ${errorMessage}`);
+        }
+      } else {
+        // Fallback to direct API call if onDelete is not provided
+        const response = await fetch(`/api/books/${bookId}`, {
+          method: 'DELETE',
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          const errorMessage = errorData?.error || 'Failed to delete book';
+          throw new Error(errorMessage);
+        }
+
+        toast.success('Book deleted successfully');
+        router.push('/dashboard/books');
+        router.refresh();
+      }
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      console.error('Error deleting book:', error);
+      toast.error(`Error: ${errorMessage}`);
+    }
+  };
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -70,38 +113,8 @@ export function BooksMenu({
             Edit Book
           </DropdownMenuItem>
         )}
-        <DropdownMenuItem
-          onSelect={async (e) => {
-            e.preventDefault(); // Prevent menu from closing immediately
-            
-            if (!confirm("Are you sure you want to delete this book? This action cannot be undone.")) {
-              return;
-            }
-            
-            try {
-              let result;
-              
-              if (onDelete) {
-                result = await onDelete();
-              } else {
-                result = await deleteBook(bookId);
-              }
-              
-              if (result?.success) {
-                // Navigate away after successful deletion
-                router.push('/dashboard/books');
-                router.refresh();
-              } else {
-                // Show specific error message if available
-                const errorMessage = result?.error || 'Failed to delete book';
-                console.error('Delete book error:', errorMessage);
-                alert(`Error: ${errorMessage}`);
-              }
-            } catch (error) {
-              console.error('Unexpected error deleting book:', error);
-              alert('An unexpected error occurred. Please try again or contact support if the problem persists.');
-            }
-          }}
+        <DropdownMenuItem 
+          onSelect={handleDelete} 
           className="text-red-600 hover:bg-red-50 focus:bg-red-50"
         >
           <span className="flex items-center">
@@ -126,3 +139,5 @@ export function BooksMenu({
     </DropdownMenu>
   );
 }
+
+export { BooksMenu as default };

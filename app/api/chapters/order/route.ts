@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { db } from '@/db';
 import { chapters } from '@/db/schema';
 import { eq } from 'drizzle-orm';
+import type { PgTransaction } from 'drizzle-orm/pg-core';
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 
 export async function POST(req: Request) {
   try {
@@ -16,7 +18,8 @@ export async function POST(req: Request) {
     }
 
     // Update chapters in a transaction
-    await db.transaction(async (tx) => {
+    const dbWithTransaction = db as unknown as PostgresJsDatabase<Record<string, unknown>>;
+    await dbWithTransaction.transaction(async (tx) => {
       for (const update of updates) {
         await tx
           .update(chapters)

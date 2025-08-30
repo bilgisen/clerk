@@ -67,7 +67,7 @@ export const PATCH = createApiHandler({
       .update(chapters)
       .set({
         ...body,
-        updated_at: new Date(),
+        updatedAt: new Date(),
       })
       .where(eq(chapters.id, chapterId))
       .returning();

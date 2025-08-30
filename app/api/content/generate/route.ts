@@ -23,12 +23,21 @@ interface ContentGenerationResponse {
 }
 
 // GitHub Actions Service
-import { Octokit } from '@octokit/rest';
+let Octokit: any;
 
 class GitHubActionsService {
-  private static octokit = new Octokit({
-    auth: process.env.GITHUB_TOKEN,
-  });
+  private static octokit: any;
+
+  static async init() {
+    if (!Octokit) {
+      const { Octokit: OctokitClass } = await import('@octokit/rest');
+      Octokit = OctokitClass;
+      this.octokit = new Octokit({
+        auth: process.env.GITHUB_TOKEN,
+      });
+    }
+    return this.octokit;
+  }
 
   static async triggerContentProcessing(params: {
     contentId: string;
@@ -36,6 +45,10 @@ class GitHubActionsService {
     nonce: string;
     metadata?: Record<string, unknown>;
   }) {
+    // Initialize Octokit if not already done
+    if (!this.octokit) {
+      await this.init();
+    }
     const { contentId, sessionId, nonce, metadata = {} } = params;
     const owner = process.env.GITHUB_REPO_OWNER || '';
     const repo = process.env.GITHUB_REPO_NAME || '';

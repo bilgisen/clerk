@@ -105,8 +105,7 @@ export async function POST(request: NextRequest) {
     });
 
     // Trigger the GitHub Actions workflow
-    const githubService = new GitHubActionsService();
-    const workflowResponse = await githubService.triggerWorkflow({
+    const workflowResponse = await GitHubActionsService.triggerWorkflow({
       bookId,
       options,
       userId,
@@ -119,87 +118,37 @@ export async function POST(request: NextRequest) {
       }
     });
 
-    if (!workflowResponse.ok) {
-      const error = await workflowResponse.json().catch(() => ({}));
+    if (!workflowResponse.success) {
       logger.error('Failed to trigger workflow', { 
         requestId, 
-        status: workflowResponse.status,
-        error 
+        error: workflowResponse.error
       });
       
       return NextResponse.json(
         { 
           success: false,
-          error: error.message || 'Failed to initialize publish session',
-          code: error.code || 'SESSION_INIT_FAILED',
-          details: error.details
-        },
-        { status: workflowResponse.status || 500 }
-      );
-    }
-
-    const { sessionId, nonce } = await initResponse.json();
-    
-    if (!sessionId || !nonce) {
-      logger.error('Invalid session initialization response', { 
-        requestId, 
-        response: { sessionId, nonce } 
-      });
-      
-      return NextResponse.json(
-        { 
-          success: false,
-          error: 'Invalid session initialization response',
-          code: 'INVALID_SESSION_RESPONSE'
+          error: workflowResponse.error || 'Failed to trigger workflow',
+          code: 'WORKFLOW_TRIGGER_FAILED'
         },
         { status: 500 }
       );
     }
 
-    logger.info('Triggering GitHub Actions workflow', { 
-      requestId, 
-      contentId,
-      sessionId,
-      userId 
+    // Log successful workflow trigger
+    logger.info('Successfully triggered GitHub Actions workflow', {
+      requestId,
+      bookId,
+      workflowRunId: workflowResponse.workflowRunId,
+      workflowUrl: workflowResponse.workflowUrl,
+      triggeredAt: workflowResponse.triggeredAt
     });
-
-    // Trigger the GitHub Actions workflow
-    const result = await GitHubActionsService.triggerContentProcessing({
-      contentId,
-      sessionId,
-      nonce,
-      metadata: {
-        ...metadata,
-        userId,
-        requestId,
-        timestamp: new Date().toISOString()
-      }
-    });
-
-    if (!result.success) {
-      logger.error('Failed to trigger workflow', { 
-        requestId, 
-        error: result.error,
-        sessionId 
-      });
-      
-      return NextResponse.json(
-        { 
-          success: false,
-          error: result.error || 'Failed to trigger workflow',
-          code: 'WORKFLOW_TRIGGER_FAILED',
-          sessionId
-        },
-        { status: 500 }
-      );
-    }
 
     // Save workflow ID to the database
-    if (result.workflowRunId) {
+    if (workflowResponse.workflowRunId) {
       try {
         await db.update(books)
           .set({ 
-            workflowId: result.workflowRunId,
+            workflowId: workflowResponse.workflowRunId,
             updatedAt: new Date()
           })
           .where(eq(books.id, bookId));
@@ -207,29 +156,29 @@ export async function POST(request: NextRequest) {
         logger.info('Updated book with workflow ID', { 
           requestId,
           bookId,
-          workflowRunId: result.workflowRunId 
+          workflowRunId: workflowResponse.workflowRunId 
         });
       } catch (dbError) {
         logger.error('Failed to update book with workflow ID', { 
-          error: dbError, 
-          bookId, 
-          workflowRunId: result.workflowRunId 
+          requestId,
+          bookId,
+          error: dbError,
+          workflowRunId: workflowResponse.workflowRunId
         });
-        // Continue even if this fails
+        // Continue even if database update fails
       }
     }
 
     const response: TriggerWorkflowResponse = {
       success: true,
-      workflowRunId: result.workflowRunId,
-      workflowUrl: result.workflowUrl,
-      sessionId
+      workflowRunId: workflowResponse.workflowRunId,
+      workflowUrl: workflowResponse.workflowUrl
     };
 
     logger.info('Workflow triggered successfully', { 
       requestId, 
-      sessionId,
-      workflowRunId: result.workflowRunId,
+      workflowRunId: workflowResponse.workflowRunId,
+      workflowUrl: workflowResponse.workflowUrl,
       duration: Date.now() - startTime
     });
 

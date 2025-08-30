@@ -50,12 +50,17 @@ export function useBooks() {
   });
 }
 
-// Fetch a single book by ID
-export function useBook(id: string, options?: { enabled?: boolean }) {
+// Fetch a single book by slug or ID
+export function useBook(identifier: string, options?: { enabled?: boolean; bySlug?: boolean }) {
   return useQuery<Book>({
-    queryKey: ['books', id],
+    queryKey: ['books', identifier],
     queryFn: async (): Promise<Book> => {
-      const response = await fetch(`${API_BASE_URL}/${id}`);
+      // If bySlug is true, use the slug endpoint, otherwise use the ID endpoint
+      const endpoint = options?.bySlug 
+        ? `${API_BASE_URL}/slug/${identifier}`
+        : `${API_BASE_URL}/${identifier}`;
+        
+      const response = await fetch(endpoint);
       if (!response.ok) {
         const error: ApiResponse<null> = await response.json();
         throw new Error(error.message || 'Failed to fetch book');
@@ -63,8 +68,8 @@ export function useBook(id: string, options?: { enabled?: boolean }) {
       const result: BookResponse = await response.json();
       return result.data;
     },
-    enabled: options?.enabled !== false && !!id, // Only run the query if enabled is not false and ID exists
-    ...options, // Spread any additional options
+    enabled: options?.enabled !== false && !!identifier,
+    ...options,
   });
 }
 

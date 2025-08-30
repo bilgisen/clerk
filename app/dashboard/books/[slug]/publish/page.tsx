@@ -6,10 +6,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { BookOpen, FileText, Headphones, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
 import { BooksMenu } from '@/components/books/books-menu';
-import { getBookBySlug } from '@/actions/books/get-book-by-slug';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
-import { initiatePublishSession } from '@/actions/publish/initiate-publish-session';
+import { useBook } from '@/hooks/api/use-books';
 import type { Book } from '@/types/book';
 
 type PublishStatus = 'idle' | 'initializing' | 'ready' | 'publishing' | 'published' | 'error';
@@ -46,50 +45,53 @@ const FormatCard = ({ title, description, icon, active = true, onClick }: Format
 export default function PublishPage() {
   const router = useRouter();
   const params = useParams();
-  const slug = Array.isArray(params.slug) ? params.slug[0] : params.slug || '';
-  const [book, setBook] = useState<Book | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const slug = typeof params?.slug === 'string' ? params.slug : '';
+  
+  const { data: book, isLoading } = useBook(slug);
+  const [selectedFormats, setSelectedFormats] = useState({
+    epub: true,
+    pdf: true,
+    audio: false,
+  } as const);
   const [publishStatus, setPublishStatus] = useState<PublishStatus>('idle');
-  const [selectedFormat, setSelectedFormat] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  // Fetch book data
   useEffect(() => {
-    const fetchBook = async () => {
-      if (!slug) return;
-      
-      try {
-        setIsLoading(true);
-        const bookData = await getBookBySlug(slug);
-        setBook(bookData);
-      } catch (error) {
-        console.error('Error fetching book:', error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
+    if (!isLoading && !book) {
+      router.push('/dashboard/books');
+    }
+  }, [isLoading, book, router]);
 
-    fetchBook();
-  }, [slug]);
+  type FormatId = keyof typeof selectedFormats;
+  
+  interface Format {
+    id: FormatId;
+    title: string;
+    description: string;
+    icon: React.ReactNode;
+    active: boolean;
+    status: 'ready' | 'coming_soon';
+  }
 
-  const formats = [
+  const formats: Format[] = [
     {
-      id: 'ebook',
+      id: 'epub',
       title: 'E-book',
       description: 'Publish in EPUB format for e-readers',
       icon: <BookOpen className="h-5 w-5" />,
       active: true,
-      status: publishStatus === 'published' && selectedFormat === 'ebook' ? 'published' : 'idle'
+      status: 'ready'
     },
     {
       id: 'pdf',
       title: 'PDF',
-      description: 'Coming soon - Publish as a printable PDF document',
+      description: 'Publish as a printable PDF document',
       icon: <FileText className="h-5 w-5" />,
-      active: false,
-      status: 'coming_soon'
+      active: true,
+      status: 'ready'
     },
     {
-      id: 'audiobook',
+      id: 'audio',
       title: 'Audio Book',
       description: 'Coming soon - Create an audio version of your book',
       icon: <Headphones className="h-5 w-5" />,
@@ -98,38 +100,47 @@ export default function PublishPage() {
     },
   ];
 
-  const handlePublish = async (format: string) => {
+  const handlePublish = async (formatId?: keyof typeof selectedFormats) => {
     if (!book) return;
     
     try {
       setPublishStatus('initializing');
-      setSelectedFormat(format);
       
-      // Initialize publish session
-      const { sessionId } = await initiatePublishSession({
-        bookId: book.id,
-        format,
-        metadata: {
-          title: book.title,
-          slug: book.slug,
-          // Add any additional metadata needed
-        }
+      // Update selected formats if a specific format was clicked
+      if (formatId) {
+        setSelectedFormats(prev => ({
+          ...prev,
+          [formatId]: true
+        }));
+      }
+      
+      // Call the publish API
+      const response = await fetch(`/api/books/${book.id}/publish`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          formats: Object.entries(selectedFormats)
+            .filter(([_, selected]) => selected)
+            .map(([format]) => format)
+        })
       });
       
-      setPublishStatus('ready');
+      if (!response.ok) {
+        throw new Error('Failed to publish book');
+      }
       
-      // Navigate to the format-specific publish page
-      router.push(`/dashboard/books/${slug}/publish/${format}/?sessionId=${sessionId}`);
-      
-    } catch (error) {
-      console.error('Error initializing publish session:', error);
+      setPublishStatus('published');
+      toast.success('Book published successfully!');
+    } catch (err) {
+      console.error('Error publishing book:', err);
+      setError('Failed to publish book. Please try again.');
       setPublishStatus('error');
-      toast.error('Failed to start publishing process', {
-        description: error instanceof Error ? error.message : 'Please try again later.'
-      });
+      toast.error('Failed to publish book');
     }
   };
-  
+
   const getStatusBadge = (status: PublishStatus | string) => {
     switch (status) {
       case 'published':
@@ -186,7 +197,6 @@ export default function PublishPage() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {formats.map((format) => {
           const isActive = format.active && publishStatus !== 'publishing';
-          const isCurrentFormat = selectedFormat === format.id;
           
           return (
             <div key={format.id} className="relative">
@@ -200,7 +210,7 @@ export default function PublishPage() {
                 description={
                   <div className="flex flex-col gap-1">
                     <span>{format.description}</span>
-                    {isCurrentFormat && publishStatus === 'publishing' && (
+                    {format.id in selectedFormats && selectedFormats[format.id as keyof typeof selectedFormats] && publishStatus === 'publishing' && (
                       <div className="mt-2">
                         {getStatusBadge('publishing')}
                       </div>

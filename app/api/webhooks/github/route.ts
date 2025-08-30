@@ -1,13 +1,23 @@
 import { NextResponse } from "next/server";
-import { Webhooks } from "@octokit/webhooks";
-import { 
-  getSession, 
-  updateSession, 
-  type PublishSession,
-  PublishStatus as PublishStatusValue
-} from "@/lib/store/redis";
+import { getSession, updateSession, type PublishSession, PublishStatus as PublishStatusValue } from "@/lib/store/redis";
 import { GitHubJob } from '@/lib/store/github-types';
 import { SessionUpdateData } from '@/lib/store/types';
+
+// Dynamic import for ES modules
+let Webhooks: any;
+let webhooks: any;
+
+// Initialize webhooks if secret is provided
+if (process.env.GITHUB_WEBHOOK_SECRET) {
+  import('@octokit/webhooks').then(module => {
+    Webhooks = module.Webhooks;
+    webhooks = new Webhooks({
+      secret: process.env.GITHUB_WEBHOOK_SECRET,
+    });
+  }).catch(error => {
+    console.error('Failed to load @octokit/webhooks:', error);
+  });
+}
 
 // Extend the PublishSession type with our additional fields
 type Session = PublishSession & {
@@ -22,12 +32,6 @@ type Session = PublishSession & {
   workflowRunId?: string;
 };
 
-// Only initialize webhooks if secret is provided
-const webhooks = process.env.GITHUB_WEBHOOK_SECRET 
-  ? new Webhooks({
-      secret: process.env.GITHUB_WEBHOOK_SECRET,
-    })
-  : null;
 
 // Helper to verify GitHub webhook signature
 async function verifyWebhook(req: Request): Promise<boolean> {

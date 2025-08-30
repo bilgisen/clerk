@@ -155,6 +155,7 @@ function FormMessage({ className, ...props }: React.ComponentProps<"p">) {
 
 export {
   useFormField,
+  Form as default,
   Form,
   FormItem,
   FormLabel,

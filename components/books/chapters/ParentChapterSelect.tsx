@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import { cn } from "@/lib/services/utils";
 import {
   Select,
@@ -55,7 +56,7 @@ const getLevelIndicator = (level: number = 0) => {
 /**
  * A select component for choosing a parent chapter with support for hierarchical display
  */
-export const ParentChapterSelect = ({
+function ParentChapterSelect({
   parentChapters,
   value,
   onChange,
@@ -63,7 +64,7 @@ export const ParentChapterSelect = ({
   className,
   placeholder = "Select parent chapter",
   showLevelIndicator = true,
-}: ParentChapterSelectProps) => {
+}: ParentChapterSelectProps) {
   const selectValue = value ?? "none";
 
   const handleChange = (val: string) => {
@@ -106,4 +107,6 @@ export const ParentChapterSelect = ({
       </SelectContent>
     </Select>
   );
-};
+}
+
+export { ParentChapterSelect as default }

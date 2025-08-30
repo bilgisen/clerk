@@ -1,21 +1,41 @@
 // app/api/books/by-slug/[slug]/chapters/[chapterId]/route.ts
 import { NextResponse } from 'next/server';
 import { currentUser } from '@clerk/nextjs/server';
-import { db } from '@/db/drizzle';
-import { and, eq } from 'drizzle-orm';
-import { books, chapters, users } from '@/db/schema';
+import { neon } from '@neondatabase/serverless';
 
-// Configure the route to handle UUIDs with hyphens
+// Create a Neon client
+const sql = neon(process.env.DATABASE_URL!);
+
+// Define types for our database tables
+interface User {
+  id: string;
+  clerk_id: string;
+  // Add other user fields as needed
+}
+
+interface Book {
+  id: string;
+  slug: string;
+  user_id: string;
+  // Add other book fields as needed
+}
+
+interface Chapter {
+  id: string;
+  book_id: string;
+  // Add other chapter fields as needed
+}
+
+// Route Segment Config
 export const dynamic = 'force-dynamic';
 export const dynamicParams = true;
 export const revalidate = 0;
 
-// This ensures the full path is captured
-export const config = {
-  api: {
-    bodyParser: false,
-  },
-};
+// Disable body parsing for file uploads
+export const maxDuration = 30; // 30 seconds
+
+export const fetchCache = 'force-no-store';
+export const runtime = 'nodejs';
 
 // GET: Get a single chapter by ID for a book by slug
 export async function GET(
@@ -32,17 +52,36 @@ export async function GET(
       return NextResponse.json({ error: 'Book slug and chapter ID are required' }, { status: 400 });
     }
 
-    const [dbUser] = await db.select({ id: users.id }).from(users).where(eq(users.clerkId, user.id)).limit(1);
+    // Find user using raw SQL with proper type safety
+    const [dbUser] = (await sql`
+      SELECT id, clerk_id 
+      FROM users 
+      WHERE clerk_id = ${user.id} 
+      LIMIT 1`
+    ) as User[];
+    
     if (!dbUser) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
-    const book = await db.query.books.findFirst({
-      where: (b, { and, eq }) => and(eq(b.slug, slug), eq(b.userId, dbUser.id)),
-    });
+    // Find book using raw SQL with proper type safety
+    const [book] = (await sql`
+      SELECT * 
+      FROM books 
+      WHERE slug = ${slug} 
+        AND user_id = ${dbUser!.id} 
+      LIMIT 1`
+    ) as Book[];
+    
     if (!book) return NextResponse.json({ error: 'Book not found' }, { status: 404 });
 
-    const chapter = await db.query.chapters.findFirst({
-      where: (c, { and, eq }) => and(eq(c.id, chapterId), eq(c.bookId, book.id)),
-    });
+    // Find chapter using raw SQL with proper type safety
+    const [chapter] = (await sql`
+      SELECT * 
+      FROM chapters 
+      WHERE id = ${chapterId} 
+        AND book_id = ${book!.id} 
+      LIMIT 1`
+    ) as Chapter[];
+    
     if (!chapter) return NextResponse.json({ error: 'Chapter not found' }, { status: 404 });
 
     // Return the chapter data
@@ -83,16 +122,35 @@ export async function PATCH(
       );
     }
 
-    const [dbUser] = await db.select({ id: users.id }).from(users).where(eq(users.clerkId, user.id)).limit(1);
+    // Find user using raw SQL with proper type safety
+    const [dbUser] = (await sql`
+      SELECT id, clerk_id 
+      FROM users 
+      WHERE clerk_id = ${user.id} 
+      LIMIT 1`
+    ) as User[];
+    
     if (!dbUser) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
-    const book = await db.query.books.findFirst({
-      where: (b, { and, eq }) => and(eq(b.slug, slug), eq(b.userId, dbUser.id)),
-    });
+    // Find book using raw SQL with proper type safety
+    const [book] = (await sql`
+      SELECT * 
+      FROM books 
+      WHERE slug = ${slug} 
+        AND user_id = ${dbUser!.id} 
+      LIMIT 1`
+    ) as Book[];
+    
     if (!book) return NextResponse.json({ error: 'Book not found' }, { status: 404 });
 
     const body = await request.json();
-    const { title, content, parentChapterId, order, level } = body;
+    const { title, content, parentChapterId, order, level } = body as {
+      title?: string;
+      content?: string;
+      parentChapterId?: string | null;
+      order?: number;
+      level?: number;
+    };
 
     if (
       !title &&
@@ -126,25 +184,28 @@ export async function PATCH(
     if (level !== undefined) updateData.level = level;
 
     // Update the chapter if it belongs to the book
-    const [chapter] = await db
-      .update(chapters)
-      .set(updateData)
-      .where(
-        and(
-          eq(chapters.id, chapterId), 
-          eq(chapters.bookId, book.id)
-        )
-      )
-      .returning();
+    const [updatedChapter] = (await sql`
+      UPDATE chapters 
+      SET 
+        title = ${title ?? null},
+        content = ${content ?? null},
+        parent_chapter_id = ${parentChapterId ?? null},
+        "order" = ${order ?? null},
+        level = ${level ?? null},
+        updated_at = NOW()
+      WHERE id = ${chapterId} 
+        AND book_id = ${book!.id}
+      RETURNING *`
+    ) as Chapter[];
 
-    if (!chapter) {
+    if (!updatedChapter) {
       return NextResponse.json(
         { error: 'Chapter not found or access denied' }, 
         { status: 404 }
       );
     }
 
-    return NextResponse.json(chapter);
+    return NextResponse.json(updatedChapter);
   } catch (error) {
     console.error('Error in PATCH /api/books/by-slug/[slug]/chapters/[chapterId]:', error);
     return NextResponse.json(
@@ -180,29 +241,45 @@ export async function DELETE(
       );
     }
 
-    const [dbUser] = await db.select({ id: users.id }).from(users).where(eq(users.clerkId, user.id)).limit(1);
+    // Find user using raw SQL with proper type safety
+    const [dbUser] = (await sql`
+      SELECT id, clerk_id 
+      FROM users 
+      WHERE clerk_id = ${user.id} 
+      LIMIT 1`
+    ) as User[];
+    
     if (!dbUser) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
-    const book = await db.query.books.findFirst({
-      where: (b, { and, eq }) => and(eq(b.slug, slug), eq(b.userId, dbUser.id)),
-    });
+    // Find book using raw SQL with proper type safety
+    const [book] = (await sql`
+      SELECT * 
+      FROM books 
+      WHERE slug = ${slug} 
+        AND user_id = ${dbUser!.id} 
+      LIMIT 1`
+    ) as Book[];
+    
     if (!book) return NextResponse.json({ error: 'Book not found' }, { status: 404 });
 
-    const chapter = await db.query.chapters.findFirst({
-      where: (c, { and, eq }) => and(eq(c.id, chapterId), eq(c.bookId, book.id)),
-    });
+    // Find chapter using raw SQL with proper type safety
+    const [chapter] = (await sql`
+      SELECT * 
+      FROM chapters 
+      WHERE id = ${chapterId} 
+        AND book_id = ${book!.id} 
+      LIMIT 1`
+    ) as Chapter[];
+    
     if (!chapter) return NextResponse.json({ error: 'Chapter not found' }, { status: 404 });
 
-    // Delete the chapter if it belongs to the book
-    const [deletedChapter] = await db
-      .delete(chapters)
-      .where(
-        and(
-          eq(chapters.id, chapterId), 
-          eq(chapters.bookId, book.id)
-        )
-      )
-      .returning();
+    // Delete chapter using raw SQL with proper type safety
+    const [deletedChapter] = (await sql`
+      DELETE FROM chapters 
+      WHERE id = ${chapterId} 
+        AND book_id = ${book!.id} 
+      RETURNING *`
+    ) as Chapter[];
 
     if (!deletedChapter) {
       return NextResponse.json(

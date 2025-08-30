@@ -3,7 +3,9 @@
 import React from "react";
 import { useRouter } from "next/navigation";
 import { useParams } from 'next/navigation';
-import { ParentChapterSelect } from "@/components/books/chapters/ParentChapterSelect";
+import { SerializedEditorState } from "lexical";
+import ParentChapterSelect from "@/components/books/chapters/ParentChapterSelect";
+import ChapterContentEditor from "@/components/books/chapters/ChapterContentEditor";
 import { useForm, type SubmitHandler } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -13,18 +15,9 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Input } from "@/components/ui/input";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import dynamic from "next/dynamic";
 import { Separator } from "@/components/ui/separator";
 import { BooksMenu } from "@/components/books/books-menu";
-
-// Import editor dynamically to avoid SSR issues
-const ChapterContentEditor = dynamic(
-  () => import("@/components/books/chapters/ChapterContentEditor"),
-  { 
-    ssr: false,
-    loading: () => <div className="min-h-[400px] border rounded-md p-4">Loading editor...</div>
-  }
-);
+import DynamicChapterContentEditor from "@/components/books/chapters/DynamicChapterContentEditor";
 
 // Define chapter type for parent chapter selection
 interface Chapter {
@@ -289,21 +282,25 @@ export default function NewChapterPage() {
                       <FormLabel className="text-muted-foreground">Chapter Content</FormLabel>
                       <FormControl>
                         <div className="overflow-hidden">
-                          <ChapterContentEditor
+                          <DynamicChapterContentEditor
                             name="content"
                             initialContent={(() => {
                               try {
                                 if (!field.value) return undefined;
-                                return typeof field.value === 'string' 
+                                const content = typeof field.value === 'string' 
                                   ? JSON.parse(field.value) 
                                   : field.value;
+                                // Ensure the content matches the expected SerializedEditorState type
+                                return content?.root ? content as SerializedEditorState : undefined;
                               } catch (e) {
                                 console.error('Error parsing initial content:', e);
                                 return undefined; // Will use default from component
                               }
                             })()}
-                            onChange={field.onChange}
-                            className="min-h-[400px] p-4"
+                            onChange={(newContent) => {
+                              form.setValue('content', newContent);
+                            }}
+                            disabled={form.formState.isSubmitting}
                             placeholder="Start writing your chapter content here..."
                           />
                         </div>

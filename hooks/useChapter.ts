@@ -4,8 +4,8 @@ import { updateChapterSchema } from '@/lib/validations/chapter';
 import type { z } from 'zod';
 
 // Get a single chapter by ID
-export function useChapter(chapterId: string) {
-  return useQuery({
+export function useChapter<T = any>(chapterId: string) {
+  return useQuery<T>({
     queryKey: ['chapters', chapterId],
     queryFn: async () => {
       const res = await fetch(`/api/chapters/${chapterId}`);

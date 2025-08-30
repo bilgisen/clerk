@@ -122,7 +122,7 @@ function PollOptionComponent({
   )
 }
 
-export default function PollComponent({
+export function PollComponent({
   question,
   options,
   nodeKey,
@@ -218,7 +218,7 @@ export default function PollComponent({
   return (
     <div
       className={`bg-background max-w-[600px] min-w-[400px] cursor-pointer rounded-lg border border-gray-200 select-none ${
-        isFocused ? "outline-primary outline outline-2" : ""
+        isFocused ? "ring-2 ring-primary ring-offset-2" : ""
       }`}
       ref={ref}
     >

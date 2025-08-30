@@ -1,8 +1,33 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
-import { db } from '@/lib/db/server';
-import { books, users } from '@/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { neon } from '@neondatabase/serverless';
+
+// Create a Neon client
+const sql = neon(process.env.DATABASE_URL!);
+
+// Define types for our database tables
+interface User {
+  id: string;
+  clerk_id: string;
+}
+
+interface Book {
+  id: string;
+  user_id: string;
+  title: string;
+  slug: string;
+  description: string | null;
+  cover_image_url: string | null;
+  published_at: Date | null;
+  created_at: Date;
+  updated_at: Date;
+  genre: string | null;
+  language: string | null;
+  isbn: string | null;
+  view_count: number;
+  is_published: boolean;
+  is_featured: boolean;
+}
 
 /**
  * GET /api/books/by-slug/[slug]
@@ -26,22 +51,26 @@ export async function GET(
       return NextResponse.json({ error: 'Book slug is required' }, { status: 400 });
     }
 
-    const [user] = await db
-      .select({ id: users.id })
-      .from(users)
-      .where(eq(users.clerkId, userId))
-      .limit(1);
+    // Find user using raw SQL with proper type safety
+    const [user] = (await sql`
+      SELECT id, clerk_id 
+      FROM users 
+      WHERE clerk_id = ${userId} 
+      LIMIT 1`
+    ) as User[];
 
     if (!user) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
-    const book = await db.query.books.findFirst({
-      where: (books, { and, eq }) => and(
-        eq(books.slug, slug),
-        eq(books.userId, user.id)
-      ),
-    });
+    // Find book using raw SQL with proper type safety
+    const [book] = (await sql`
+      SELECT * 
+      FROM books 
+      WHERE slug = ${slug} 
+        AND user_id = ${user.id} 
+      LIMIT 1`
+    ) as Book[];
 
     if (!book) {
       return NextResponse.json({ error: 'Book not found' }, { status: 404 });
@@ -75,30 +104,36 @@ export async function DELETE(
       return NextResponse.json({ error: 'Book slug is required' }, { status: 400 });
     }
 
-    const [user] = await db
-      .select({ id: users.id })
-      .from(users)
-      .where(eq(users.clerkId, userId))
-      .limit(1);
+    // Find user using raw SQL with proper type safety
+    const [user] = (await sql`
+      SELECT id, clerk_id 
+      FROM users 
+      WHERE clerk_id = ${userId} 
+      LIMIT 1`
+    ) as User[];
 
     if (!user) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
-    const book = await db.query.books.findFirst({
-      where: (books, { and, eq }) => and(
-        eq(books.slug, slug),
-        eq(books.userId, user.id)
-      ),
-    });
+    // Find book using raw SQL with proper type safety
+    const [book] = (await sql`
+      SELECT * 
+      FROM books 
+      WHERE slug = ${slug} 
+        AND user_id = ${user.id} 
+      LIMIT 1`
+    ) as Book[];
 
     if (!book) {
       return NextResponse.json({ error: 'Book not found' }, { status: 404 });
     }
 
-    await db.delete(books).where(
-      and(eq(books.id, book.id), eq(books.userId, user.id))
-    );
+    // Delete the book using raw SQL
+    await sql`
+      DELETE FROM books 
+      WHERE id = ${book.id} 
+        AND user_id = ${user.id}`;
 
     return NextResponse.json(
       { success: true, message: 'Book deleted successfully' },
