@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
-import { auth } from '@clerk/nextjs/server';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { v4 as uuidv4 } from 'uuid';
+import { requireAuth } from '@/lib/auth/api-auth';
 
 // 5MB limit for image uploads
 const MAX_FILE_SIZE = 5 * 1024 * 1024;
@@ -9,12 +9,10 @@ const ALLOWED_FILE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'
 
 export async function POST(request: Request) {
   try {
-    const { userId } = auth();
-    if (!userId) {
-      return NextResponse.json(
-        { success: false, error: 'Unauthorized' },
-        { status: 401 }
-      );
+    const { user, error } = await requireAuth();
+    if (error) return error;
+    if (!user) {
+      return new NextResponse('Unauthorized', { status: 401 });
     }
 
     const formData = await request.formData();

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { auth } from './lib/auth/better-auth';
+import { getAuth } from './lib/auth/better-auth';
 
 // Public routes that don't require authentication
 const publicRoutes = [
@@ -47,31 +48,29 @@ export default async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Check for session cookie
-  const sessionCookie = request.cookies.get('auth-session');
-
-  if (!sessionCookie?.value) {
-    // No session cookie found, redirect to sign-in
-    const signInUrl = new URL('/signin', request.url);
-    signInUrl.searchParams.set('callbackUrl', pathname);
-    return NextResponse.redirect(signInUrl);
-  }
-
   try {
-    // Verify the session token
-    const headers = new Headers();
-    headers.append('cookie', `auth-session=${sessionCookie.value}`);
+    // Verify the user's session
+    const authResult = await getAuth();
+    let userRole = 'user';
     
-    const session = await auth.api.getSession({ headers });
-
-    if (!session?.user) {
-      // Invalid or expired session, redirect to sign-in
+    if (authResult?.user) {
+      // User is authenticated, set the user role
+      userRole = authResult.user.role || 'user';
+    } else {
+      // Not authenticated, redirect to sign-in
       const signInUrl = new URL('/signin', request.url);
-      signInUrl.searchParams.set('callbackUrl', pathname);
-      signInUrl.searchParams.set('error', 'session_expired');
-
+      signInUrl.searchParams.set('redirect', pathname);
+      
       const response = NextResponse.redirect(signInUrl);
-      // Clear the invalid session cookie
+      // Clear any invalid session cookie
+      response.cookies.delete('auth-session');
+      return response;
+    }
+    
+    // Check admin access for admin routes
+    if (pathname.startsWith('/admin') && userRole !== 'admin') {
+      const signInUrl = new URL('/signin', request.url);
+      const response = NextResponse.redirect(signInUrl);
       response.cookies.delete('auth-session');
       return response;
     }
@@ -79,9 +78,12 @@ export default async function middleware(request: NextRequest) {
     // Add user info to request headers for API routes
     if (pathname.startsWith('/api/')) {
       const requestHeaders = new Headers(request.headers);
-      requestHeaders.set('x-user-id', session.user.id);
-      requestHeaders.set('x-user-email', session.user.email || '');
-      requestHeaders.set('x-user-role', (session.user as any).role || 'user');
+      
+      if (authResult?.user) {
+        requestHeaders.set('x-user-id', authResult.user.id);
+        requestHeaders.set('x-user-email', authResult.user.email || '');
+        requestHeaders.set('x-user-role', authResult.user.role || 'user');
+      }
 
       return NextResponse.next({
         request: {

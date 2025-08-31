@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useAuth } from '@clerk/nextjs';
+import { useAuth } from '@/hooks/use-auth';
 import { Book } from "@/types/book";
 import { BooksMenu } from "@/components/books/books-menu";
 import { Separator } from "@/components/ui/separator";
@@ -40,12 +40,18 @@ function BookHeader({ book, slug }: { book: Book & { id: string }; slug: string 
  * @param params - The route parameters containing the book slug
  */
 export default function BookDetailPage({ params, searchParams }: PageProps) {
-  const { slug } = params;
+  const { user, loading, getToken } = useAuth();
   const router = useRouter();
-  const { getToken } = useAuth();
+  const { slug } = params;
   const [book, setBook] = useState<Book & { id: string } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!loading && !user) {
+      router.push('/signin');
+    }
+  }, [user, loading, router]);
 
   useEffect(() => {
     const fetchData = async () => {

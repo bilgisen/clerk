@@ -2,8 +2,8 @@
 
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect } from 'react';
-import { useAuth } from '@clerk/nextjs';
-import { toast } from 'sonner';
+import { useAuth } from '@/hooks/use-auth';
+import toast from 'sonner';
 import { Loader2 } from 'lucide-react';
 import { BooksMenu } from '@/components/books/books-menu';
 import { Button } from '@/components/ui/button';
@@ -13,26 +13,27 @@ import { useBook, useUpdateBook } from '@/hooks/api/use-books';
 import type { Book } from '@/types/book';
 
 export default function EditBookPage() {
+  const { user, loading: isAuthLoading } = useAuth();
   const router = useRouter();
-  const { isLoaded, userId } = useAuth();
   const params = useParams();
   const slug = typeof params?.slug === 'string' ? params.slug : '';
   
   // Use the useBook hook to fetch book data
-  const { data: book, isLoading, error: bookError } = useBook(slug, {
-    enabled: !!slug && isLoaded && !!userId,
+  const { data: book, isLoading: isBookLoading, error: bookError } = useBook(slug, {
+    enabled: !!slug && !isAuthLoading && !!user?.id,
   });
   
   // Use the useUpdateBook hook for updating the book
   const { mutate: updateBook, isPending: isSubmitting } = useUpdateBook();
   
-  // Redirect to sign-in if not authenticated
   useEffect(() => {
-    if (isLoaded && !userId) {
-      router.push('/sign-in');
+    if (!isAuthLoading && !user) {
+      // Redirect to sign-in if not authenticated
+      router.push('/signin');
+      toast.error('Please sign in to edit this book');
     }
-  }, [isLoaded, userId, router]);
-  
+  }, [user, isAuthLoading, router]);
+
   // Handle book fetch errors
   useEffect(() => {
     if (bookError) {
@@ -81,9 +82,9 @@ export default function EditBookPage() {
     router.back();
   };
 
-  if (isLoading) {
+  if (isBookLoading || isAuthLoading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
+      <div className="flex items-center justify-center h-64">
         <Loader2 className="h-8 w-8 animate-spin" />
       </div>
     );
@@ -100,6 +101,29 @@ export default function EditBookPage() {
           </Button>
         </div>
       </div>
+    );
+  }
+
+  return (
+    <div className="container w-full p-8">
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold">Edit Book</h1>
+            <p className="text-muted-foreground">Update your book details</p>
+          </div>
+          <Button onClick={handleCancel} variant="outline">
+            Cancel
+          </Button>
+        </div>
+        <Separator />
+        <BookInfoForm
+          initialData={book}
+          onSubmit={handleSubmit}
+          isSubmitting={isSubmitting}
+        />
+      </div>
+    </div>
     );
   }
 

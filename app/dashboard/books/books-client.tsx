@@ -8,7 +8,7 @@ import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
 import { Book } from '@/types/book';
-import { useAuth } from '@clerk/nextjs';
+import { useAuth } from '@/hooks/use-auth';
 import { BookTable } from '@/components/books/book-table';
 
 interface BooksPageProps {
@@ -17,19 +17,23 @@ interface BooksPageProps {
 
 export default function BooksPage({ initialBooks = [] }: BooksPageProps) {
   const router = useRouter();
-  const { userId, sessionId, getToken } = useAuth();
+  const { user, loading: isAuthLoading } = useAuth();
   const [isLoading, setIsLoading] = useState(true);
   const [books, setBooks] = useState<Book[]>(initialBooks);
-  
+  const [error, setError] = useState<string | null>(null);
+
   console.log('[BooksPage] Initial props:', { initialBooks });
-  
+
   // Log auth state and initialize
   useEffect(() => {
-    console.log('[BooksClient] Auth state:', { userId, sessionId });
-    
+    if (!isAuthLoading && !user) {
+      router.push('/signin');
+      return;
+    }
+
     const initialize = async () => {
       try {
-        const token = await getToken();
+        const token = await useAuth().getToken();
         console.log('[BooksClient] Auth token:', token ? 'present' : 'missing');
       } catch (err) {
         console.error('[BooksClient] Error getting auth token:', err);
@@ -37,10 +41,12 @@ export default function BooksPage({ initialBooks = [] }: BooksPageProps) {
         setIsLoading(false);
       }
     };
-    
-    initialize();
-  }, [userId, sessionId, getToken]);
-  
+
+    if (user) {
+      initialize();
+    }
+  }, [user, isAuthLoading]);
+
   // Update books when initialBooks changes
   useEffect(() => {
     console.log('[BooksPage] initialBooks changed:', initialBooks);

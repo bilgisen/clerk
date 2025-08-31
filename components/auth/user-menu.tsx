@@ -11,11 +11,20 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { User } from 'lucide-react';
-import { useAuth } from '@/lib/auth/better-auth';
+import { useAuth } from '@/hooks/use-auth';
+import { useRouter } from 'next/navigation';
 
 export function UserMenu() {
   const router = useRouter();
-  const { user, signOut } = useAuth();
+  const { user, signOut, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <Button variant="ghost" className="relative h-8 w-8 rounded-full" disabled>
+        <User className="h-4 w-4 animate-pulse" />
+      </Button>
+    );
+  }
 
   if (!user) {
     return (
@@ -35,7 +44,9 @@ export function UserMenu() {
       <DropdownMenuContent className="w-56" align="end" forceMount>
         <DropdownMenuLabel className="font-normal">
           <div className="flex flex-col space-y-1">
-            <p className="text-sm font-medium leading-none">{user.name || 'User'}</p>
+            <p className="text-sm font-medium leading-none">
+              {[user.firstName, user.lastName].filter(Boolean).join(' ') || 'User'}
+            </p>
             <p className="text-xs leading-none text-muted-foreground">
               {user.email}
             </p>

@@ -70,11 +70,27 @@ export function useAuth() {
     }
   }, [queryClient, router]);
 
+  // Get authentication token
+  const getToken = useCallback(async (): Promise<string | null> => {
+    try {
+      const response = await fetch('/api/auth/token');
+      if (!response.ok) {
+        throw new Error('Failed to get auth token');
+      }
+      const data = await response.json();
+      return data.token || null;
+    } catch (error) {
+      console.error('Error getting auth token:', error);
+      return null;
+    }
+  }, []);
+
   return {
     user: state.user,
     loading: state.loading,
     error: state.error,
     isAuthenticated: !!state.user,
     signOut,
+    getToken,
   };
 }

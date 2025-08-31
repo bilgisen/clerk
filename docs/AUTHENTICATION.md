@@ -4,9 +4,12 @@ This document describes the authentication system used in the application.
 
 ## Overview
 
-The authentication system supports two main authentication methods:
-1. **Clerk Authentication** - For web users
-2. **GitHub OIDC** - For GitHub Actions workflows
+The authentication system is built on top of NextAuth.js with the following features:
+- Email/password authentication
+- OAuth providers (Google, GitHub)
+- JWT-based session management
+- Role-based access control
+- API route protection
 
 ## Setup
 
@@ -15,39 +18,78 @@ The authentication system supports two main authentication methods:
 Add these to your `.env.local` file:
 
 ```env
-# Clerk
-NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=your_clerk_publishable_key
-CLERK_SECRET_KEY=your_clerk_secret_key
+# Authentication
+NEXTAUTH_SECRET=your_nextauth_secret
+NEXTAUTH_URL=http://localhost:3000
 
-# GitHub OIDC
-GITHUB_OIDC_ISSUER=https://token.actions.githubusercontent.com
-GITHUB_OIDC_AUDIENCE=your_audience
+# JWT Secret (for API authentication)
+JWT_SECRET=your_jwt_secret_here
 
-# Optional: Restrict to specific repositories
-GITHUB_ALLOWED_REPOSITORIES=owner1/repo1,owner2/repo2
+# OAuth Providers
+GOOGLE_CLIENT_ID=your_google_client_id
+GOOGLE_CLIENT_SECRET=your_google_client_secret
+GITHUB_CLIENT_ID=your_github_client_id
+GITHUB_CLIENT_SECRET=your_github_client_secret
 
-# Optional: Restrict to specific environments
-GITHUB_ALLOWED_ENVIRONMENTS=production,staging
+# Database
+DATABASE_URL=your_database_url
 ```
 
 ## Usage
 
-### Middleware
+### Client Components
 
-The authentication middleware provides several utility functions to protect your API routes:
+Use the `useAuth` hook to access the current user and authentication methods:
 
 ```typescript
-import { withClerkAuth, withGithubOidcAuth, withOptionalAuth } from '@/middleware/auth';
+import { useAuth } from '@/hooks/use-auth';
 
-// Clerk-protected route
-export const POST = withClerkAuth(async (request) => {
-  const authContext = (request as any).authContext;
-  // Your protected route logic here
+function MyComponent() {
+  const { user, loading, signOut } = useAuth();
+  
+  if (loading) return <div>Loading...</div>;
+  if (!user) return <div>Not authenticated</div>;
+  
+  return (
+    <div>
+      <p>Welcome, {user.name}!</p>
+      <button onClick={signOut}>Sign out</button>
+    </div>
+  );
+}
+```
+
+### API Routes
+
+Protect your API routes using the `requireAuth` utility:
+
+```typescript
+import { requireAuth } from '@/lib/auth/api-auth';
+
+export async function GET(request: Request) {
+  const { user, error } = await requireAuth();
+  if (error) return error;
+  
+  // User is authenticated
+  return Response.json({ message: 'Protected data', user });
+}
+```
+
+### Middleware
+
+The authentication middleware protects your pages and API routes. Add it to your `middleware.ts` file:
+
+```typescript
+import { auth } from '@/auth';
+
+export default auth((req) => {
+  // Your middleware logic here
 });
 
-// GitHub OIDC protected route
-export const PUT = withGithubOidcAuth(async (request) => {
-  const authContext = (request as any).authContext;
+export const config = {
+  matcher: ['/((?!api/auth|_next/static|_next/image|favicon.ico).*)'],
+};
+```
   // Your protected route logic here
 });
 

@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { RefreshCw, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
-import { useAuth } from "@clerk/nextjs";
+import { useAuth } from "@/hooks/use-auth";
 
 // Types for the API response
 type CreditSummary = {

@@ -1,17 +1,17 @@
 import { NextResponse } from 'next/server';
-import { auth } from '@clerk/nextjs/server';
 import { db } from '@/lib/db/server';
 import { creditLedger } from '@/db/schema/credits';
 import { and, eq } from 'drizzle-orm';
+import { requireAuth } from '@/lib/auth/api-auth';
 
 export async function POST(request: Request) {
   try {
     const { checkoutId } = await request.json();
     
-    const session = await auth();
-    const userId = session.userId;
+    const { user, error } = await requireAuth();
+    if (error) return error;
     
-    if (!userId) {
+    if (!user) {
       return NextResponse.json(
         { success: false, error: 'Unauthorized' },
         { status: 401 }

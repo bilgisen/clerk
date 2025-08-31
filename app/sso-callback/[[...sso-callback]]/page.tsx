@@ -2,28 +2,24 @@
 
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { useAuth } from '@clerk/nextjs';
+import { useAuth } from '@/hooks/use-auth';
 import { Loader2 } from 'lucide-react';
 
 export default function SSOCallbackPage() {
   const router = useRouter();
-  const { isLoaded, userId } = useAuth();
+  const { isAuthenticated, loading } = useAuth();
 
   useEffect(() => {
-    if (!isLoaded) return;
-    
-    // If user is authenticated, redirect to dashboard
-    if (userId) {
+    if (loading) return;
+
+    if (isAuthenticated) {
+      // Redirect to dashboard after successful SSO
       router.push('/dashboard');
     } else {
-      // If not authenticated, redirect to sign-in after a short delay
-      const timer = setTimeout(() => {
-        router.push('/sign-in');
-      }, 2000);
-      
-      return () => clearTimeout(timer);
+      // If not authenticated, redirect to sign-in page
+      router.push('/sign-in');
     }
-  }, [isLoaded, userId, router]);
+  }, [isAuthenticated, loading, router]);
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-background">

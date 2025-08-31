@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { auth } from '@clerk/nextjs/server';
 import { db } from '@/db';
+import { requireAuth } from '@/lib/auth/api-auth';
 
 // Initialize Octokit with dynamic import
 let Octokit: any;
@@ -25,9 +25,10 @@ export async function GET(
   const { workflowId } = context.params;
   try {
     // Authenticate the user
-    const session = await auth();
-    const userId = session.userId;
-    if (!userId) {
+    const { user, error } = await requireAuth();
+    if (error) return error;
+    
+    if (!user) {
       return NextResponse.json(
         { error: 'Unauthorized' },
         { status: 401 }
@@ -54,7 +55,7 @@ export async function GET(
     }
 
     // Check if the user has access to this book
-    if (book.userId !== userId) {
+    if (book.userId !== user?.id) {
       return NextResponse.json(
         { error: 'Unauthorized' },
         { status: 403 }

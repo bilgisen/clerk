@@ -1,32 +1,26 @@
 "use client";
 
-import { useOrganization, useSession, useUser } from "@clerk/nextjs";
+import { useAuth } from "@/hooks/use-auth";
 import clsx from "clsx";
 import { useState } from "react";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import theme from "./theme";
 
-const TYPES = ["user", "session", "organization"];
+const TYPES = ["user"]; // Simplified since we're only using user data now
 
 export function CodeSwitcher() {
   const [selectedType, setSelectedType] = useState(TYPES[0]);
-  const { user } = useUser();
-  const { session } = useSession();
-  const { organization } = useOrganization();
+  const { user } = useAuth();
 
   const selectedCode = JSON.stringify(
     {
       user,
-      session,
-      organization,
-    }[selectedType],
+    },
     null,
     2
   );
 
-  const typesToShow = organization
-    ? TYPES
-    : TYPES.filter((type) => type !== "organization");
+  const typesToShow = TYPES;
 
   return (
     <div className={clsx(organization ? "h-218.5" : "h-166.5")}>

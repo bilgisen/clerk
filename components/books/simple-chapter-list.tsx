@@ -4,7 +4,7 @@
 import React, { useMemo, useContext, createContext } from 'react';
 import { Skeleton } from "@/components/ui/skeleton";
 import { useQuery } from "@tanstack/react-query";
-import { useAuth } from "@clerk/nextjs";
+import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Eye, Pencil, Trash2 } from "lucide-react";
 import { useRouter } from 'next/navigation';

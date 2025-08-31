@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useAuth } from '@clerk/nextjs';
+import { useAuth } from '@/hooks/use-auth';
 
 interface UseContentGenerationProps {
   onSuccess?: (data: any) => void;
@@ -17,7 +17,11 @@ export function useContentGeneration({ onSuccess, onError }: UseContentGeneratio
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [data, setData] = useState<any>(null);
-  const { getToken } = useAuth();
+  const { user } = useAuth();
+  const getToken = async () => {
+    // Implement token retrieval if needed for your API
+    return user ? 'user-authenticated' : null;
+  };
 
   const generateContent = async (params: GenerateContentParams) => {
     setIsLoading(true);

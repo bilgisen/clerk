@@ -1,14 +1,14 @@
-// app/api/upload/image/route.ts
 import { NextResponse, type NextRequest } from 'next/server';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
-import { auth } from '@clerk/nextjs/server';
+import { requireAuth } from '@/lib/auth/api-auth';
 
 export const runtime = 'nodejs';
 
 export async function POST(request: NextRequest) {
   try {
-    const { userId } = auth();
-    if (!userId) {
+    const { user, error } = await requireAuth();
+    if (error) return error;
+    if (!user) {
       return new NextResponse('Unauthorized', { status: 401 });
     }
 

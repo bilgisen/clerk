@@ -1,9 +1,9 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { GitHubActionsService } from '@/lib/services/github-actions.service';
-import { auth } from '@clerk/nextjs/server';
 import { logger } from '@/lib/logger';
 import { db } from '@/db';
 import { books } from '@/db/schema';
+import { requireAuth } from '@/lib/auth/api-auth';
 import { eq } from 'drizzle-orm';
 
 // Type definitions for the request and response

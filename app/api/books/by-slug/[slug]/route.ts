@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { auth } from '@clerk/nextjs/server';
 import { neon } from '@neondatabase/serverless';
+import { requireAuth } from '@/lib/auth/api-auth';
 
 // Create a Neon client
 const sql = neon(process.env.DATABASE_URL!);
@@ -93,11 +93,15 @@ export async function DELETE(
 ) {
   try {
     const { slug } = await context.params;
-    const session = await auth();
-    const userId = session.userId;
-
-    if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    // Get the current user
+    const { user, error } = await requireAuth();
+    if (error) return error;
+    
+    if (!user) {
+      return NextResponse.json(
+        { success: false, error: 'Unauthorized' },
+        { status: 401 }
+      );
     }
 
     if (!slug) {

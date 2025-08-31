@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
-import { auth } from '@clerk/nextjs/server';
 import { db } from '@/db';
 import { users, books, chapters, media } from '@/db/schema';
 import { eq } from 'drizzle-orm';
+import { requireAuth } from '@/lib/auth/api-auth';
 import { CreditService } from '@/lib/services/credits/credit-service';
 
 // Type for Drizzle's where clause operators
@@ -26,10 +26,16 @@ export async function GET(
   context: { params: { id: string } }
 ) {
   try {
-    const session = await auth();
-    const userId = session.userId;
+    const { user, error } = await requireAuth();
+    if (error) return error;
     
-    // Await params before destructuring
+    if (!user) {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      );
+    }
+    
     const { id } = await context.params;
 
     if (!userId) {

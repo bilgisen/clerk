@@ -4,7 +4,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useAuth } from "@clerk/nextjs";
+import { useAuth } from "@/hooks/use-auth";
 import { formatDistanceToNow } from "date-fns";
 import { tr } from 'date-fns/locale';
 import { Activity, CreditCard, Loader2 } from "lucide-react";

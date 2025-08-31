@@ -3,14 +3,14 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useAuth } from '@clerk/nextjs';
+import { useAuth } from '@/hooks/use-auth';
 import BooksPage from './books-client';
 import { Book } from '@/types/book';
 
 // This is a client component that wraps the actual books page
 export default function BooksPageWrapper() {
   const router = useRouter();
-  const { isLoaded, userId } = useAuth();
+  const { user, loading } = useAuth();
   const [isClient, setIsClient] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [books, setBooks] = useState<Book[]>([]);
@@ -18,11 +18,22 @@ export default function BooksPageWrapper() {
 
   // Fetch books from the API
   const fetchBooks = async () => {
-    if (!userId) return;
+    if (!user?.id) {
+      setError('User not authenticated');
+      setIsLoading(false);
+      return;
+    }
     
     try {
       setIsLoading(true);
-      const response = await fetch('/api/books');
+      setError(null);
+      
+      const response = await fetch(`/api/books?userId=${user.id}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
       
       if (!response.ok) {
         const errorData = await response.json();
@@ -42,14 +53,17 @@ export default function BooksPageWrapper() {
   useEffect(() => {
     setIsClient(true);
     
-    if (isLoaded && !userId) {
-      router.push('/sign-in');
-    } else if (userId) {
-      fetchBooks();
+    if (loading) return;
+    
+    if (!user) {
+      router.push('/signin');
+      return;
     }
-  }, [isLoaded, userId, router]);
+    
+    fetchBooks();
+  }, [loading, user, router]);
 
-  if (!isClient || !isLoaded || isLoading) {
+  if (!isClient) {
     return (
       <div className="space-y-6 p-6">
         <div className="flex items-center justify-between">
@@ -59,6 +73,13 @@ export default function BooksPageWrapper() {
           </div>
           <div className="h-10 w-32 bg-muted rounded animate-pulse" />
         </div>
+      </div>
+    );
+  }
+  
+  if (isLoading) {
+    return (
+      <div className="space-y-6 p-6">
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {[1, 2, 3, 4, 5, 6].map((i) => (
             <div key={i} className="space-y-3">
@@ -82,12 +103,9 @@ export default function BooksPageWrapper() {
     );
   }
 
-  console.log('Raw books data from API:', books);
-  console.log('Raw books data from API (before mapping):', JSON.stringify(books, null, 2));
-  
+  // Map books to ensure all required fields are present with proper types
   const mappedBooks = books.map(book => ({
     ...book,
-    // Ensure all required fields are present with proper types
     id: book.id,
     userId: book.userId,
     title: book.title || 'Untitled',

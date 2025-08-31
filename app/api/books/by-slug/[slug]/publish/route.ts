@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
-import { auth } from '@clerk/nextjs/server';
 import { creditService } from '@/lib/services/credits/credit-service';
 import { db } from '@/db';
 import { users } from '@/db/schema';
+import { requireAuth } from '@/lib/auth/api-auth';
 import { eq } from 'drizzle-orm';
 
 export async function POST(
@@ -16,17 +16,20 @@ export async function POST(
   const { slug } = context.params;
   try {
     // Get the current user session
-    const { userId: clerkUserId } = await auth();
-    if (!clerkUserId) {
-      return new NextResponse(JSON.stringify({ error: 'Unauthorized' }), { 
-        status: 401,
-        headers: { 'Content-Type': 'application/json' }
-      });
+    const { user, error } = await requireAuth();
+    if (error) return error;
+    
+    if (!user) {
+      return NextResponse.json(
+        { success: false, error: 'Unauthorized' },
+        { status: 401 }
+      );
     }
     
-    // Get the user's database ID using their Clerk ID
+    // Get the user's database ID using their ID
     const [user] = await db.select()
       .from(users)
+      .where(eq(users.id, user.id))
       .where(eq(users.clerkId, clerkUserId))
       .limit(1);
     

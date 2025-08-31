@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { useAuth, useUser } from "@clerk/nextjs";
+import { useAuth } from "@/hooks/use-auth";
 import { polarService } from "@/lib/services/polar/polar-service";
 
 type CheckoutParams = {
@@ -10,8 +10,8 @@ type CheckoutParams = {
 };
 
 export function usePolar() {
-  const { userId } = useAuth();
-  const { user } = useUser();
+  const { user } = useAuth();
+  const userId = user?.id;
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 

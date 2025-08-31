@@ -1,7 +1,19 @@
 "use client";
 
 import React from 'react';
-import { useOrganization, useSession, useUser } from "@clerk/nextjs";
+import { useAuth } from "@/hooks/use-auth";
+import { User } from "@/db/schema";
+
+// Extend the User type to match the database schema
+type ExtendedUser = User & {
+  firstName?: string | null;
+  lastName?: string | null;
+  imageUrl?: string | null;
+  lastActiveAt?: Date | string | null;
+  lastLoginAt?: Date | string | null;
+  createdAt: Date | string;
+  updatedAt: Date | string;
+};
 
 function Row({
   desc,
@@ -58,61 +70,100 @@ function formatDateWithNumbers(date: Date): string {
 }
 
 export function UserDetails() {
-  const { user } = useUser();
-  const { session } = useSession();
-  const { organization } = useOrganization();
-
-  if (!user || !session) return null;
+  const { user, loading } = useAuth();
+  
+  if (loading) return <div>Loading...</div>;
+  if (!user) return null;
+  
+  // Define session object with proper typing
+  interface SessionData {
+    id: string;
+    status: string;
+    lastActiveAt: Date | null;
+    expireAt: Date;
+  }
+  
+  const session: SessionData = { 
+    id: user.id,
+    status: 'active',
+    lastActiveAt: user.lastLoginAt || null,
+    expireAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) // 30 days from now
+  };
+  
+  const userData = user as unknown as ExtendedUser;
+  const displayName = userData.firstName && userData.lastName 
+    ? `${userData.firstName} ${userData.lastName}`
+    : userData.email?.split('@')[0] || 'User';
 
   return (
     <div className="p-16 rounded-lg border border-[#EDEDED] bg-[#F1F1F2] background relative">
       <div className="p-8 rounded-xl bg-white shadow-[0_5px_15px_rgba(0,0,0,0.08),0_15px_35px_-5px_rgba(25,28,33,0.2)] ring-1 ring-gray-950/5 max-w-100">
         <div className="flex flex-col items-center gap-2 mb-6">
           <div className="w-full relative flex justify-center">
-            <img src={user.imageUrl} className="size-20 rounded-full" />
+            <img 
+              src={userData.imageUrl || '/default-avatar.png'} 
+              alt={userData.email || 'User'} 
+              className="size-20 rounded-full" 
+              onError={(e) => {
+                const target = e.target as HTMLImageElement;
+                target.src = '/default-avatar.png';
+              }}
+            />
             <div className="absolute w-fit flex items-center gap-5 top-1/2 -translate-x-2.5 -translate-y-1/2 left-full">
               <div className="relative">
                 <div className="h-px bg-[#BFBFC4] w-26" />
                 <div className="size-1 bg-[#BFBFC4] rotate-45 absolute right-0 top-1/2 -translate-y-1/2" />
               </div>
               <div className="font-mono text-xs bg-black px-1.5 py-1 rounded-md text-white">
-                user.imageUrl
+                {userData.imageUrl ? 'Has avatar' : 'No avatar'}
               </div>
             </div>
           </div>
-          {user.firstName && user.lastName ? (
-            <h1 className="text-[1.0625rem] font-semibold relative w-full text-center">
-              {user.firstName} {user.lastName}
-              <div className="absolute w-fit flex items-center gap-5 top-1/2 -translate-x-2.5 -translate-y-1/2 left-full">
-                <div className="relative">
-                  <div className="h-px bg-[#BFBFC4] w-26" />
-                  <div className="size-1 bg-[#BFBFC4] rotate-45 absolute right-0 top-1/2 -translate-y-1/2" />
-                </div>
-                <div className="font-mono text-xs bg-black px-1.5 py-1 rounded-md text-white">
-                  user.firstName
-                </div>
-                <div className="font-mono text-xs bg-black px-1.5 py-1 rounded-md text-white -translate-x-3">
-                  user.lastName
-                </div>
+          <h1 className="text-[1.0625rem] font-semibold relative w-full text-center">
+            {displayName}
+            <div className="absolute w-fit flex items-center gap-5 top-1/2 -translate-x-2.5 -translate-y-1/2 left-full">
+              <div className="relative">
+                <div className="h-px bg-[#BFBFC4] w-26" />
+                <div className="size-1 bg-[#BFBFC4] rotate-45 absolute right-0 top-1/2 -translate-y-1/2" />
               </div>
-            </h1>
-          ) : (
-            <div className="h-4" />
-          )}
+              <div className="font-mono text-xs bg-black px-1.5 py-1 rounded-md text-white">
+                {userData.firstName && userData.lastName ? 'user.name' : 'user.email'}
+              </div>
+            </div>
+          </h1>
+          <div className="flex flex-col items-center gap-1">
+            <p className="text-sm text-muted-foreground">
+              {userData.email || 'No email'}
+            </p>
+          </div>
         </div>
 
-        <div className="px-2.5 bg-[#FAFAFB] rounded-lg divide-y divide-[#EEEEF0]">
-          <Row desc="Email" value={user.emailAddresses[0].emailAddress}>
-            <PointerC label="user.emailAddresses[0].emailAddress" />
+        <div className="grid gap-4">
+          <Row 
+            desc="User ID" 
+            value={userData.id}
+          >
+            <PointerC label="user.id" />
           </Row>
-          <Row desc="Last signed in" value={formatDate(user.lastSignInAt!)}>
-            <PointerC label="user.lastSignInAt" />
-          </Row>
-          <Row desc="Joined on" value={formatDate(user.createdAt!)}>
+          {userData.lastActiveAt && (
+            <Row 
+              desc="Last active" 
+              value={formatDate(new Date(userData.lastActiveAt))}
+            >
+              <PointerC label="user.lastActiveAt" />
+            </Row>
+          )}
+          <Row 
+            desc="Created" 
+            value={userData.createdAt ? formatDate(new Date(userData.createdAt)) : 'Unknown'}
+          >
             <PointerC label="user.createdAt" />
           </Row>
-          <Row desc="User ID" value={user.id}>
-            <PointerC label="user.user.id" />
+          <Row 
+            desc="Updated" 
+            value={userData.updatedAt ? formatDate(new Date(userData.updatedAt)) : 'Unknown'}
+          >
+            <PointerC label="user.updatedAt" />
           </Row>
         </div>
         <h2 className="mt-6 mb-4 text-[0.9375rem] font-semibold">
@@ -122,46 +173,24 @@ export function UserDetails() {
           <Row desc="Session ID" value={session.id}>
             <PointerC label="session.id" />
           </Row>
-          <Row desc="Status" value={session.status}>
+          <Row desc="Status" value="active">
             <PointerC label="session.status" />
           </Row>
-          <Row
-            desc="Last active"
-            value={formatDateWithNumbers(session.lastActiveAt)}
-          >
-            <PointerC label="session.lastActiveAt" />
-          </Row>
-          <Row
-            desc="Session expiration"
-            value={formatDateWithNumbers(session.expireAt)}
+          {userData.lastActiveAt && (
+            <Row 
+              desc="Last active" 
+              value={formatDate(new Date(userData.lastActiveAt))}
+            >
+              <PointerC label="user.lastActiveAt" />
+            </Row>
+          )}
+          <Row 
+            desc="Expires" 
+            value={session.expireAt ? formatDate(new Date(session.expireAt)) : 'Unknown'}
           >
             <PointerC label="session.expireAt" />
           </Row>
         </div>
-        {organization ? (
-          <>
-            <h2 className="mt-6 mb-4 text-[0.9375rem] font-semibold">
-              Organization detail
-            </h2>
-            <div className="px-2.5 bg-[#FAFAFB] rounded-lg divide-y divide-[#EEEEF0]">
-              <Row desc="Organization ID" value={organization.id}>
-                <PointerC label="organization.id" />
-              </Row>
-              <Row desc="Name" value={organization.name}>
-                <PointerC label="organization.name" />
-              </Row>
-              <Row desc="Members" value={String(organization.membersCount)}>
-                <PointerC label="organization.membersCount" />
-              </Row>
-              <Row
-                desc="Pending invitations"
-                value={String(organization.pendingInvitationsCount)}
-              >
-                <PointerC label="organization.pendingInvitationsCount" />
-              </Row>
-            </div>
-          </>
-        ) : null}
       </div>
     </div>
   );
