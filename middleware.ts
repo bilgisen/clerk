@@ -1,4 +1,4 @@
-import { auth } from '@clerk/nextjs/server';
+import { authMiddleware } from '@clerk/nextjs';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { verifyGitHubOidcToken } from '@/lib/auth/github-oidc';
@@ -14,7 +14,9 @@ const publicRoutes = [
   '/_next/image(.*)',
   '/favicon.ico',
   '/public(.*)',
-  '/api/github/oidc'
+  '/api/github/oidc',
+  '/api/clerk/.*',
+  '/api/.*\.(jpg|jpeg|png|svg|webp|gif|ico|css|js)$',
 ];
 
 // GitHub OIDC protected routes
@@ -27,6 +29,21 @@ function isPathMatching(path: string, patterns: string[]): boolean {
     return regex.test(path);
   });
 }
+
+// Create Clerk middleware with default options
+const clerkMiddleware = authMiddleware({
+  // Public routes that don't require authentication
+  publicRoutes: publicRoutes,
+  // Allow API routes to be accessed without authentication
+  ignoredRoutes: [
+    '/api/webhooks(.*)',
+    '/api/trpc(.*)',
+    '/api/github/oidc',
+    '/_next/static(.*)',
+    '/_next/image(.*)',
+    '/favicon.ico',
+  ],
+});
 
 export default async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
@@ -48,26 +65,26 @@ export default async function middleware(req: NextRequest) {
       const result = await verifyGitHubOidcToken(token);
 
       if (!result.valid) {
-        return new NextResponse('Invalid GitHub OIDC token', { status: 403 });
+        return new NextResponse('Unauthorized - Invalid token', { status: 401 });
       }
 
-      return NextResponse.next();
-    } catch (err) {
-      console.error('GitHub OIDC verification failed:', err);
-      return new NextResponse('Unauthorized - Invalid or expired token', { status: 401 });
+      // Add GitHub OIDC claims to request headers
+      const requestHeaders = new Headers(req.headers);
+      requestHeaders.set('x-github-oidc-claims', JSON.stringify(result.claims));
+
+      return NextResponse.next({
+        request: {
+          headers: requestHeaders,
+        },
+      });
+    } catch (error) {
+      console.error('GitHub OIDC verification failed:', error);
+      return new NextResponse('Internal Server Error', { status: 500 });
     }
   }
 
-  // For protected routes, require authentication
-  const { userId } = auth();
-  if (!userId) {
-    // Redirect to sign-in if not authenticated
-    const signInUrl = new URL('/sign-in', req.url);
-    signInUrl.searchParams.set('redirect_url', req.url);
-    return NextResponse.redirect(signInUrl);
-  }
-
-  return NextResponse.next();
+  // For all other routes, use Clerk's auth middleware
+  return clerkMiddleware(req);
 }
 
 export const config = {
