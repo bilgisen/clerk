@@ -1,10 +1,8 @@
-import { ClerkProvider } from "@clerk/nextjs";
 import type { Appearance } from "@clerk/types";
 import "./globals.css";
 import { ThemeProvider } from "next-themes";
 import { headers } from "next/headers";
-import { ErrorBoundary } from "@/components/error-boundary";
-import { logError } from "@/lib/utils/error-handler";
+import { ClerkProvider } from "@/components/providers/clerk-provider";
 
 export const metadata = {
   title: "Bookshall - Document Management System",
@@ -107,82 +105,11 @@ export default async function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className="min-h-screen bg-background">
-        <ErrorBoundary
-          onError={(error, errorInfo) => {
-            console.error('ClerkProvider Error Boundary caught:', {
-              error: error instanceof Error ? error.message : String(error),
-              errorStack: error instanceof Error ? error.stack : undefined,
-              componentStack: errorInfo?.componentStack,
-              clerkConfig: {
-                hasAppearance: !!clerkAppearance,
-                publishableKey: process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? '***' : 'MISSING',
-                domain: process.env.NEXT_PUBLIC_CLERK_DOMAIN || 'default',
-              }
-            });
-            logError(error, { 
-              componentName: 'ClerkProvider',
-              errorInfo: {
-                componentStack: errorInfo?.componentStack,
-                clerkConfig: {
-                  hasAppearance: !!clerkAppearance,
-                  hasPublishableKey: !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
-                  domain: process.env.NEXT_PUBLIC_CLERK_DOMAIN || 'default',
-                }
-              }
-            });
-          }}
-          fallback={
-            <div className="p-4 bg-red-50 border border-red-200 rounded m-4">
-              <h1 className="text-xl font-bold text-red-600 mb-2">Authentication Service Unavailable</h1>
-              <p className="mb-2">We're having trouble connecting to our authentication service.</p>
-              <button 
-                onClick={() => window.location.reload()} 
-                className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
-              >
-                Try Again
-              </button>
-            </div>
-          }
-        >
-          <ClerkProvider 
-            appearance={clerkAppearance} 
-            nonce={nonce} 
-            publishableKey={process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
-            signInUrl="/sign-in"
-            signUpUrl="/sign-up"
-            afterSignInUrl="/dashboard"
-            afterSignUpUrl="/dashboard"
-          >
-            <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-              <ErrorBoundary
-                onError={(error, errorInfo) => {
-                  logError(error, {
-                    componentStack: errorInfo?.componentStack,
-                    pathname: typeof window !== "undefined" ? window.location.pathname : undefined,
-                  });
-                }}
-                fallback={
-                  <div className="p-6 max-w-2xl mx-auto my-8 bg-red-50 border border-red-200 rounded-lg">
-                    <h2 className="text-xl font-bold text-red-800 mb-4">
-                      Something went wrong
-                    </h2>
-                    <p className="mb-4">
-                      We're sorry, but an unexpected error occurred. Our team has been notified.
-                    </p>
-                    <button
-                      onClick={() => window.location.reload()}
-                      className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
-                    >
-                      Reload Page
-                    </button>
-                  </div>
-                }
-              >
-                {children}
-              </ErrorBoundary>
-            </ThemeProvider>
-          </ClerkProvider>
-        </ErrorBoundary>
+        <ClerkProvider appearance={clerkAppearance} nonce={nonce}>
+          <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+            {children}
+          </ThemeProvider>
+        </ClerkProvider>
       </body>
     </html>
   );
