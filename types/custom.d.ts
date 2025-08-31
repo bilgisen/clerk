@@ -6,6 +6,10 @@ declare module '@/components/tree-view' {
     id: string;
     name: string;
     children?: TreeViewItem[];
+    order?: number;
+    level?: number;
+    parent_chapter_id?: string | null;
+    [key: string]: any; // Allow additional properties
   }
 }
 

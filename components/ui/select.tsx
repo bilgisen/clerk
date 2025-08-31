@@ -22,7 +22,7 @@ export const SelectValue = React.forwardRef<HTMLDivElement, React.ComponentProps
   }
 )
 
-export const SelectTrigger = React.forwardRef<HTMLDivElement, React.ComponentProps<typeof SelectPrimitive.Trigger> & {
+export const SelectTrigger = React.forwardRef<HTMLButtonElement, React.ComponentProps<typeof SelectPrimitive.Trigger> & {
   size?: "sm" | "default"
 }>(
   ({ className, size = "default", children, ...props }, ref) => {

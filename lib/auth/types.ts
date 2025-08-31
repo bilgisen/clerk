@@ -1,4 +1,4 @@
-import type { User } from '@clerk/nextjs/server';
+import type { User } from '@clerk/nextjs/dist/types/server';
 
 // Define Clerk auth types without direct dependency on the auth function
 export interface ClerkAuth {

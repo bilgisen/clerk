@@ -31,15 +31,11 @@ export function convertChaptersToTree(chapters: Chapter[] | ChapterWithChildren[
     const node: TreeViewItem = {
       id: chapter.id,
       name: chapter.title,
-      type: "chapter",
       children: [],
-      data: {
-        order: chapter.order ?? 0,
-        level: chapter.level ?? 0,
-        parent_chapter_id: normalizedParentId,
-        // Include any additional chapter properties
-        ...(chapter as any).data,
-      },
+      order: chapter.order ?? 0,
+      level: chapter.level ?? 0,
+      parent_chapter_id: normalizedParentId,
+      ...(chapter as any) // Spread any additional properties
     };
     
     nodeMap.set(chapter.id, node);
@@ -71,20 +67,20 @@ export function convertChaptersToTree(chapters: Chapter[] | ChapterWithChildren[
 }
 
 // Helper function to check if the input is a hierarchical chapter structure
-function isChapterWithChildrenArray(chapters: any[]): chapters is ChapterWithChildren[] {
-  return chapters.some(chapter => Array.isArray((chapter as ChapterWithChildren).children));
+function isChapterWithChildrenArray(chapters: any[]): chapters is (Chapter & { children_chapters: any[] })[] {
+  return chapters.length > 0 && 'children_chapters' in chapters[0];
 }
 
 // Helper function to flatten a hierarchical chapter structure
-function flattenChapterTree(chapters: ChapterWithChildren[]): Chapter[] {
+function flattenChapterTree(chapters: (Chapter & { children_chapters: any[] })[]): Chapter[] {
   const result: Chapter[] = [];
   
-  function walk(nodes: ChapterWithChildren[]) {
+  function walk(nodes: (Chapter & { children_chapters: any[] })[]): void {
     nodes.forEach(node => {
-      const { children, ...rest } = node;
-      result.push(rest);
-      if (children && children.length > 0) {
-        walk(children);
+      const { children_chapters, ...rest } = node;
+      result.push(rest as Chapter);
+      if (children_chapters && children_chapters.length > 0) {
+        walk(children_chapters);
       }
     });
   }

@@ -1,3 +1,13 @@
+// Extend the Document interface to include caretPositionFromPoint
+declare global {
+  interface Document {
+    caretPositionFromPoint(x: number, y: number): {
+      offsetNode: Node;
+      offset: number;
+    } | null;
+  }
+}
+
 export function caretFromPoint(
   x: number,
   y: number
@@ -12,11 +22,9 @@ export function caretFromPoint(
     }
     return {
       node: range.startContainer,
-      offset: rangeOffset,
+      offset: range.startOffset,
     }
-    // @ts-expect-error - caretPositionFromPoint is not in TypeScript's DOM types
-  } else if (document.caretPositionFromPoint !== "undefined") {
-    // @ts-expect-error - caretPositionFromPoint is not in TypeScript's DOM types
+  } else if (typeof document.caretPositionFromPoint === 'function') {
     const range = document.caretPositionFromPoint(x, y)
     if (range === null) {
       return null

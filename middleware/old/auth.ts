@@ -139,12 +139,11 @@ export function withAuth(
           const clerkContext: ClerkAuthContext = {
             type: 'clerk',
             userId: session.userId,
-            email: user.emailAddresses.find(e => e.id === user.primaryEmailAddressId)?.emailAddress,
+            email: user.emailAddresses.find((e: { id: string }) => e.id === user.primaryEmailAddressId)?.emailAddress,
             firstName: user.firstName || undefined,
             lastName: user.lastName || undefined,
             imageUrl: user.imageUrl || undefined,
-            sessionId: session.sessionId,
-            sessionClaims: session.sessionClaims
+            sessionId: session.sessionId || undefined
           };
           authReq.authContext = clerkContext;
         }

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { auth, currentUser, type User as ClerkUser } from '@clerk/nextjs/server';
+import { auth, currentUser } from '@clerk/nextjs/server';
+import type { User as ClerkUser } from '@clerk/nextjs/dist/types/server';
 import { verifyGitHubOidcToken } from './github-oidc';
 
 export type AuthType = 'clerk' | 'github-oidc' | 'unauthorized';

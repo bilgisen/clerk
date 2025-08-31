@@ -7,10 +7,10 @@ export async function GET(request: Request) {
   return NextResponse.json({
     receivedToken: token,
     receivedLength: token.length,
-    receivedCharCodes: [...token].map(c => c.charCodeAt(0)),
+    receivedCharCodes: Array.from(token, c => c.charCodeAt(0)),
     expectedToken: process.env.GT_PAYLOAD_SECRET,
     expectedLength: process.env.GT_PAYLOAD_SECRET?.length,
-    expectedCharCodes: process.env.GT_PAYLOAD_SECRET ? [...process.env.GT_PAYLOAD_SECRET].map(c => c.charCodeAt(0)) : [],
+    expectedCharCodes: process.env.GT_PAYLOAD_SECRET ? Array.from(process.env.GT_PAYLOAD_SECRET, c => c.charCodeAt(0)) : [],
     isMatch: token === process.env.GT_PAYLOAD_SECRET,
     environment: {
       nodeEnv: process.env.NODE_ENV,

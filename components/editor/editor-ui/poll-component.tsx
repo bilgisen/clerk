@@ -17,10 +17,11 @@ import {
 } from "lexical"
 
 import type {
-  Option,
-  Options,
+  PollOption,
   PollNode,
 } from "@/components/editor/nodes/poll-node"
+
+type Options = PollOption[];
 import {
   $isPollNode,
   createPollOption,
@@ -30,8 +31,8 @@ import { Input } from "@/components/ui/input"
 
 function getTotalVotes(options: Options): number {
   return options.reduce((totalVotes, next) => {
-    return totalVotes + next.votes.length
-  }, 0)
+    return totalVotes + next.votes;
+  }, 0);
 }
 
 function PollOptionComponent({
@@ -42,7 +43,7 @@ function PollOptionComponent({
   withPollNode,
 }: {
   index: number
-  option: Option
+  option: PollOption
   options: Options
   totalVotes: number
   withPollNode: (
@@ -50,42 +51,36 @@ function PollOptionComponent({
     onSelect?: () => void
   ) => void
 }): JSX.Element {
-  const { clientID } = useCollaborationContext()
-  const checkboxRef = useRef(null)
-  const votesArray = option.votes
-  const checkedIndex = votesArray.indexOf(clientID)
-  const checked = checkedIndex !== -1
-  const votes = votesArray.length
-  const text = option.text
+  const checkboxRef = useRef<HTMLInputElement>(null);
+  const hasVoted = option.votes > 0;
+  const votesCount = option.votes;
+  const text = option.text;
 
   return (
     <div className="mb-2.5 flex flex-row items-center">
-      <div
-        className={`relative mr-2.5 flex h-[22px] w-[22px] rounded-md border border-gray-400 ${
-          checked
-            ? 'border-primary bg-primary after:pointer-events-none after:absolute after:top-1 after:left-2 after:m-0 after:block after:h-[9px] after:w-[5px] after:rotate-45 after:cursor-pointer after:border-r-2 after:border-b-2 after:border-solid after:border-white after:content-[""]'
-            : ""
-        }`}
-      >
+      <div className="relative mr-2.5 flex h-[22px] w-[22px] rounded-md border border-gray-400">
         <input
           ref={checkboxRef}
           className="absolute block h-full w-full cursor-pointer border-0 opacity-0"
           type="checkbox"
           onChange={(e) => {
             withPollNode((node) => {
-              node.toggleVote(option, clientID)
-            })
+              node.toggleVote(option);
+            });
           }}
-          checked={checked}
+          checked={hasVoted}
         />
+        {hasVoted && (
+          <div className="absolute top-1 left-2 h-[9px] w-[5px] rotate-45 border-r-2 border-b-2 border-solid border-white" />
+        )}
       </div>
       <div className="border-primary relative flex flex-[10px] cursor-pointer overflow-hidden rounded-md border">
         <div
           className="transition-width bg-accent absolute top-0 left-0 z-0 h-full duration-1000 ease-in-out"
-          style={{ width: `${votes === 0 ? 0 : (votes / totalVotes) * 100}%` }}
+          style={{ width: `${votesCount === 0 ? 0 : (votesCount / totalVotes) * 100}%` }}
         />
         <span className="text-primary absolute top-1.5 right-4 text-xs">
-          {votes > 0 && (votes === 1 ? "1 vote" : `${votes} votes`)}
+          {votesCount > 0 && (votesCount === 1 ? "1 vote" : `${votesCount} votes`)}
         </span>
         <Input
           type="text"
@@ -97,7 +92,15 @@ function PollOptionComponent({
             const selectionEnd = target.selectionEnd
             withPollNode(
               (node) => {
-                node.setOptionText(option, value)
+                const newOptions = [...node.getOptions()]
+                const optionIndex = newOptions.findIndex(o => o.id === option.id)
+                if (optionIndex !== -1) {
+                  newOptions[optionIndex] = {
+                    ...newOptions[optionIndex],
+                    text: value
+                  }
+                  node.setOptions(newOptions)
+                }
               },
               () => {
                 target.selectionStart = selectionStart
@@ -114,7 +117,10 @@ function PollOptionComponent({
         aria-label="Remove"
         onClick={() => {
           withPollNode((node) => {
-            node.deleteOption(option)
+            const newOptions = node.getOptions().filter(o => o.id !== option.id)
+            if (newOptions.length >= 2) {
+              node.setOptions(newOptions)
+            }
           })
         }}
       />
@@ -122,7 +128,7 @@ function PollOptionComponent({
   )
 }
 
-export function PollComponent({
+export default function PollComponent({
   question,
   options,
   nodeKey,
@@ -209,7 +215,9 @@ export function PollComponent({
 
   const addOption = () => {
     withPollNode((node) => {
-      node.addOption(createPollOption())
+      const newOption = createPollOption()
+      const currentOptions = node.getOptions()
+      node.setOptions([...currentOptions, newOption])
     })
   }
 
@@ -227,7 +235,7 @@ export function PollComponent({
           {question}
         </h2>
         {options.map((option, index) => {
-          const key = option.uid
+          const key = option.id
           return (
             <PollOptionComponent
               key={key}

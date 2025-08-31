@@ -9,30 +9,26 @@
  */
 import * as React from "react"
 import { useCallback, useEffect, useMemo, useState } from "react"
-import dynamic from "next/dynamic"
-import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext"
-import {
-  MenuOption,
-  useBasicTypeaheadTriggerMatch,
-} from "@lexical/react/LexicalTypeaheadMenuPlugin"
-import {
-  $createTextNode,
-  $getSelection,
-  $isRangeSelection,
-  TextNode,
-} from "lexical"
 import { createPortal } from "react-dom"
+import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext"
+import { MenuOption, useBasicTypeaheadTriggerMatch } from "@lexical/react/LexicalTypeaheadMenuPlugin"
+import { $createTextNode, $getSelection, $isRangeSelection, type TextNode } from "lexical"
+import { Command, CommandGroup, CommandItem, CommandList } from "@/components/ui/command"
 
-import {
-  Command,
-  CommandGroup,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command"
+declare global {
+  namespace JSX {
+    interface IntrinsicElements {
+      command: React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement>;
+      'command-list': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement>;
+      'command-group': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement>;
+      'command-item': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement>;
+    }
+  }
+}
 
-const LexicalTypeaheadMenuPlugin = dynamic(
-  () => import("./default/lexical-typeahead-menu-plugin"),
-  { ssr: false }
+// Import the dynamic component with proper typing
+const DynamicTypeaheadMenu = React.lazy(
+  () => import("./default/lexical-typeahead-menu-plugin")
 )
 
 class EmojiOption extends MenuOption {
@@ -54,12 +50,13 @@ class EmojiOption extends MenuOption {
   }
 }
 
+// Type that matches the structure of emoji data from emoji-list.ts
 type Emoji = {
   emoji: string
   description: string
   category: string
-  aliases: Array<string>
-  tags: Array<string>
+  aliases: readonly string[]
+  tags: readonly string[]
   unicode_version: string
   ios_version: string
   skin_tones?: boolean
@@ -70,54 +67,64 @@ const MAX_EMOJI_SUGGESTION_COUNT = 10
 export function EmojiPickerPlugin() {
   const [editor] = useLexicalComposerContext()
   const [queryString, setQueryString] = useState<string | null>(null)
-  const [emojis, setEmojis] = useState<Array<Emoji>>([])
+  const [emojis, setEmojis] = useState<Emoji[]>([])
   const [isOpen, setIsOpen] = useState(false)
+  
   useEffect(() => {
-    import("../utils/emoji-list").then((file) => setEmojis(file.default))
+    import("../utils/emoji-list").then((file) => {
+      // Convert the readonly array to a mutable one
+      const emojiData = JSON.parse(JSON.stringify(file.default)) as Emoji[]
+      setEmojis(emojiData)
+    })
   }, [])
 
-  const emojiOptions = useMemo(
-    () =>
-      emojis != null
-        ? emojis.map(
-            ({ emoji, aliases, tags }) =>
-              new EmojiOption(aliases[0], emoji, {
-                keywords: [...aliases, ...tags],
-              })
-          )
-        : [],
-    [emojis]
-  )
+  const emojiOptions = useMemo(() => {
+    return emojis.map(({ emoji, aliases, tags }) => {
+      // Create new arrays to ensure mutability
+      const aliasesArray = [...aliases]
+      const tagsArray = [...tags]
+      return new EmojiOption(aliasesArray[0], emoji, {
+        keywords: [...aliasesArray, ...tagsArray]
+      })
+    })
+  }, [emojis])
 
   const checkForTriggerMatch = useBasicTypeaheadTriggerMatch(":", {
     minLength: 0,
   })
 
-  const options: Array<EmojiOption> = useMemo(() => {
+  const options: EmojiOption[] = useMemo(() => {
+    if (!queryString) {
+      return emojiOptions.slice(0, MAX_EMOJI_SUGGESTION_COUNT)
+    }
+    
+    const queryRegex = new RegExp(queryString, "gi")
     return emojiOptions
-      .filter((option: EmojiOption) => {
-        return queryString != null
-          ? new RegExp(queryString, "gi").exec(option.title) ||
-            option.keywords != null
-            ? option.keywords.some((keyword: string) =>
-                new RegExp(queryString, "gi").exec(keyword)
-              )
-            : false
-          : emojiOptions
+      .filter((option) => {
+        return (
+          queryRegex.test(option.title) ||
+          option.keywords.some(keyword => queryRegex.test(keyword))
+        )
       })
       .slice(0, MAX_EMOJI_SUGGESTION_COUNT)
   }, [emojiOptions, queryString])
 
   const onSelectOption = useCallback(
     (
-      selectedOption: EmojiOption,
+      selectedOption: MenuOption,
       nodeToRemove: TextNode | null,
-      closeMenu: () => void
+      closeMenu: () => void,
+      _matchingString: string
     ) => {
+      // Type guard to ensure we have an EmojiOption
+      if (!(selectedOption instanceof EmojiOption)) {
+        return
+      }
+
       editor.update(() => {
         const selection = $getSelection()
 
-        if (!$isRangeSelection(selection) || selectedOption == null) {
+        if (!$isRangeSelection(selection)) {
           return
         }
 
@@ -126,7 +133,6 @@ export function EmojiPickerPlugin() {
         }
 
         selection.insertNodes([$createTextNode(selectedOption.emoji)])
-
         closeMenu()
       })
     },
@@ -134,71 +140,46 @@ export function EmojiPickerPlugin() {
   )
 
   return (
-    // @ts-expect-error - LexicalTypeaheadMenuPlugin generic type needs update
-    <LexicalTypeaheadMenuPlugin<EmojiOption>
-      onQueryChange={setQueryString}
-      onSelectOption={onSelectOption}
-      triggerFn={checkForTriggerMatch}
-      options={options}
-      onOpen={() => {
-        setIsOpen(true)
-      }}
-      onClose={() => {
-        setIsOpen(false)
-      }}
-      menuRenderFn={(
-        anchorElementRef,
-        { selectedIndex, selectOptionAndCleanUp, setHighlightedIndex }
-      ) => {
-        return anchorElementRef.current && options.length
-          ? createPortal(
-              <div className="fixed w-[200px] rounded-md shadow-md">
-                <Command
-                  onKeyDown={(e) => {
-                    if (e.key === "ArrowUp") {
-                      e.preventDefault()
-                      setHighlightedIndex(
-                        selectedIndex !== null
-                          ? (selectedIndex - 1 + options.length) %
-                              options.length
-                          : options.length - 1
-                      )
-                    } else if (e.key === "ArrowDown") {
-                      e.preventDefault()
-                      setHighlightedIndex(
-                        selectedIndex !== null
-                          ? (selectedIndex + 1) % options.length
-                          : 0
-                      )
-                    }
-                  }}
-                >
-                  <CommandList>
-                    <CommandGroup>
-                      {options.map((option, index) => (
-                        <CommandItem
-                          key={option.key}
-                          value={option.title}
-                          onSelect={() => {
-                            selectOptionAndCleanUp(option)
-                          }}
-                          className={`flex items-center gap-2 ${
-                            selectedIndex === index
-                              ? "bg-accent"
-                              : "!bg-transparent"
-                          }`}
-                        >
-                          {option.emoji} {option.title}
-                        </CommandItem>
-                      ))}
-                    </CommandGroup>
-                  </CommandList>
-                </Command>
-              </div>,
-              anchorElementRef.current
-            )
-          : null
-      }}
-    />
-  )
+    <React.Suspense fallback={null}>
+      <DynamicTypeaheadMenu
+        onQueryChange={setQueryString}
+        onSelectOption={onSelectOption}
+        triggerFn={checkForTriggerMatch}
+        options={options}
+        onOpen={() => setIsOpen(true)}
+        onClose={() => setIsOpen(false)}
+        menuRenderFn={(anchorElementRef, { selectedIndex, setHighlightedIndex }) => {
+          if (!anchorElementRef.current || !options.length) {
+            return null;
+          }
+
+          const menu = (
+            <div className="fixed w-[200px] rounded-md shadow-md bg-white">
+              <Command>
+                <CommandList>
+                  <CommandGroup>
+                    {options.map((option: EmojiOption, index: number) => (
+                      <CommandItem
+                        key={option.key}
+                        className={selectedIndex === index ? 'bg-gray-100' : ''}
+                        onMouseEnter={() => setHighlightedIndex(index)}
+                        onSelect={() => {
+                          onSelectOption(option, null, () => {}, '');
+                        }}
+                      >
+                        <span className="text-xl">{option.emoji}</span>
+                        <span className="ml-2">{option.title}</span>
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </div>
+          );
+
+          return createPortal(menu, anchorElementRef.current);
+        }}
+      />
+    </React.Suspense>
+  );
 }

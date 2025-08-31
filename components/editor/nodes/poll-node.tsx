@@ -87,9 +87,7 @@ export class PollNode extends DecoratorNode<JSX.Element> {
         <PollComponent
           question={this.__question}
           options={this.__options}
-          totalVotes={this.__totalVotes}
           nodeKey={this.__key}
-          editor={_editor}
         />
       </Suspense>
     );
@@ -121,6 +119,34 @@ export class PollNode extends DecoratorNode<JSX.Element> {
     const writable = this.getWritable();
     writable.__totalVotes = totalVotes;
   }
+
+  toggleVote(option: PollOption): void {
+    const writable = this.getWritable();
+    const optionIndex = writable.__options.findIndex(o => o.id === option.id);
+    
+    if (optionIndex !== -1) {
+      // Toggle the vote count (0 or 1 for this simple implementation)
+      const newVotes = writable.__options[optionIndex].votes > 0 ? 0 : 1;
+      const voteDelta = newVotes - writable.__options[optionIndex].votes;
+      
+      // Update the option's votes
+      writable.__options[optionIndex] = {
+        ...writable.__options[optionIndex],
+        votes: newVotes
+      };
+      
+      // Update total votes
+      writable.__totalVotes += voteDelta;
+    }
+  }
+}
+
+export function createPollOption(text: string = ''): PollOption {
+  return {
+    id: Math.random().toString(36).substr(2, 9),
+    text,
+    votes: 0
+  };
 }
 
 export function $createPollNode(

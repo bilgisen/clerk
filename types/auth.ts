@@ -1,8 +1,8 @@
-export type AuthContextUnion = 
-  | { type: 'github-oidc'; userId: string; repository: string; run_id: string; workflow: string; }
-  | { type: 'clerk'; userId: string; sessionId: string; }
-  | { type: 'unauthorized' };
+import { NextRequest } from 'next/server';
+import { ClerkAuthContext, GitHubOidcAuthContext } from '@/lib/types/auth';
 
-export interface AuthRequest extends Request {
+export type AuthContextUnion = ClerkAuthContext | GitHubOidcAuthContext | { type: 'unauthorized' };
+
+export interface AuthRequest extends NextRequest {
   authContext: AuthContextUnion;
 }

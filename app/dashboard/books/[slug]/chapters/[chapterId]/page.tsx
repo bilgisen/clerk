@@ -34,7 +34,8 @@ function getPreviewText(content: unknown, max = 200) {
     const obj = content as any;
     const s = JSON.stringify(obj);
     // çok basit çıkarım: "text":"..." alanlarını yakala
-    const texts = [...s.matchAll(/"text"\s*:\s*"([^"]*)"/g)].map((m) => m[1]);
+    const matches = s.matchAll(/"text"\s*:\s*"([^"]*)"/g);
+    const texts = Array.from(matches, (m) => m[1]);
     return texts.join(" ").slice(0, max).trim();
   } catch {
     return "";

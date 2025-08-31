@@ -1,5 +1,5 @@
 import { auth } from '@clerk/nextjs/server';
-import type { User } from '@clerk/nextjs/server';
+import type { User } from '@clerk/nextjs/dist/types/server';
 
 const clerkAuth = auth;
 import * as jose from 'jose';

@@ -4,6 +4,13 @@ export function setDomHiddenUntilFound(dom: HTMLElement): void {
   dom.hidden = "until-found"
 }
 
+// Extend HTMLElement to include onbeforematch
+declare global {
+  interface HTMLElement {
+    onbeforematch: (() => void) | null;
+  }
+}
+
 export function domOnBeforeMatch(dom: HTMLElement, callback: () => void): void {
   dom.onbeforematch = callback
 }

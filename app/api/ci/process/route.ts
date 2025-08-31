@@ -17,9 +17,10 @@ const cache = new Map<string, { at: number }>();
 // Simple cache garbage collection
 function gcCache() {
   const now = Date.now();
-  for (const [key, { at }] of cache) {
+  // Use forEach instead of for...of for better compatibility
+  cache.forEach(({ at }, key) => {
     if (now - at > IDEMPOTENCY_TTL_MS) cache.delete(key);
-  }
+  });
   // Enforce max cache size
   if (cache.size > MAX_CACHE) {
     const keys = Array.from(cache.keys()).slice(0, cache.size - MAX_CACHE);
@@ -64,7 +65,7 @@ export const POST = withGithubOidcAuth(async (request) => {
   // Log the request for auditing
   console.log('CI process request', {
     repository: authContext.repository,
-    runId: authContext.run_id, // Use run_id to match the type
+    runId: authContext.claims.run_id, // Access run_id from claims object
     workflow: authContext.workflow,
     userId: authContext.userId
   });

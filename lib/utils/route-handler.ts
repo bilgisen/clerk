@@ -22,7 +22,13 @@ type RouteHandlerOptions<
   
   // Add this to make it compatible with Next.js route handler types
   GET?: (request: NextRequest, context: { params: z.infer<TParams> }) => Promise<NextResponse>;
-  POST?: (request: NextRequest, context: { params: z.infer<TParams>; body: TBody extends ZodType ? output<TBody> : undefined }) => Promise<NextResponse>;
+  POST?: <T = unknown>(
+    request: NextRequest, 
+    context: { 
+      params: z.infer<TParams>;
+      body: TBody extends ZodType ? output<TBody> : T | undefined;
+    }
+  ) => Promise<NextResponse>;
   PATCH?: (request: NextRequest, context: { params: z.infer<TParams>; body: TBody extends ZodType ? output<TBody> : undefined }) => Promise<NextResponse>;
   DELETE?: (request: NextRequest, context: { params: z.infer<TParams> }) => Promise<NextResponse>;
 };
@@ -50,7 +56,7 @@ export function createRouteHandler<
       }
 
       // Validate request body if schema is provided
-      let body: z.infer<TBody> | undefined;
+      let body: unknown;
       if (options.bodySchema) {
         const json = await request.json().catch(() => ({}));
         const validatedBody = options.bodySchema.safeParse(json);
@@ -65,10 +71,12 @@ export function createRouteHandler<
       }
 
       // Call the handler with validated data
-      const response = await options.handler(request, { 
-        params: params.data, 
-        body: (body ?? undefined) as TBody extends ZodType ? output<TBody> : undefined
-      });
+      const handlerContext = {
+        params: params.data,
+        body: body as TBody extends ZodType ? output<TBody> : undefined
+      };
+      
+      const response = await options.handler(request, handlerContext);
       
       if (response instanceof Response && !(response instanceof NextResponse)) {
         return new NextResponse(response.body, response);

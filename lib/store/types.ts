@@ -6,7 +6,10 @@ export interface PublishSession {
   userId: string;
   status: PublishStatus;
   progress: number;
+  createdAt: number;
+  updatedAt: number;
   gh?: GitHubContext;
+  metadata?: Record<string, unknown>;
   [key: string]: unknown;
 }
 

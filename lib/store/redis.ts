@@ -1,10 +1,13 @@
 import Redis from "ioredis";
-import {
-  SessionCreateData,
-  SessionUpdateData,
-  SessionListResult,
+import { 
+  SessionCreateData, 
+  SessionUpdateData, 
+  SessionListResult, 
   SessionFilterOptions,
-} from "./types";
+  type PublishSession 
+} from './types';
+
+export type { PublishSession };
 
 if (!process.env.REDIS_URL) {
   throw new Error("REDIS_URL environment variable is not set");
@@ -67,41 +70,16 @@ redis.on('ready', () => {
 });
 
 export type PublishStatus = 
-  | "pending-runner" 
-  | "runner-attested" 
-  | "processing"
-  | "completed" 
-  | "aborted" 
-  | "failed";
-
-export interface PublishSession extends SessionCreateData {
-  id: string;
-  userId: string;
-  nonce: string;
-  status: PublishStatus;
-  contentId: string;
-  progress?: number;
-  message?: string;
-  phase?: string;
-  gh?: {
-    repository?: string;
-    run_id?: string;
-    run_number?: string;
-    workflow?: string;
-    sha?: string;
-  };
-  combinedToken?: string;
-  completedAt?: number;
-  result?: Record<string, unknown>;
-  error?: {
-    message: string;
-    code?: string;
-    details?: unknown;
-  };
-  metadata?: Record<string, unknown>;
-  createdAt: number;
-  updatedAt: number;
-};
+  | 'idle'
+  | 'initializing'
+  | 'ready'
+  | 'publishing'
+  | 'published'
+  | 'pending-runner'
+  | 'processing'
+  | 'completed'
+  | 'failed'
+  | 'aborted';
 
 // Session expiration times (in seconds)
 const SESSION_TTL = 60 * 60 * 24; // 24 hours
@@ -121,36 +99,58 @@ function getTtl(status: PublishStatus): number {
 }
 
 export async function createSession(session: SessionCreateData): Promise<PublishSession | null> {
-  const now = Date.now();
-  const sessionWithTimestamps = {
-    ...session,
-    createdAt: now,
-    updatedAt: now,
-  };
-
   try {
+    const key = getKey(session.id);
+    const now = Date.now();
+    
+    // Create a base session with required fields
+    const publishSession: PublishSession = {
+      id: session.id,
+      userId: session.userId,
+      status: session.status,
+      progress: session.progress ?? 0, // Ensure progress is always a number
+      createdAt: now,
+      updatedAt: now,
+    };
+    
+    // Add optional fields if they exist
+    if (session.gh) {
+      publishSession.gh = session.gh;
+    }
+    if (session.metadata) {
+      publishSession.metadata = session.metadata;
+    }
+
     await redis.set(
-      getKey(session.id),
-      JSON.stringify(sessionWithTimestamps),
-      "EX",
+      key,
+      JSON.stringify(publishSession),
+      'EX',
       getTtl(session.status)
     );
-    return sessionWithTimestamps;
+
+    return publishSession;
   } catch (error) {
-    console.error("Error creating session:", error);
+    console.error('Error creating session:', error);
     return null;
   }
 }
 
 export async function getSession(id: string): Promise<PublishSession | null> {
   try {
-    const data = await redis.get(getKey(id));
+    const key = getKey(id);
+    const data = await redis.get(key);
     if (!data) return null;
     
-    const session = JSON.parse(data) as PublishSession;
-    return session;
+    const session = JSON.parse(data);
+    // Ensure required fields are present
+    if (!session.id || !session.userId || session.progress === undefined) {
+      console.error('Invalid session data:', session);
+      return null;
+    }
+    
+    return session as PublishSession;
   } catch (error) {
-    console.error("Error getting session:", error);
+    console.error('Error getting session:', error);
     return null;
   }
 }
@@ -159,25 +159,34 @@ export async function updateSession(
   id: string,
   updates: SessionUpdateData
 ): Promise<PublishSession | null> {
-  const existing = await getSession(id);
-  if (!existing) return null;
-
-  const updated = {
-    ...existing,
-    ...updates,
-    updatedAt: Date.now(),
-  } as PublishSession;
-
   try {
+    const key = getKey(id);
+    const existing = await getSession(id);
+    
+    if (!existing) return null;
+
+    const updatedSession: PublishSession = {
+      id: existing.id,
+      userId: existing.userId,
+      status: updates.status || existing.status,
+      progress: updates.progress !== undefined ? updates.progress : existing.progress,
+      ...(existing.gh && { gh: existing.gh }),
+      ...(updates.gh && { gh: updates.gh }),
+      ...(updates.metadata && { metadata: { ...existing.metadata, ...updates.metadata } }),
+      updatedAt: Date.now(),
+      createdAt: existing.createdAt,
+    };
+
     await redis.set(
-      getKey(id),
-      JSON.stringify(updated),
-      "EX",
+      key,
+      JSON.stringify(updatedSession),
+      'EX',
       getTtl(updates.status || existing.status)
     );
-    return updated;
+
+    return updatedSession;
   } catch (error) {
-    console.error("Error updating session:", error);
+    console.error('Error updating session:', error);
     return null;
   }
 }
@@ -201,15 +210,41 @@ export async function getActiveSessions(
   
     for (const key of keys) {
       const data = await redis.get(key);
-      if (data) {
-        const session = JSON.parse(data) as PublishSession;
-        if (session.userId === userId && session.status !== "completed") {
-          sessions.push(session);
+      if (!data) continue;
+      
+      try {
+        const parsed = JSON.parse(data);
+        
+        // Skip if required fields are missing or invalid
+        if (!parsed || 
+            typeof parsed.id !== 'string' || 
+            parsed.userId !== userId || 
+            parsed.status === 'completed' ||
+            typeof parsed.progress !== 'number') {
+          continue;
         }
+        
+        // Create a new session object with all required fields
+        const session: PublishSession = {
+          id: parsed.id,
+          userId: parsed.userId,
+          status: parsed.status,
+          progress: parsed.progress,
+          createdAt: typeof parsed.createdAt === 'number' ? parsed.createdAt : Date.now(),
+          updatedAt: typeof parsed.updatedAt === 'number' ? parsed.updatedAt : Date.now(),
+          ...(parsed.gh && { gh: parsed.gh }),
+          ...(parsed.metadata && { metadata: parsed.metadata })
+        };
+        
+        sessions.push(session);
+      } catch (error) {
+        console.error('Error parsing session data:', error);
+        continue;
       }
     }
   
-    return sessions;
+    // Sort by updatedAt (newest first)
+    return sessions.sort((a, b) => b.updatedAt - a.updatedAt);
   } catch (error) {
     console.error("Error getting active sessions:", error);
     return [];
@@ -227,34 +262,71 @@ export async function getSessionsByUser(
     if (keys.length === 0) {
       return { sessions: [], total: 0 };
     }
-
-    // Get all sessions
-    const sessionsRaw = await redis.mget(...keys);
-    let sessions = sessionsRaw
-      .map((data) => (data ? (JSON.parse(data) as PublishSession) : null))
-      .filter((session): session is PublishSession => 
-        session !== null && session.userId === userId
-      );
-
-    // Apply filters
+    
+    const pipeline = redis.pipeline();
+    keys.forEach(key => pipeline.get(key));
+    const results = await pipeline.exec();
+    
+    if (!results) {
+      return { sessions: [], total: 0 };
+    }
+    
+    // Process and validate sessions
+    let sessions = results
+      .map(([err, data]) => {
+        if (err || !data) return null;
+        
+        try {
+          const parsed = JSON.parse(data as string);
+          
+          // Validate required fields
+          if (!parsed || 
+              typeof parsed.id !== 'string' || 
+              parsed.userId !== userId || 
+              typeof parsed.progress !== 'number' ||
+              !parsed.status) {
+            return null;
+          }
+          
+          // Create a properly typed session object
+          const session: PublishSession = {
+            id: parsed.id,
+            userId: parsed.userId,
+            status: parsed.status,
+            progress: parsed.progress,
+            createdAt: typeof parsed.createdAt === 'number' ? parsed.createdAt : Date.now(),
+            updatedAt: typeof parsed.updatedAt === 'number' ? parsed.updatedAt : Date.now(),
+            ...(parsed.gh && { gh: parsed.gh }),
+            ...(parsed.metadata && { metadata: parsed.metadata })
+          };
+          
+          return session;
+        } catch (error) {
+          console.error('Error parsing session data:', error);
+          return null;
+        }
+      })
+      .filter((session): session is PublishSession => session !== null);
+    
+    // Apply status filter if provided
     if (options.status?.length) {
       sessions = sessions.filter(session => 
         options.status?.includes(session.status)
       );
     }
-
+    
     // Sort by creation date (newest first)
     sessions.sort((a, b) => b.createdAt - a.createdAt);
-
+    
     // Apply pagination
     const total = sessions.length;
     const offset = options.offset || 0;
     const limit = options.limit || total;
     const paginatedSessions = sessions.slice(offset, offset + limit);
-
-    return { 
+    
+    return {
       sessions: paginatedSessions,
-      total 
+      total,
     };
   } catch (error) {
     console.error("Error getting user sessions:", error);

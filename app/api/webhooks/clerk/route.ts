@@ -2,7 +2,15 @@
 export const runtime = 'nodejs';
 
 import { Webhook } from 'svix';
-import type { WebhookEvent } from '@clerk/nextjs/server';
+
+// Define our own WebhookEvent type since the Clerk version might have changed
+type WebhookEvent = {
+  type: string;
+  data: Record<string, any>;
+  object: string;
+  id: string;
+  created_at: number;
+};
 import { createOrGetUser } from "@/lib/db/user";
 import { creditService } from "@/lib/services/credits/credit-service";
 

@@ -1,5 +1,6 @@
 import { auth as clerkAuth, currentUser } from '@clerk/nextjs/server';
-import type { User as ClerkUser, AuthObject } from '@clerk/nextjs/server';
+import type { User as ClerkUser } from '@clerk/nextjs/dist/types/server';
+import type { AuthObject } from '@clerk/nextjs/server';
 
 export type User = ClerkUser;
 

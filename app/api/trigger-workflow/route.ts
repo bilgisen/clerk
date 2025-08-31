@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { GitHubActionsService } from '@/lib/services/github-actions.service';
-import { getAuth } from '@clerk/nextjs/server';
+import { auth } from '@clerk/nextjs/server';
 import { logger } from '@/lib/logger';
 import { db } from '@/db';
 import { books } from '@/db/schema';
@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
     logger.info('Triggering workflow', { requestId });
     
     // Get the authenticated user
-    const { userId } = getAuth(request);
+    const { userId } = auth();
     
     if (!userId) {
       logger.warn('Unauthorized workflow trigger attempt', { requestId });

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getAuth } from '@clerk/nextjs/server';
+import { auth } from '@clerk/nextjs/server';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -9,7 +9,7 @@ const ALLOWED_FILE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'
 
 export async function POST(request: Request) {
   try {
-    const { userId } = getAuth(request as any);
+    const { userId } = auth();
     if (!userId) {
       return NextResponse.json(
         { success: false, error: 'Unauthorized' },
