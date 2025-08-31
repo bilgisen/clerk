@@ -2,7 +2,7 @@ import { Logo } from "./logo";
 import { NavMenu } from "./nav-menu";
 import { NavigationSheet } from "./navigation-sheet";
 import { ThemeSwitcher } from "./theme-switcher";
-import { UserMenu } from "./user-menu";
+import { UserMenu } from "@/components/auth/user-menu";
 
 const Navbar01Page = () => {
   return (

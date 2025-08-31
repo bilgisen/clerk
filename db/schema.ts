@@ -8,12 +8,20 @@ export const subscriptionStatusEnum = pgEnum('subscription_status', ['TRIAL', 'A
 
 // Users Table
 export const users = pgTable('users', {
-  // Clerk Authentication
+  // Authentication
   id: uuid('id').primaryKey().defaultRandom(),
-  clerkId: text('clerk_id').unique().notNull(),
-
-  // Basic Info
   email: text('email').notNull(),
+  
+  // Auth Fields
+  passwordHash: text('password_hash'),
+  salt: text('salt'),
+  emailVerified: timestamp('email_verified', { withTimezone: true }),
+  verificationToken: text('verification_token'),
+  resetToken: text('reset_token'),
+  resetTokenExpires: timestamp('reset_token_expires', { withTimezone: true }),
+  lastActiveAt: timestamp('last_active_at', { withTimezone: true }),
+
+  // Profile Info
   firstName: text('first_name'),
   lastName: text('last_name'),
   imageUrl: text('image_url'),

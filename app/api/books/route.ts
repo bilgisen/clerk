@@ -1,7 +1,8 @@
 import 'server-only';
 
 import { NextResponse } from 'next/server';
-import { auth } from '@clerk/nextjs/server';
+import { auth } from '@/lib/auth/better-auth';
+import { cookies } from 'next/headers';
 import { db } from '@/lib/db/server';
 import { books, users } from '@/db/schema';
 import { eq } from 'drizzle-orm';
@@ -21,20 +22,24 @@ type NewBook = InferInsertModel<typeof books>;
 export async function GET(): Promise<NextResponse> {
   try {
     // Get the current user session
-    const { userId } = await auth();
+    const session = await auth.api.getSession({
+      headers: new Headers({
+        cookie: cookies().toString()
+      })
+    });
     
-    if (!userId) {
+    if (!session?.user) {
       return NextResponse.json(
         { error: 'Unauthorized' }, 
         { status: 401 }
       );
     }
 
-    // Get the user's database ID using their Clerk ID
+    // Get the user's database ID
     const [user] = await db
       .select()
       .from(users)
-      .where(eq(users.clerkId, userId))
+      .where(eq(users.id, session.user.id))
       .limit(1);
 
     if (!user) {
@@ -71,20 +76,24 @@ export async function GET(): Promise<NextResponse> {
 export async function POST(request: Request) {
   try {
     // Get the current user session
-    const { userId } = await auth();
+    const session = await auth.api.getSession({
+      headers: new Headers({
+        cookie: cookies().toString()
+      })
+    });
     
-    if (!userId) {
+    if (!session?.user) {
       return NextResponse.json(
         { error: 'Unauthorized' }, 
         { status: 401 }
       );
     }
     
-    // Get the user's database ID using their Clerk ID
+    // Get the user's database ID
     const [user] = await db
       .select()
       .from(users)
-      .where(eq(users.clerkId, userId))
+      .where(eq(users.id, session.user.id))
       .limit(1);
 
     if (!user) {
