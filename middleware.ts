@@ -1,4 +1,4 @@
-import { authMiddleware } from '@clerk/nextjs';
+import { clerkMiddleware } from "@clerk/nextjs";
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { verifyGitHubOidcToken } from '@/lib/auth/github-oidc';
@@ -16,7 +16,7 @@ const publicRoutes = [
   '/public(.*)',
   '/api/github/oidc',
   '/api/clerk/.*',
-  '/api/.*\.(jpg|jpeg|png|svg|webp|gif|ico|css|js)$',
+  '/api/.*\\.(jpg|jpeg|png|svg|webp|gif|ico|css|js)$',
 ];
 
 // GitHub OIDC protected routes
@@ -30,11 +30,9 @@ function isPathMatching(path: string, patterns: string[]): boolean {
   });
 }
 
-// Create Clerk middleware with default options
-const clerkMiddleware = authMiddleware({
-  // Public routes that don't require authentication
-  publicRoutes: publicRoutes,
-  // Allow API routes to be accessed without authentication
+// Create Clerk middleware
+const baseClerkMiddleware = clerkMiddleware({
+  publicRoutes,
   ignoredRoutes: [
     '/api/webhooks(.*)',
     '/api/trpc(.*)',
@@ -73,9 +71,7 @@ export default async function middleware(req: NextRequest) {
       requestHeaders.set('x-github-oidc-claims', JSON.stringify(result.claims));
 
       return NextResponse.next({
-        request: {
-          headers: requestHeaders,
-        },
+        request: { headers: requestHeaders },
       });
     } catch (error) {
       console.error('GitHub OIDC verification failed:', error);
@@ -83,8 +79,8 @@ export default async function middleware(req: NextRequest) {
     }
   }
 
-  // For all other routes, use Clerk's auth middleware
-  return clerkMiddleware(req);
+  // Default: use Clerk middleware
+  return baseClerkMiddleware(req);
 }
 
 export const config = {
