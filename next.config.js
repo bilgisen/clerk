@@ -11,6 +11,10 @@ const clerkConfig = {
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Enable source maps in production for better error tracking
+  productionBrowserSourceMaps: true,
+  
+  // Enable React's Strict Mode
   reactStrictMode: false,
 
   typescript: {

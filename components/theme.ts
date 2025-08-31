@@ -1,7 +1,7 @@
 const theme = {
   'code[class*="language-"]': {
     color: '#c5c8c6',
-    fontFamily: 'var(--font-geist-mono)',
+    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
     direction: 'ltr',
     textAlign: 'left',
     whiteSpace: 'pre',
@@ -19,7 +19,7 @@ const theme = {
   },
   'pre[class*="language-"]': {
     color: '#c5c8c6',
-    fontFamily: 'var(--font-geist-mono)',
+    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
     direction: 'ltr',
     textAlign: 'left',
     whiteSpace: 'pre',

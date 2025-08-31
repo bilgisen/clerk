@@ -387,6 +387,9 @@ importers:
       '@types/react-syntax-highlighter':
         specifier: ^15.5.13
         version: 15.5.13
+      '@types/react-transition-group':
+        specifier: ^4.4.12
+        version: 4.4.12(@types/react@18.3.24)
       '@types/uuid':
         specifier: ^10.0.0
         version: 10.0.0
