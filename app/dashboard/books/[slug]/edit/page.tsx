@@ -34,6 +34,29 @@ export default function EditBookPage() {
     }
   }, [user, isAuthLoading, router]);
 
+  // Transform book data to match form values
+  const defaultValues = book ? {
+    title: book.title || '',
+    author: book.author || '',
+    publisher: book.publisher || '',
+    contributor: book.contributor || undefined,
+    translator: book.translator || undefined,
+    slug: book.slug || '',
+    subtitle: book.subtitle || undefined,
+    description: book.description || undefined,
+    publisherWebsite: book.publisherWebsite || undefined,
+    publishYear: book.publishYear || undefined,
+    isbn: book.isbn || undefined,
+    language: book.language || 'en',
+    genre: book.genre || undefined,
+    series: book.series || undefined,
+    seriesIndex: book.seriesIndex || undefined,
+    tags: book.tags || [],
+    coverImageUrl: book.coverImageUrl || undefined,
+    isPublished: book.isPublished || false,
+    isFeatured: book.isFeatured || false
+  } : undefined;
+
   // Handle book fetch errors
   useEffect(() => {
     if (bookError) {
@@ -117,11 +140,13 @@ export default function EditBookPage() {
           </Button>
         </div>
         <Separator />
-        <BookInfoForm
-          initialData={book}
-          onSubmit={handleSubmit}
-          isSubmitting={isSubmitting}
-        />
+        {defaultValues && (
+          <BookInfoForm
+            defaultValues={defaultValues}
+            onSubmit={handleSubmit}
+            isSubmitting={isSubmitting}
+          />
+        )}
       </div>
     </div>
     );
