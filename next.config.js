@@ -14,13 +14,11 @@ const nextConfig = {
   reactStrictMode: false,
 
   typescript: {
-    // CI'de type check yapılacak
     ignoreBuildErrors: false,
     tsconfigPath: "./tsconfig.json",
   },
 
   eslint: {
-    // Build'i kırma, sadece warning göster
     ignoreDuringBuilds: true,
   },
 
@@ -48,7 +46,7 @@ const nextConfig = {
     ];
   },
 
-  webpack: (config, { isServer, dev }) => {
+  webpack: (config, { isServer }) => {
     // ---- Path aliases ----
     const pathAliases = {
       "@": path.resolve(__dirname, "./"),
@@ -127,7 +125,6 @@ const nextConfig = {
       ],
     };
 
-    // Çakışan ts-loader'ları temizle
     config.module.rules = config.module.rules.filter(
       (rule) => !rule.test || !rule.test.toString().includes("tsx?")
     );
@@ -162,7 +159,6 @@ const nextConfig = {
 
   experimental: {
     externalDir: true,
-    outputFileTracingRoot: path.join(__dirname, "../../"),
   },
 
   env: {
