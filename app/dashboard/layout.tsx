@@ -3,8 +3,6 @@ export const dynamic = 'force-dynamic';
 import { ReactNode } from 'react';
 import Navbar01Page from '@/components/navbar-01/navbar-01';
 import { ThemeProvider } from 'next-themes';
-import { auth } from '@clerk/nextjs/server';
-import { redirect } from 'next/navigation';
 import { QueryProvider } from '@/providers/query-provider';
 
 export default function DashboardLayout({
