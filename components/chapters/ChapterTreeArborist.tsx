@@ -3,7 +3,7 @@
 import React, { useMemo, useCallback } from 'react';
 import { Tree, NodeRendererProps } from 'react-arborist';
 import { useQuery } from "@tanstack/react-query";
-import { useAuth } from "@clerk/nextjs";
+import { useAuth } from "@/hooks/use-auth";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { GripVertical, Eye, Pencil, Trash2 } from 'lucide-react';

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/db';
-import { users, books, chapters, media } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import { books, chapters } from '@/db/schema';
+import { and, eq } from 'drizzle-orm';
 import { requireAuth } from '@/lib/auth/api-auth';
 import { CreditService } from '@/lib/services/credits/credit-service';
 
@@ -26,19 +26,19 @@ export async function GET(
   context: { params: { id: string } }
 ) {
   try {
-    const { user, error } = await requireAuth();
+    const { user: authUser, error } = await requireAuth();
     if (error) return error;
     
-    if (!user) {
+    if (!authUser) {
       return NextResponse.json(
         { error: 'Unauthorized' },
         { status: 401 }
       );
     }
     
-    const { id } = await context.params;
+    const { id } = context.params;
 
-    if (!userId) {
+    if (!authUser.id) {
       return NextResponse.json(
         { error: 'Unauthorized' },
         { status: 401 }
@@ -52,25 +52,11 @@ export async function GET(
       );
     }
 
-    // First, get the user's database ID from their Clerk ID
-    const [user] = await db
-      .select({ id: users.id })
-      .from(users)
-      .where(eq(users.clerkId, userId))
-      .limit(1);
-
-    if (!user) {
-      return NextResponse.json(
-        { error: 'User not found' },
-        { status: 404 }
-      );
-    }
-
     // Get the book by ID and user ID
     const book = await db.query.books.findFirst({
       where: ((books: unknown, { and, eq }: DrizzleOperators) => and(
         eq((books as { id: string }).id, id),
-        eq((books as { userId: string }).userId, user.id)
+        eq((books as { userId: string }).userId, authUser.id)
       )) as DrizzleWhereFn,
       // Explicitly select the fields we want to return
       columns: {
@@ -99,7 +85,7 @@ export async function GET(
 
     return NextResponse.json(book);
   } catch (error) {
-    console.error('Error fetching book by ID:', error);
+    console.error('Error getting book:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
@@ -116,11 +102,19 @@ export async function DELETE(
   context: { params: { id: string } }
 ) {
   try {
-    const session = await auth();
-    const userId = session.userId;
+    const { user: authUser, error } = await requireAuth();
+    if (error) return error;
+    
+    if (!authUser) {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      );
+    }
+    
     const { id } = context.params;
 
-    if (!userId) {
+    if (!authUser.id) {
       return NextResponse.json(
         { error: 'Unauthorized' },
         { status: 401 }
@@ -134,70 +128,22 @@ export async function DELETE(
       );
     }
 
-    // First, get the user's database ID from their Clerk ID
-    const [user] = await db
-      .select({ id: users.id })
-      .from(users)
-      .where(eq(users.clerkId, userId))
-      .limit(1);
-
-    if (!user) {
-      return NextResponse.json(
-        { error: 'User not found' },
-        { status: 404 }
-      );
-    }
-
-    // Check if book exists and belongs to user
-    const book = await db.query.books.findFirst({
-      where: ((books: unknown, { and, eq }: DrizzleOperators) => and(
-        eq((books as { id: string }).id, id),
-        eq((books as { userId: string }).userId, user.id)
-      )) as DrizzleWhereFn,
-      columns: {
-        id: true
-      },
-    });
-
-    if (!book) {
-      return NextResponse.json(
-        { error: 'Book not found' },
-        { status: 404 }
-      );
-    }
-
-    const creditService = new CreditService();
-    
-    // Delete the book and all related data in a transaction
+    // Start a transaction
     await db.transaction(async (tx: typeof db) => {
-      // Delete all media associated with the book
-      await tx.delete(media).where(eq(media.bookId, id));
-      
-      // Delete all chapters associated with the book
+      // First, delete all chapters associated with the book
       await tx.delete(chapters).where(eq(chapters.bookId, id));
       
-      // Refund 300 credits to the user
-      await creditService.addCredits({
-        userId: user.id,
-        amount: 300,
-        reason: 'book_deletion_refund',
-        metadata: {
-          bookId: id,
-          ref: `book:${id}`,
-          refundAmount: 300,
-          type: 'refund',
-          title: 'Book Deletion Refund'
-        }
-      });
-      
-      // Finally, delete the book
-      await tx.delete(books).where(eq(books.id, id));
+      // Then delete the book
+      await tx.delete(books)
+        .where(
+          and(
+            eq(books.id, id),
+            eq(books.userId, authUser.id)
+          )
+        );
     });
 
-    return NextResponse.json(
-      { success: true, message: 'Book deleted successfully' },
-      { status: 200 }
-    );
+    return new NextResponse(null, { status: 204 });
   } catch (error) {
     console.error('Error deleting book:', error);
     return NextResponse.json(

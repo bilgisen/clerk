@@ -10,7 +10,6 @@
       "@/hooks/*": ["./hooks/*"],
       "@/types/*": ["./types/*"],
       "@/middleware/*": ["./middleware/*"],
-      "@/middleware/old/*": ["./middleware/old/*"],
       "@/schemas/*": ["./schemas/*"]
     },
     "typeRoots": [

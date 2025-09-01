@@ -3,7 +3,12 @@ import { NextResponse } from 'next/server';
 import { db } from '@/db/drizzle';
 import { books } from '@/db/schema';
 import { generateImprintHTML, type BookImprintData } from '@/lib/generateChapterHTML';
-import { withGithubOidcAuth, type HandlerWithAuth, type AuthContextUnion } from '@/middleware/old/auth';
+import { 
+  withSessionAuth, 
+  type AuthContextUnion, 
+  isSessionAuthContext, 
+  type HandlerWithAuth 
+} from '@/middleware/auth';
 import { eq } from 'drizzle-orm';
 import { logger } from '@/lib/logger';
 
@@ -28,7 +33,7 @@ const handler: HandlerWithAuth = async (
   context: { 
     params?: Record<string, string>; 
     authContext: AuthContextUnion;
-  } = { authContext: { type: 'unauthorized' } }
+  }
 ) => {
   const { params = {}, authContext } = context;
   const slug = params?.slug;
@@ -53,11 +58,11 @@ const handler: HandlerWithAuth = async (
     return response;
   }
   
-  // Ensure we have a valid GitHub OIDC context
-  if (authContext.type !== 'github-oidc') {
+  // Ensure we have a valid session context
+  if (!isSessionAuthContext(authContext)) {
     const response = new NextResponse(
       JSON.stringify({ 
-        error: 'GitHub OIDC authentication required',
+        error: 'Authentication required',
         code: 'AUTH_REQUIRED'
       }),
       { 
@@ -73,20 +78,15 @@ const handler: HandlerWithAuth = async (
     );
     return response;
   }
-
-  const { claims } = authContext;
   const requestStart = Date.now();
   const { searchParams } = new URL(request.url);
   const format = searchParams.get('format') || 'html';
   
-  // Log OIDC context for audit
-  logger.info('OIDC-authenticated imprint request', {
-    repository: claims.repository_owner,
-    workflow: claims.workflow,
-    run_id: claims.run_id,
+  // Log request for audit
+  logger.info('Authenticated imprint request', {
     bookSlug: slug,
     format,
-    userId: claims.sub
+    userId: authContext.userId
   });
 
   // Validate format
@@ -157,7 +157,7 @@ const handler: HandlerWithAuth = async (
     logger.info('Generating imprint', {
       bookId: book.id,
       format,
-      userId: claims.sub
+      userId: context.authContext.type === 'session' ? context.authContext.userId : 'anonymous'
     });
 
     // Prepare book data for imprint
@@ -181,7 +181,7 @@ const handler: HandlerWithAuth = async (
       logger.info('Successfully generated HTML imprint', {
         bookId: book.id,
         durationMs: duration,
-        userId: claims.sub
+        userId: context.authContext.type === 'session' ? context.authContext.userId : 'anonymous'
       });
 
       const response = new NextResponse(imprintHTML, {
@@ -221,7 +221,7 @@ const handler: HandlerWithAuth = async (
       logger.info('Successfully generated JSON imprint', {
         bookId: book.id,
         durationMs: duration,
-        userId: claims.sub
+        userId: context.authContext.type === 'session' ? context.authContext.userId : 'anonymous'
       });
 
       const response = new NextResponse(JSON.stringify(responseData), {
@@ -247,7 +247,7 @@ const handler: HandlerWithAuth = async (
       stack: errorStack,
       errorId,
       bookSlug: slug,
-      userId: claims?.sub,
+      userId: context.authContext.type === 'session' ? context.authContext.userId : 'anonymous',
       format
     });
 
@@ -276,5 +276,5 @@ const handler: HandlerWithAuth = async (
   }
 };
 
-// Export the handler wrapped with GitHub OIDC auth middleware
-export const GET = withGithubOidcAuth(handler);
+// Export the handler wrapped with session auth middleware
+export const GET = withSessionAuth(handler);

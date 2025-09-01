@@ -38,29 +38,20 @@ export async function GET(
   context: { params: Promise<{ slug: string }> }
 ) {
   try {
-    const session = await auth();
-    const userId = session.userId;
+    const { user: authUser, error } = await requireAuth();
+    if (error) return error;
+    
+    if (!authUser) {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      );
+    }
 
     const { slug } = await context.params;
 
-    if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
     if (!slug) {
       return NextResponse.json({ error: 'Book slug is required' }, { status: 400 });
-    }
-
-    // Find user using raw SQL with proper type safety
-    const [user] = (await sql`
-      SELECT id, clerk_id 
-      FROM users 
-      WHERE clerk_id = ${userId} 
-      LIMIT 1`
-    ) as User[];
-
-    if (!user) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
     // Find book using raw SQL with proper type safety
@@ -68,7 +59,7 @@ export async function GET(
       SELECT * 
       FROM books 
       WHERE slug = ${slug} 
-        AND user_id = ${user.id} 
+        AND user_id = ${authUser.id} 
       LIMIT 1`
     ) as Book[];
 
@@ -92,32 +83,20 @@ export async function DELETE(
   context: { params: Promise<{ slug: string }> }
 ) {
   try {
-    const { slug } = await context.params;
-    // Get the current user
-    const { user, error } = await requireAuth();
+    const { user: authUser, error } = await requireAuth();
     if (error) return error;
     
-    if (!user) {
+    if (!authUser) {
       return NextResponse.json(
-        { success: false, error: 'Unauthorized' },
+        { error: 'Unauthorized' },
         { status: 401 }
       );
     }
 
+    const { slug } = await context.params;
+
     if (!slug) {
       return NextResponse.json({ error: 'Book slug is required' }, { status: 400 });
-    }
-
-    // Find user using raw SQL with proper type safety
-    const [user] = (await sql`
-      SELECT id, clerk_id 
-      FROM users 
-      WHERE clerk_id = ${userId} 
-      LIMIT 1`
-    ) as User[];
-
-    if (!user) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
     // Find book using raw SQL with proper type safety
@@ -125,7 +104,7 @@ export async function DELETE(
       SELECT * 
       FROM books 
       WHERE slug = ${slug} 
-        AND user_id = ${user.id} 
+        AND user_id = ${authUser.id} 
       LIMIT 1`
     ) as Book[];
 
@@ -137,7 +116,7 @@ export async function DELETE(
     await sql`
       DELETE FROM books 
       WHERE id = ${book.id} 
-        AND user_id = ${user.id}`;
+        AND user_id = ${authUser.id}`;
 
     return NextResponse.json(
       { success: true, message: 'Book deleted successfully' },

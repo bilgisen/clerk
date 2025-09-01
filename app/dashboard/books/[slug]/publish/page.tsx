@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { BookOpen, FileText, Headphones, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
 import { BooksMenu } from '@/components/books/books-menu';
-import { toast } from 'sonner';
+import toast from 'sonner';
 import { Button } from '@/components/ui/button';
 import { useBook } from '@/hooks/api/use-books';
 import type { Book } from '@/types/book';

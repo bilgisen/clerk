@@ -18,7 +18,7 @@ async function updateFile(filePath) {
     // Update the import path
     const updatedContent = content.replace(
       /from\s+['"]@\/middleware\/auth['"]/g,
-      'from \'@/middleware/old/auth\''
+      'from \'@/lib/auth\''
     );
     
     if (content !== updatedContent) {
@@ -38,6 +38,10 @@ async function main() {
     await updateFile(file);
   }
   console.log('✅ All files processed');
+  console.log('✅ Migration to the new authentication system is complete!');
+  console.log('All auth-related code has been moved to @/lib/auth/');
+  console.log('This script is no longer needed and can be safely removed.');
+  process.exit(0);
 }
 
 main();

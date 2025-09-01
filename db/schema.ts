@@ -13,8 +13,8 @@ export const users = pgTable('users', {
   email: text('email').notNull(),
   
   // Auth Fields
-  passwordHash: text('password_hash'),
-  salt: text('salt'),
+  passwordHash: text('password_hash').notNull(),
+  salt: text('salt').notNull(),
   emailVerified: timestamp('email_verified', { withTimezone: true }),
   verificationToken: text('verification_token'),
   resetToken: text('reset_token'),

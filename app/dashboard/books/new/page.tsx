@@ -2,7 +2,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { toast } from "sonner";
+import toast from "sonner";
 import { BookInfoForm, type BookFormValues } from "@/components/books/forms/book-info-form";
 import { Separator } from "@/components/ui/separator";
 import { BooksMenu } from "@/components/books/books-menu";

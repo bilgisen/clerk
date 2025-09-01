@@ -1,15 +1,16 @@
 # Authentication System
 
-This document describes the authentication system used in the application.
+This document describes the authentication system used in the application, built with Better Auth and Google SSO.
 
 ## Overview
 
-The authentication system is built on top of NextAuth.js with the following features:
-- Email/password authentication
-- OAuth providers (Google, GitHub)
-- JWT-based session management
+The authentication system provides the following features:
+- Google Single Sign-On (SSO)
+- Session-based authentication
+- JWT token generation for API access
+- Protected API routes
+- Secure HTTP-only cookies
 - Role-based access control
-- API route protection
 
 ## Setup
 
@@ -19,17 +20,15 @@ Add these to your `.env.local` file:
 
 ```env
 # Authentication
-NEXTAUTH_SECRET=your_nextauth_secret
-NEXTAUTH_URL=http://localhost:3000
+AUTH_SECRET=your_auth_secret_here
+AUTH_URL=http://localhost:3000
 
 # JWT Secret (for API authentication)
 JWT_SECRET=your_jwt_secret_here
 
-# OAuth Providers
+# Google OAuth (required for SSO)
 GOOGLE_CLIENT_ID=your_google_client_id
 GOOGLE_CLIENT_SECRET=your_google_client_secret
-GITHUB_CLIENT_ID=your_github_client_id
-GITHUB_CLIENT_SECRET=your_github_client_secret
 
 # Database
 DATABASE_URL=your_database_url
@@ -42,12 +41,12 @@ DATABASE_URL=your_database_url
 Use the `useAuth` hook to access the current user and authentication methods:
 
 ```typescript
-import { useAuth } from '@/hooks/use-auth';
+import { useAuth } from '@/lib/auth/use-auth';
 
 function MyComponent() {
-  const { user, loading, signOut } = useAuth();
+  const { user, isLoading, signOut } = useAuth();
   
-  if (loading) return <div>Loading...</div>;
+  if (isLoading) return <div>Loading...</div>;
   if (!user) return <div>Not authenticated</div>;
   
   return (
@@ -61,18 +60,18 @@ function MyComponent() {
 
 ### API Routes
 
-Protect your API routes using the `requireAuth` utility:
+Protect your API routes using the `withSessionAuth` middleware:
 
 ```typescript
-import { requireAuth } from '@/lib/auth/api-auth';
+import { withSessionAuth } from '@/middleware/auth';
 
-export async function GET(request: Request) {
-  const { user, error } = await requireAuth();
-  if (error) return error;
-  
+export const GET = withSessionAuth(async (request: NextRequest, { authContext }) => {
   // User is authenticated
-  return Response.json({ message: 'Protected data', user });
-}
+  return NextResponse.json({ 
+    message: 'Protected data', 
+    userId: authContext.userId 
+  });
+});
 ```
 
 ### Middleware
@@ -80,9 +79,9 @@ export async function GET(request: Request) {
 The authentication middleware protects your pages and API routes. Add it to your `middleware.ts` file:
 
 ```typescript
-import { auth } from '@/auth';
+import { withSessionAuth } from './middleware/auth';
 
-export default auth((req) => {
+export default withSessionAuth((req) => {
   // Your middleware logic here
 });
 
@@ -90,31 +89,19 @@ export const config = {
   matcher: ['/((?!api/auth|_next/static|_next/image|favicon.ico).*)'],
 };
 ```
-  // Your protected route logic here
-});
-
-// Optional auth route
-export const GET = withOptionalAuth(async (request) => {
-  const authContext = (request as any).authContext;
-  // Your route logic here
-});
-```
 
 ### Accessing Authentication Context
 
-In any protected route, you can access the authentication context from the request object:
+In any protected route, you can access the authentication context:
 
 ```typescript
+// In API routes
 const authContext = (request as any).authContext;
 
-// For Clerk authentication
-authContext.authType; // 'clerk'
-authContext.userId;   // Clerk user ID
-
-// For GitHub OIDC authentication
-authContext.authType; // 'github-oidc'
-authContext.userId;   // GitHub OIDC subject (usually 'repo:owner/repo:environment:name')
-authContext.claims;   // Full JWT claims
+// Type-safe access
+authContext.userId;   // Authenticated user ID
+authContext.email;    // User's email (if available)
+authContext.sessionId; // Current session ID
 ```
 
 ## Error Handling
@@ -127,24 +114,26 @@ The authentication middleware returns standardized error responses:
 {
   "error": "Unauthorized",
   "code": "UNAUTHORIZED",
-  "message": "Authentication required. Please provide valid credentials."
+  "message": "Authentication required. Please log in."
 }
 ```
 
-### 403 Forbidden
+### 500 Internal Server Error
 
 ```json
 {
-  "error": "Forbidden",
-  "code": "FORBIDDEN",
-  "message": "Authentication method 'github-oidc' is not allowed for this endpoint."
+  "error": "Internal Server Error",
+  "code": "INTERNAL_SERVER_ERROR",
+  "message": "An error occurred during authentication."
 }
 ```
 
 ## Security Considerations
 
 1. Always use HTTPS in production
-2. Keep your Clerk secret keys secure
-3. Restrict GitHub OIDC tokens to specific repositories and environments when possible
+2. Keep your authentication secrets secure
+3. Use secure, HTTP-only cookies for session storage
 4. Validate all inputs from authenticated requests
 5. Use the principle of least privilege when setting up permissions
+6. Implement proper session expiration and rotation
+7. Regularly rotate your JWT secrets

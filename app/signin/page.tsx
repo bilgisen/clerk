@@ -3,17 +3,17 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { useAuth } from '@/lib/auth/better-auth';
+import { useAuth } from '@/hooks/use-auth';
 
 export default function SignInPage() {
   const router = useRouter();
-  const { isAuthenticated, isLoading } = useAuth();
+  const { user, loading } = useAuth();
 
   useEffect(() => {
-    if (isAuthenticated) {
+    if (user) {
       router.push('/dashboard');
     }
-  }, [isAuthenticated, router]);
+  }, [user, router]);
 
   const handleSignIn = async () => {
     try {
@@ -27,7 +27,7 @@ export default function SignInPage() {
     }
   };
 
-  if (isLoading || isAuthenticated) {
+  if (loading || user) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>

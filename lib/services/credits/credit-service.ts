@@ -55,7 +55,7 @@ export class CreditService {
           amount: SIGNUP_BONUS_AMOUNT,
           reason: 'signup_bonus',
           idempotencyKey,
-          source: 'clerk',
+          source: 'app',
           metadata: { 
             type: 'signup_bonus',
             awardedAt: new Date().toISOString()

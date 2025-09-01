@@ -1,5 +1,4 @@
 onlyBuiltDependencies:
-  - '@clerk/shared'
   - '@parcel/watcher'
   - '@tailwindcss/oxide'
   - esbuild

@@ -10,7 +10,7 @@ type CheckoutParams = {
 };
 
 export function usePolar() {
-  const { user } = useAuth();
+  const { user } = useAuth() as { user: { id: string; email: string } | null };
   const userId = user?.id;
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
@@ -29,9 +29,9 @@ export function usePolar() {
           priceId: params.priceId,
           successUrl: params.successUrl || `${window.location.origin}/success?session_id={CHECKOUT_SESSION_ID}`,
           cancelUrl: params.cancelUrl || window.location.href,
-          customerEmail: user?.emailAddresses?.[0]?.emailAddress,
+          customerEmail: user?.email || '',
           metadata: {
-            clerkUserId: userId,
+            userId: userId,
             ...params.metadata,
           },
         });
@@ -46,7 +46,7 @@ export function usePolar() {
         setIsLoading(false);
       }
     },
-    [userId, user?.emailAddresses, setError, setIsLoading]
+    [userId, user?.email, setError, setIsLoading]
   );
 
   const redirectToCustomerPortal = useCallback(async (returnUrl: string = window.location.href) => {
@@ -58,9 +58,8 @@ export function usePolar() {
     setError(null);
 
     try {
-      // In a real app, you would first get the customer ID from your database
-      // For now, we'll use the Clerk user ID as the customer ID
-      const customerId = `clerk_${userId}`;
+      // Get the customer ID from your database
+      const customerId = userId;
       
       const { url } = await polarService.createPortalSession(customerId, returnUrl);
       

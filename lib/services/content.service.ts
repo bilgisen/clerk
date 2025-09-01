@@ -1,4 +1,4 @@
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth/better-auth";
 import { randomUUID } from 'crypto';
 
 export type EbookFormat = 'epub' | 'mobi' | 'pdf' | 'html' | 'docx';

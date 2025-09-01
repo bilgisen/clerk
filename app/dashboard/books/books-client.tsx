@@ -4,7 +4,7 @@
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Plus } from 'lucide-react';
-import { toast } from 'sonner';
+import toast from 'sonner';
 
 import { Button } from '@/components/ui/button';
 import { Book } from '@/types/book';
@@ -17,7 +17,7 @@ interface BooksPageProps {
 
 export default function BooksPage({ initialBooks = [] }: BooksPageProps) {
   const router = useRouter();
-  const { user, loading: isAuthLoading } = useAuth();
+  const { user, isLoading: isAuthLoading } = useAuth();
   const [isLoading, setIsLoading] = useState(true);
   const [books, setBooks] = useState<Book[]>(initialBooks);
   const [error, setError] = useState<string | null>(null);
@@ -74,10 +74,9 @@ export default function BooksPage({ initialBooks = [] }: BooksPageProps) {
       
       toast.success('Book deleted successfully');
     } catch (error) {
-      console.error('[BooksClient] Error deleting book:', error);
-      toast.error('Failed to delete book', {
-        description: error instanceof Error ? error.message : 'An error occurred',
-      });
+      const errorMessage = error instanceof Error ? error.message : 'Failed to delete book';
+      console.error('[BooksClient] Error deleting book:', errorMessage);
+      toast.error(errorMessage);
     }
   };
 

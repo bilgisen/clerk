@@ -3,8 +3,9 @@
 
 import { useState, useEffect } from "react";
 import { useRouter, useParams } from "next/navigation";
-import { useAuth } from "@clerk/nextjs";
+import { useAuth } from "@/hooks/use-auth";
 import dynamic from 'next/dynamic';
+import toast from "sonner";
 
 interface ChapterData {
   id: string;
@@ -45,12 +46,21 @@ function getPreviewText(content: unknown, max = 200) {
 export default function ChapterDetailPage() {
   const router = useRouter();
   const params = useParams();
-  const { userId } = useAuth();
-  const bookSlug = params?.slug as string;
-  const chapterId = params?.chapterId as string;
-  
+  const { slug: bookSlug, chapterId } = params as { slug: string; chapterId: string };
+  const { getToken, user, isLoading: authLoading } = useAuth();
+  const [isClient, setIsClient] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  
+  // Redirect if not authenticated
+  useEffect(() => {
+    if (!authLoading && !user) {
+      router.push(`/signin?redirect=/dashboard/books/${bookSlug}/chapters/${chapterId}`);
+      toast.error('Please sign in to view this chapter');
+    } else if (!authLoading) {
+      setIsLoading(false);
+    }
+  }, [user, authLoading, router, bookSlug, chapterId]);
   
   const { 
     data: chapterData, 

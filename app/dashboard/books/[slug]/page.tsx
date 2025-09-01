@@ -8,7 +8,7 @@ import { Separator } from "@/components/ui/separator";
 import { BookInfo } from "@/components/books/book-info";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useBook, useDeleteBook } from "@/hooks/api/use-books";
-import { toast } from "sonner";
+import toast from "sonner";
 
 interface PageProps {
   params: { slug: string };

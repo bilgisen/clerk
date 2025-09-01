@@ -54,11 +54,11 @@ on:
 permissions:
   contents: read    # Checkout repo
   actions: read     # For workflow run information
-  id-token: write   # For OIDC token generation
 
 # Environment variables
 env:
   NODE_ENV: production
+  # Default backend URL - can be overridden in GitHub repository variables
   BACKEND_URL: ${{ vars.BACKEND_URL || 'https://editor.bookshall.com' }}
   # Set default values for required environment variables
   BOOK_ID: ${{ inputs.book_id }}
@@ -407,7 +407,8 @@ jobs:
           FILE_PATH="./output/${CONTENT_ID}.epub"
           
           # Generate a slug from the book title or use the content ID
-          RAW_SLUG="${{ inputs.slug }}"
+          # Default to empty string if slug is not provided
+          RAW_SLUG="${{ inputs.slug || '' }}"
           [ -z "$RAW_SLUG" ] && RAW_SLUG=$(jq -r '.book.title // "untitled"' ./book-content/payload.json)
           
           # Clean up the slug

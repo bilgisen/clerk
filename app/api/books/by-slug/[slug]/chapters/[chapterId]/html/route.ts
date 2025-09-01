@@ -4,7 +4,13 @@ import { db } from '@/db/drizzle';
 import { books, chapters } from '@/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { generateCompleteDocumentHTML } from '@/lib/generateChapterHTML';
-import { withGithubOidcAuth, type AuthContextUnion, type HandlerWithAuth } from '@/middleware/old/auth';
+import { 
+  withSessionAuth, 
+  type HandlerWithAuth, 
+  type AuthContextUnion,
+  type BaseAuthContext,
+  isSessionAuthContext
+} from '@/middleware/auth';
 import { logger } from '@/lib/logger';
 
 // Configuration
@@ -15,21 +21,20 @@ export const runtime = 'nodejs';
 // Types
 type Chapter = typeof chapters.$inferSelect;
 
-const handleRequest: HandlerWithAuth = async (
+const handleRequest: HandlerWithAuth<{ slug: string; chapterId: string }> = async (
   request: NextRequest,
-  context: { params?: Record<string, string>; authContext: AuthContextUnion } = { authContext: { type: 'unauthorized' } }
+  context: BaseAuthContext<{ slug: string; chapterId: string }>
 ): Promise<NextResponse> => {
-  // Ensure we have a valid GitHub OIDC context
-  if (context.authContext.type !== 'github-oidc') {
+  // Ensure we have a valid session
+  if (!isSessionAuthContext(context.authContext)) {
     return new NextResponse(
-      JSON.stringify({ error: 'GitHub OIDC authentication required' }),
+      JSON.stringify({ error: 'Authentication required' }),
       { status: 401, headers: { 'Content-Type': 'application/json' } }
     );
   }
   
   const authContext = context.authContext;
-  const slug = context.params?.slug;
-  const chapterId = context.params?.chapterId;
+  const { slug, chapterId } = context.params || {};
   
   if (!slug || !chapterId) {
     return new NextResponse(
@@ -41,12 +46,10 @@ const handleRequest: HandlerWithAuth = async (
   const userId = authContext.userId;
   
   try {
-    logger.info('OIDC-authenticated chapter HTML request', {
-      repository: authContext.repository,
-      workflow: authContext.workflow,
-      runId: authContext.runId,
+    logger.info('Chapter HTML request', {
       bookSlug: slug,
-      chapterId
+      chapterId,
+      userId: authContext.userId
     });
 
     // Get the book with the requested chapter
@@ -103,7 +106,7 @@ const handleRequest: HandlerWithAuth = async (
       chapterId: requestedChapter.id,
       durationMs: Date.now() - requestStart,
       userId,
-      sessionId: authContext.runId
+      sessionId: authContext.sessionId
     });
 
     return new NextResponse(completeHTML, {
@@ -142,4 +145,4 @@ const handleRequest: HandlerWithAuth = async (
 };
 
 // Export the wrapped handler
-export const GET = withGithubOidcAuth(handleRequest);
+export const GET = withSessionAuth(handleRequest);

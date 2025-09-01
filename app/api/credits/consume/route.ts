@@ -1,6 +1,6 @@
 // app/api/credits/consume/route.ts
 import { NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { requireAuth } from "@/lib/auth/api-auth";
 import { creditService } from "@/lib/services/credits/credit-service";
 import { z } from "zod";
 
@@ -38,9 +38,10 @@ function calculateCost(action: string, words?: number): number {
 
 export async function POST(req: Request) {
   try {
-    const { userId } = await auth();
+    const { user: authUser, error } = await requireAuth();
+    if (error) return error;
     
-    if (!userId) {
+    if (!authUser) {
       return new NextResponse("Unauthorized", { status: 401 });
     }
 
@@ -77,7 +78,7 @@ export async function POST(req: Request) {
     // Try to spend the credits
     try {
       const result = await creditService.spendCredits({
-        userId,
+        userId: authUser.id,
         amount,
         reason: action,
         ref,

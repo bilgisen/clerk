@@ -4,7 +4,7 @@ import { env } from "@/env.mjs";
 // Initialize Octokit with environment token
 const octokit = new Octokit({
   auth: env.GITHUB_TOKEN,
-  userAgent: 'clerk-publish/1.0.0',
+  userAgent: 'book-publish/1.0.0',
   timeZone: 'UTC',
   request: {
     timeout: 5000,

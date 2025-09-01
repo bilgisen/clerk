@@ -59,7 +59,7 @@ export async function POST(request: Request) {
     // Generate a clean filename
     const originalName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
     const fileExt = originalName.split('.').pop()?.toLowerCase() || '';
-    const fileKey = `uploads/${userId}/${uuidv4()}.${fileExt || 'jpg'}`;
+    const fileKey = `uploads/${user.id}/${uuidv4()}.${fileExt || 'jpg'}`;
     
     const bytes = await file.arrayBuffer();
     const buffer = Buffer.from(bytes);

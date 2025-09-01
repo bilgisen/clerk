@@ -1,12 +1,13 @@
 "use client";
 
-import { useAuth } from "@clerk/nextjs";
+import { useAuth } from "@/hooks/use-auth";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Check, Zap } from "lucide-react";
+import { Check, Zap, Loader2 } from "lucide-react";
 import { usePolar } from "@/hooks/use-polar";
 import { useState } from "react";
+import toast from "sonner";
 
 type Plan = {
   id: string;
@@ -66,14 +67,16 @@ const plans: Plan[] = [
 ];
 
 export default function PricingPage() {
-  const { isSignedIn } = useAuth();
+  const { user, isLoading: authLoading } = useAuth();
   const router = useRouter();
   const { redirectToCheckout, isLoading } = usePolar();
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
 
   const handleSelectPlan = async (plan: Plan) => {
-    if (!isSignedIn) {
-      router.push(`/sign-up?redirect_url=/pricing`);
+    if (authLoading) return;
+    
+    if (!user) {
+      router.push(`/signin?redirect=/pricing`);
       return;
     }
 
@@ -90,13 +93,14 @@ export default function PricingPage() {
         metadata: {
           planId: plan.id,
           planName: plan.name,
-          credits: plan.credits
+          credits: plan.credits,
+          userId: user.id
         },
         successUrl: `${window.location.origin}/success?plan=${encodeURIComponent(plan.name)}`,
       });
     } catch (error) {
       console.error("Error redirecting to checkout:", error);
-      // Handle error (e.g., show error toast)
+      toast.error("Failed to start checkout. Please try again.");
     } finally {
       setSelectedPlan(null);
     }

@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Loader2 } from "lucide-react";
-import { toast } from "sonner";
+import toast from "sonner";
 import { Separator } from "@/components/ui/separator";
 import { BooksMenu } from "@/components/books/books-menu";
 import DynamicChapterContentEditor from "@/components/books/chapters/DynamicChapterContentEditor";

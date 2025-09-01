@@ -10,7 +10,7 @@ export const creditLedger = pgTable("credit_ledger", {
   metadata: jsonb("metadata"),
   expiresAt: timestamp("expires_at"),  // optional: null if no expiration
   createdAt: timestamp("created_at").defaultNow(),
-  source: text("source").notNull().default("app"), // app|clerk|polar
+  source: text("source").notNull().default("app"), // app|polar
   idempotencyKey: text("idempotency_key"),
 }, (t) => ({
   byUser: index("ledger_user_idx").on(t.userId, t.createdAt),

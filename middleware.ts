@@ -1,117 +1,93 @@
+// middleware.ts
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { auth } from './lib/auth/better-auth';
-import { getAuth } from './lib/auth/better-auth';
+import { getAuthToken, verifyToken } from '@/lib/auth/edge-auth';
 
-// Public routes that don't require authentication
+// Public routes
 const publicRoutes = [
   '/',
-  '/signin',
+  '/sign-in',
   '/api/auth',
   '/_next',
   '/favicon.ico',
   '/public',
-  '/api/.*\.(jpg|jpeg|png|svg|webp|gif|ico|css|js)$',
+  '/api/.*\\.(jpg|jpeg|png|svg|webp|gif|ico|css|js)$',
+  '/auth/.*',
 ];
 
-// Protected routes that require authentication
-const protectedRoutes = [
-  '/dashboard',
-  '/books',
-  '/api/books',
-  '/api/user',
-];
+// Protected routes
+const protectedRoutes = ['/dashboard', '/books', '/api/books', '/api/user', '/api/private'];
 
-// Check if a path matches any of the patterns
 const isPathMatching = (path: string, patterns: string[]): boolean => {
-  return patterns.some(pattern => {
+  return patterns.some((pattern) => {
     if (pattern.endsWith('*')) {
       return path.startsWith(pattern.slice(0, -1));
     }
-    if (pattern.startsWith('*') && pattern.endsWith('*')) {
-      return path.includes(pattern.slice(1, -1));
-    }
-    return path === pattern;
+    return path === pattern || new RegExp(`^${pattern}$`).test(path);
   });
 };
 
 export default async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Skip middleware for public routes
+  // Skip for public
   if (isPathMatching(pathname, publicRoutes)) {
     return NextResponse.next();
   }
 
-  // Skip middleware for non-protected routes
+  // Skip for non-protected
   if (!isPathMatching(pathname, protectedRoutes)) {
     return NextResponse.next();
   }
 
   try {
-    // Verify the user's session
-    const authResult = await getAuth();
-    let userRole = 'user';
-    
-    if (authResult?.user) {
-      // User is authenticated, set the user role
-      userRole = authResult.user.role || 'user';
-    } else {
-      // Not authenticated, redirect to sign-in
-      const signInUrl = new URL('/signin', request.url);
-      signInUrl.searchParams.set('redirect', pathname);
-      
-      const response = NextResponse.redirect(signInUrl);
-      // Clear any invalid session cookie
-      response.cookies.delete('auth-session');
-      return response;
+    const token = await getAuthToken();
+
+    if (!token) {
+      if (pathname.startsWith('/api/')) {
+        return new NextResponse(JSON.stringify({ error: 'Unauthorized' }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      const signInUrl = new URL('/sign-in', request.url);
+      signInUrl.searchParams.set('callbackUrl', request.url);
+      return NextResponse.redirect(signInUrl);
     }
-    
-    // Check admin access for admin routes
-    if (pathname.startsWith('/admin') && userRole !== 'admin') {
-      const signInUrl = new URL('/signin', request.url);
+
+    const payload = await verifyToken(token);
+    if (!payload) {
+      const signInUrl = new URL('/sign-in', request.url);
+      signInUrl.searchParams.set('error', 'invalid_token');
       const response = NextResponse.redirect(signInUrl);
-      response.cookies.delete('auth-session');
+      response.cookies.delete('auth-token');
       return response;
     }
 
-    // Add user info to request headers for API routes
     if (pathname.startsWith('/api/')) {
       const requestHeaders = new Headers(request.headers);
-      
-      if (authResult?.user) {
-        requestHeaders.set('x-user-id', authResult.user.id);
-        requestHeaders.set('x-user-email', authResult.user.email || '');
-        requestHeaders.set('x-user-role', authResult.user.role || 'user');
-      }
+      requestHeaders.set('x-user-id', payload.userId);
+      requestHeaders.set('x-user-email', payload.email || '');
+      requestHeaders.set('x-user-role', payload.role || 'user');
 
       return NextResponse.next({
-        request: {
-          headers: requestHeaders,
-        },
+        request: { headers: requestHeaders },
       });
     }
 
     return NextResponse.next();
   } catch (error) {
-    console.error('Error verifying session:', error);
-    
-    // Error verifying session, redirect to sign-in
-    const signInUrl = new URL('/signin', request.url);
-    signInUrl.searchParams.set('callbackUrl', pathname);
+    console.error('Error in middleware auth:', error);
+    const signInUrl = new URL('/sign-in', request.url);
     signInUrl.searchParams.set('error', 'session_error');
-    
     const response = NextResponse.redirect(signInUrl);
-    // Clear the invalid session cookie
-    response.cookies.delete('auth-session');
+    response.cookies.delete('auth-token');
     return response;
   }
-  
-  return NextResponse.next();
 }
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|.*\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 };

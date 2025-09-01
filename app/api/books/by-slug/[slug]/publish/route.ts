@@ -16,10 +16,10 @@ export async function POST(
   const { slug } = context.params;
   try {
     // Get the current user session
-    const { user, error } = await requireAuth();
+    const { user: authUser, error } = await requireAuth();
     if (error) return error;
     
-    if (!user) {
+    if (!authUser) {
       return NextResponse.json(
         { success: false, error: 'Unauthorized' },
         { status: 401 }
@@ -27,25 +27,24 @@ export async function POST(
     }
     
     // Get the user's database ID using their ID
-    const [user] = await db.select()
+    const [dbUser] = await db.select()
       .from(users)
-      .where(eq(users.id, user.id))
-      .where(eq(users.clerkId, clerkUserId))
+      .where(eq(users.id, authUser.id))
       .limit(1);
     
-    if (!user) {
+    if (!dbUser) {
       return new NextResponse(JSON.stringify({ error: 'User not found' }), {
         status: 404,
         headers: { 'Content-Type': 'application/json' }
       });
     }
     
-    // Deduct 10 credits for EPUB publishing
+    // Deduct credits for EPUB publishing
     const creditResult = await creditService.spendCredits({
-      userId: user.id,
+      userId: dbUser.id,
       amount: 200,
       reason: 'epub_publish',
-      idempotencyKey: `publish-epub:${user.id}:${Date.now()}`,
+      idempotencyKey: `publish-epub:${authUser.id}:${Date.now()}`,
       ref: slug,
       metadata: {
         action: 'epub_publish',
@@ -90,9 +89,9 @@ export async function POST(
     // Prepare metadata
     const metadata = {
       generatedAt: new Date().toISOString(),
-      userId: clerkUserId,
+      userId: authUser.id,
       bookSlug: slug,
-      databaseUserId: user.id
+      databaseUserId: dbUser.id
     };
 
     // Trigger the workflow

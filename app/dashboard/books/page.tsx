@@ -10,7 +10,7 @@ import { Book } from '@/types/book';
 // This is a client component that wraps the actual books page
 export default function BooksPageWrapper() {
   const router = useRouter();
-  const { user, loading } = useAuth();
+  const { user, isLoading: authLoading } = useAuth();
   const [isClient, setIsClient] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [books, setBooks] = useState<Book[]>([]);

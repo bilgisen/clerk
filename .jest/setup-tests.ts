@@ -57,20 +57,4 @@ jest.mock('@/lib/store/redis', () => {
   };
 });
 
-// Mock GitHub OIDC verification
-jest.mock('@/lib/auth/github-oidc', () => ({
-  verifyGithubOidc: jest.fn().mockResolvedValue({
-    sub: 'repo:user/repo:ref:refs/heads/main',
-    repository: 'user/repo',
-    repository_owner: 'user',
-    repository_owner_id: '12345',
-    run_id: '123456789',
-    run_number: '1',
-    workflow: 'test-workflow',
-    head_ref: 'main',
-    base_ref: '',
-    event_name: 'workflow_dispatch',
-    ref: 'refs/heads/main',
-    sha: 'a1b2c3d4e5f6g7h8i9j0',
-  }),
-}));
+// Session-based authentication mocks are handled in individual test files

@@ -1,10 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { toast } from 'sonner';
-import { useAuth } from '@clerk/nextjs';
+import toast from "sonner";
+import { useAuth } from '@/hooks/use-auth';
 import { Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -32,9 +32,17 @@ interface BookData {
 }
 
 export default function GenerateEbookPage() {
-  const { slug } = useParams();
   const router = useRouter();
-  const { getToken } = useAuth();
+  const { slug } = useParams() as { slug: string };
+  const { getToken, user, isLoading: authLoading } = useAuth();
+  
+  // Redirect if not authenticated
+  useEffect(() => {
+    if (!authLoading && !user) {
+      router.push(`/signin?redirect=/dashboard/books/${slug}/publish/ebook`);
+      toast.error('Please sign in to publish an ebook');
+    }
+  }, [user, authLoading, router, slug]);
   
   // State management
   const [status, setStatus] = useState<PublishStatus>('idle');
@@ -104,11 +112,11 @@ export default function GenerateEbookPage() {
           polling = false;
           
           if (epubUrl) {
-            toast.success('EPUB generated successfully!', {
+            toast.success('EPUB generated successfully! Your EPUB file is ready to download.', {
               action: {
                 label: 'Download',
                 onClick: () => window.open(epubUrl, '_blank')
-              }
+              } as any
             });
           }
           return;
@@ -133,8 +141,7 @@ export default function GenerateEbookPage() {
         const errorMessage = error instanceof Error ? error.message : 'Failed to generate EPUB';
         setError(errorMessage);
         
-        toast.error('EPUB Generation Failed', {
-          description: errorMessage,
+        toast.error(`Failed to generate EPUB: ${errorMessage}`, {
           action: {
             label: 'Retry',
             onClick: () => {
@@ -165,8 +172,8 @@ export default function GenerateEbookPage() {
       setStatus('publishing');
       setError(null);
       
-      // Show loading toast
-      const toastId = toast.loading('Starting EPUB generation...');
+      // Show loading state
+      toast.info('Generating your EPUB file...');
       
       const response = await fetch(`/api/books/by-slug/${slug}/publish`, {
         method: 'POST',
@@ -187,14 +194,6 @@ export default function GenerateEbookPage() {
       
       const { workflowRunId, workflowUrl } = await response.json();
       
-      // Update toast
-      toast.loading('Generating EPUB. This may take a few minutes...', {
-        id: toastId,
-        action: {
-          label: 'View Progress',
-          onClick: () => window.open(workflowUrl, '_blank')
-        }
-      });
       
       // Start polling for status
       startPolling(workflowRunId);
@@ -203,16 +202,15 @@ export default function GenerateEbookPage() {
       console.error('Publish error:', error);
       setStatus('failed');
       setError(error instanceof Error ? error.message : 'Failed to start publishing');
-      toast.error('Failed to start publishing', {
-        description: error instanceof Error ? error.message : 'An unknown error occurred'
-      });
+      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+      toast.error(`Failed to start publishing: ${errorMessage}`);
       setIsLoading(false);
     }
   };
   
   // Handle option changes
   const handleOptionChange = (key: keyof PublishOptions, value: any) => {
-    setOptions(prev => ({
+    setOptions((prev: PublishOptions) => ({
       ...prev,
       [key]: value
     }));

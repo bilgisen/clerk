@@ -31,7 +31,7 @@ export async function POST(request: Request) {
       .from(creditLedger)
       .where(
         and(
-          eq(creditLedger.userId, userId),
+          eq(creditLedger.userId, user.id),
           eq(creditLedger.ref, checkoutId)
         )
       )
@@ -40,7 +40,7 @@ export async function POST(request: Request) {
     if (!existingCredit) {
       // Only add credits if this checkout hasn't been processed before
       await db.insert(creditLedger).values({
-        userId,
+        userId: user.id,
         amount: 100, // Adjust based on your credit system
         reason: 'purchase',
         ref: checkoutId,

@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChapterNode, ChapterOrderUpdate } from '@/types/dnd';
-import { toast } from 'sonner';
+import toast from 'sonner';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/hooks/use-auth';
 import { Chapter, ChapterWithChildren } from '@/types/chapter';

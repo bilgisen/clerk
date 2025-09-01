@@ -61,7 +61,6 @@ const nextConfig = {
       "@/hooks": path.resolve(__dirname, "./hooks"),
       "@/types": path.resolve(__dirname, "./types"),
       "@/middleware": path.resolve(__dirname, "./middleware"),
-      "@/middleware/old": path.resolve(__dirname, "./middleware/old"),
       "@/schemas": path.resolve(__dirname, "./schemas"),
     };
 
@@ -163,6 +162,16 @@ const nextConfig = {
 
   experimental: {
     externalDir: true,
+    // Disable Edge Runtime for better-auth
+    serverComponentsExternalPackages: ['better-auth'],
+  },
+  
+  // Configure which pages should use Edge Runtime
+  // We'll exclude better-auth related routes from Edge
+  experimental: {
+    runtime: 'nodejs',
+    serverComponents: true,
+    concurrentFeatures: false,
   },
 
   env: {

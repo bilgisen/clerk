@@ -2,7 +2,12 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/db/drizzle';
 import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
-import { withGithubOidcAuth, type HandlerWithAuth, type AuthContextUnion } from '@/middleware/old/auth';
+import { 
+  withSessionAuth, 
+  type HandlerWithAuth, 
+  type AuthContextUnion,
+  isSessionAuthContext
+} from '@/middleware/auth';
 import { logger } from '@/lib/logger';
 import { books, chapters } from '@/db/schema';
 
@@ -68,21 +73,10 @@ interface PayloadChapter {
   title_tag: 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6';
 }
 
-interface GitHubOidcClaims {
-  sub: string;
-  iss: string;
-  aud: string;
-  exp: number;
-  iat: number;
-  repository: string;
-  repository_owner: string;
-  run_id: string;
-  workflow: string;
-  actor: string;
-  ref: string;
-  sha: string;
-  event_name: string;
-  [key: string]: unknown;
+interface SessionUser {
+  id: string;
+  email: string;
+  role?: string;
 }
 
 interface EbookPayload {
@@ -108,10 +102,8 @@ interface EbookPayload {
   metadata: {
     generated_at: string;
     generated_by: string;
-    workflow_run_id?: string;
-    repository?: string;
-    repository_owner?: string;
-    workflow?: string;
+    user_id: string;
+    user_email?: string;
   };
 }
 
@@ -219,30 +211,28 @@ function flattenChapterTree(
 const handler = async (
   request: NextRequest,
   context: { 
-    params?: Record<string, string>;
+    params?: { id: string };
     authContext: AuthContextUnion;
   }
 ): Promise<NextResponse> => {
   const { params, authContext } = context;
+  const { id } = params || {};
   
-  // Ensure we have a GitHub OIDC context
-  if (authContext.type !== 'github-oidc') {
+  if (!isSessionAuthContext(authContext)) {
     return NextResponse.json(
-      { error: 'Invalid authentication context' },
+      { error: 'unauthorized', message: 'Authentication required' },
       { status: 401 }
     );
   }
   
-  const { runId, repository, repositoryOwner, workflow } = authContext;
-  
-  if (!params?.id) {
+  if (!id) {
     return NextResponse.json(
       { error: 'Book ID is required' },
       { status: 400 }
     );
   }
   
-  const bookId = params.id;
+  const bookId = id;
   try {
     // 1. Parse and validate query parameters
     const queryParams = Object.fromEntries(request.nextUrl.searchParams);
@@ -299,10 +289,8 @@ const handler = async (
       metadata: {
         generated_at: new Date().toISOString(),
         generated_by: 'bookshall-epub-generator',
-        workflow_run_id: runId,
-        repository,
-        repository_owner: repositoryOwner,
-        workflow,
+        user_id: authContext.userId,
+        user_email: authContext.email
       },
     };
 
@@ -326,4 +314,4 @@ const handler = async (
 };
 
 // Export the handler with proper typing
-export const GET = withGithubOidcAuth(handler as HandlerWithAuth);
+export const GET = withSessionAuth(handler);

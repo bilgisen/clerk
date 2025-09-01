@@ -41,9 +41,10 @@ export async function POST(request: NextRequest) {
     logger.info('Triggering workflow', { requestId });
     
     // Get the authenticated user
-    const { userId } = auth();
+    const { user: authUser, error } = await requireAuth();
+    if (error) return error;
     
-    if (!userId) {
+    if (!authUser) {
       logger.warn('Unauthorized workflow trigger attempt', { requestId });
       return NextResponse.json(
         { 
@@ -100,7 +101,7 @@ export async function POST(request: NextRequest) {
     logger.info('Triggering EPUB generation', { 
       requestId, 
       bookId,
-      userId,
+      userId: authUser.id,
       options
     });
 
@@ -108,7 +109,7 @@ export async function POST(request: NextRequest) {
     const workflowResponse = await GitHubActionsService.triggerWorkflow({
       bookId,
       options,
-      userId,
+      userId: authUser.id,
       metadata: {
         ...metadata,
         requestId,

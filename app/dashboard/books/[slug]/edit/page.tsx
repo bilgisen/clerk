@@ -3,7 +3,7 @@
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import { useAuth } from '@/hooks/use-auth';
-import toast from 'sonner';
+import toast from "sonner";
 import { Loader2 } from 'lucide-react';
 import { BooksMenu } from '@/components/books/books-menu';
 import { Button } from '@/components/ui/button';
@@ -13,7 +13,7 @@ import { useBook, useUpdateBook } from '@/hooks/api/use-books';
 import type { Book } from '@/types/book';
 
 export default function EditBookPage() {
-  const { user, loading: isAuthLoading } = useAuth();
+  const { user, isLoading: isAuthLoading } = useAuth();
   const router = useRouter();
   const params = useParams();
   const slug = typeof params?.slug === 'string' ? params.slug : '';
@@ -39,22 +39,23 @@ export default function EditBookPage() {
     title: book.title || '',
     author: book.author || '',
     publisher: book.publisher || '',
-    contributor: book.contributor || undefined,
-    translator: book.translator || undefined,
     slug: book.slug || '',
-    subtitle: book.subtitle || undefined,
-    description: book.description || undefined,
-    publisherWebsite: book.publisherWebsite || undefined,
-    publishYear: book.publishYear || undefined,
-    isbn: book.isbn || undefined,
     language: book.language || 'en',
-    genre: book.genre || undefined,
-    series: book.series || undefined,
-    seriesIndex: book.seriesIndex || undefined,
-    tags: book.tags || [],
-    coverImageUrl: book.coverImageUrl || undefined,
     isPublished: book.isPublished || false,
-    isFeatured: book.isFeatured || false
+    isFeatured: book.isFeatured || false,
+    // Optional fields
+    ...(book.contributor && { contributor: book.contributor }),
+    ...(book.translator && { translator: book.translator }),
+    ...(book.subtitle && { subtitle: book.subtitle }),
+    ...(book.description && { description: book.description }),
+    ...(book.publisherWebsite && { publisherWebsite: book.publisherWebsite }),
+    ...(book.publishYear && { publishYear: book.publishYear }),
+    ...(book.isbn && { isbn: book.isbn }),
+    ...(book.genre && { genre: book.genre }),
+    ...(book.series && { series: book.series }),
+    ...(book.seriesIndex && { seriesIndex: book.seriesIndex }),
+    ...(book.tags && { tags: Array.isArray(book.tags) ? book.tags : [String(book.tags)] }),
+    ...(book.coverImageUrl && { coverImageUrl: book.coverImageUrl })
   } : undefined;
 
   // Handle book fetch errors
@@ -135,9 +136,12 @@ export default function EditBookPage() {
             <h1 className="text-2xl font-bold">Edit Book</h1>
             <p className="text-muted-foreground">Update your book details</p>
           </div>
-          <Button onClick={handleCancel} variant="outline">
-            Cancel
-          </Button>
+          <div className="flex items-center gap-2">
+            <BooksMenu slug={book.slug} bookId={book.id} />
+            <Button onClick={handleCancel} variant="outline">
+              Cancel
+            </Button>
+          </div>
         </div>
         <Separator />
         {defaultValues && (
@@ -147,46 +151,6 @@ export default function EditBookPage() {
             isSubmitting={isSubmitting}
           />
         )}
-      </div>
-    </div>
-    );
-  }
-
-  return (
-    <div className="container w-full mx-auto py-10 px-10">
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold">Edit Book</h1>
-        <BooksMenu slug={book.slug} bookId={book.id} />
-      </div>
-      
-      <Separator className="mb-6" />
-      
-      <div className="w-full mx-auto">
-        <BookInfoForm
-          onSubmit={handleSubmit}
-          defaultValues={{
-            title: book.title,
-            slug: book.slug,
-            author: book.author,
-            subtitle: book.subtitle || '',
-            description: book.description || '',
-            publisher: book.publisher || '',
-            publisherWebsite: book.publisherWebsite || '',
-            // Convert publishYear to string for the form input
-            publishYear: book.publishYear ?? undefined,
-            isbn: book.isbn || '',
-            language: book.language || 'en',
-            genre: book.genre || 'OTHER',
-            series: book.series || '',
-            // Convert seriesIndex to number for the form input
-            seriesIndex: book.seriesIndex ?? undefined,
-            // Ensure tags is always an array of strings
-            tags: Array.isArray(book.tags) ? book.tags : (book.tags ? [String(book.tags)] : []),
-            coverImageUrl: book.coverImageUrl || '',
-            isPublished: book.isPublished,
-            isFeatured: book.isFeatured,
-          }}
-        />
       </div>
     </div>
   );

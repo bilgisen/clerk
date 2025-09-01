@@ -3,11 +3,10 @@
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { useAuth } from '@clerk/nextjs';
+import { useAuth } from '@/hooks/use-auth';
 import { debounce } from 'lodash';
-import { toast } from 'sonner';
+import toast from "sonner";
 import { Loader2, ArrowLeft, AlertCircle } from 'lucide-react';
-
 import { Button } from '@/components/ui/button';
 import { ChapterContentForm } from '@/components/books/chapters/chapter-content-form';
 import { BooksMenu } from '@/components/books/books-menu';
@@ -19,7 +18,15 @@ import type { Chapter } from '@/types/chapter';
 export default function EditChapterPage() {
   const router = useRouter();
   const { slug: bookSlug, chapterId } = useParams() as { slug: string; chapterId: string };
-  const { getToken } = useAuth();
+  const { getToken, user, isLoading: authLoading } = useAuth();
+  
+  // Redirect if not authenticated
+  useEffect(() => {
+    if (!authLoading && !user) {
+      router.push(`/signin?redirect=/dashboard/books/${bookSlug}/chapters/${chapterId}/edit`);
+      toast.error('Please sign in to edit this chapter');
+    }
+  }, [user, authLoading, router, bookSlug, chapterId]);
   
   // Fetch chapter data using the new hook
   const { 

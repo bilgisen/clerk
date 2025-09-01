@@ -2,19 +2,19 @@
 
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { useSession } from 'next-auth/react';
+import { useAuth } from '@/hooks/use-auth';
 
 export function AuthCheck({ children }: { children: React.ReactNode }) {
-  const { data: session, status } = useSession();
+  const { user, isLoading } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    if (status === 'authenticated') {
+    if (!isLoading && user) {
       router.push('/dashboard');
     }
-  }, [status, router]);
+  }, [user, isLoading, router]);
 
-  if (status === 'loading' || status === 'authenticated') {
+  if (isLoading || user) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>

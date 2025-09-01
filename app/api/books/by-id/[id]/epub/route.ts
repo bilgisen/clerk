@@ -2,7 +2,13 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/db/drizzle';
 import { books } from '@/db/schema';
 import { eq } from 'drizzle-orm';
-import { withGithubOidcAuth, type HandlerWithAuth, type AuthContextUnion } from '@/middleware/old/auth';
+import { 
+  withSessionAuth, 
+  type AuthContextUnion, 
+  type BaseAuthContext,
+  type HandlerWithAuth,
+  isSessionAuthContext
+} from '@/middleware/auth';
 import { logger } from '@/lib/logger';
 import { z } from 'zod';
 
@@ -12,44 +18,21 @@ const UpdateEpubSchema = z.object({
 });
 
 // POST /api/books/by-id/[id]/epub
-// Protected by GitHub OIDC. Called by CI after uploading EPUB to R2.
-// Headers: { Authorization: 'Bearer <github-oidc-token>' }
+// Protected by session auth. Called after uploading EPUB to R2.
 // Body: { epubUrl: string }
-const handler: HandlerWithAuth = async (
+const handler: HandlerWithAuth<{ id: string }> = async (
   req: NextRequest,
-  context = {
-    params: { id: '' },
-    authContext: {
-      type: 'github-oidc' as const,
-      userId: 'system',
-      claims: {
-        sub: 'system',
-        iss: 'https://token.actions.githubusercontent.com',
-        aud: 'https://api.clerko.com',
-        exp: Math.floor(Date.now() / 1000) + 3600,
-        iat: Math.floor(Date.now() / 1000),
-        repository: 'system/repo',
-        repository_owner: 'system',
-        workflow: 'system-workflow',
-        run_id: '1',
-        actor: 'system',
-        ref: 'refs/heads/main',
-        sha: 'a1b2c3d4e5f6g7h8i9j0',
-        event_name: 'workflow_dispatch'
-      },
-      repository: 'system/repo',
-      repositoryOwner: 'system',
-      workflow: 'system-workflow',
-      runId: '1',
-      actor: 'system',
-      ref: 'refs/heads/main',
-      sha: 'a1b2c3d4e5f6g7h8i9j0'
-    }
-  }
+  context: BaseAuthContext<{ id: string }>
 ) => {
   try {
     const { id } = context.params || {};
-    const oidcClaims = context.authContext as AuthContextUnion & { type: 'github-oidc' };
+    
+    if (!isSessionAuthContext(context.authContext)) {
+      return NextResponse.json(
+        { error: 'unauthorized', message: 'Authentication required' },
+        { status: 401 }
+      );
+    }
     
     if (!id) {
       return NextResponse.json(
@@ -58,12 +41,10 @@ const handler: HandlerWithAuth = async (
       );
     }
 
-    // Log OIDC context for audit
-    logger.info('OIDC-authenticated EPUB update request', {
-      repository: oidcClaims.repository,
-      workflow: oidcClaims.workflow,
-      runId: oidcClaims.runId,
-      bookId: id
+    // Log the EPUB update request for audit
+    logger.info('EPUB update request', {
+      bookId: id,
+      userId: context.authContext.userId
     });
 
     // Validate book ID format (should be a valid UUID)
@@ -156,5 +137,20 @@ const handler: HandlerWithAuth = async (
   }
 };
 
-// Export the handler wrapped with GitHub OIDC auth middleware
-export const POST = withGithubOidcAuth(handler as unknown as HandlerWithAuth);
+// Export the handler wrapped with session auth middleware
+export const POST = withSessionAuth(handler);
+
+// Add handler type declaration
+declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
+  namespace NodeJS {
+    interface ProcessEnv {
+      R2_PUBLIC_URL: string;
+      R2_ACCESS_KEY_ID: string;
+      R2_SECRET_ACCESS_KEY: string;
+      R2_BUCKET_NAME: string;
+      R2_ENDPOINT: string;
+      R2_REGION: string;
+    }
+  }
+}

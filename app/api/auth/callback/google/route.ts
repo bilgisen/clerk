@@ -1,50 +1,75 @@
-import { auth } from '@/lib/auth/better-auth';
 import { NextResponse } from 'next/server';
+import { auth } from '@/lib/auth/better-auth';
 
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
     const code = url.searchParams.get('code');
+    const error = url.searchParams.get('error');
+    const state = url.searchParams.get('state');
     
+    // Handle OAuth errors
+    if (error) {
+      console.error('OAuth error:', error);
+      return NextResponse.redirect(
+        `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/signin?error=auth_failed`
+      );
+    }
+
     if (!code) {
       return NextResponse.redirect(
-        `${process.env.NEXT_PUBLIC_APP_URL}/signin?error=invalid_code`
+        `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/signin?error=invalid_code`
       );
     }
 
-    // Exchange the code for tokens
-    const { session, error } = await auth.api.signIn.social({
-      provider: 'google',
+    // Complete the OAuth flow
+    const { user, error: authError } = await auth.api.oauth.callback('google', {
       code,
-      redirectUri: `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/callback/google`,
+      redirect_uri: `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/auth/callback/google`,
     });
 
-    if (error || !session) {
-      console.error('Error signing in with Google:', error);
+    if (authError || !user) {
+      console.error('OAuth callback error:', authError);
       return NextResponse.redirect(
-        `${process.env.NEXT_PUBLIC_APP_URL}/signin?error=auth_failed`
+        `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/signin?error=auth_failed`
       );
     }
 
-    // Create a redirect response to the dashboard
-    const response = NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/dashboard`);
-    
+    // Get the original callback URL from the state parameter
+    let redirectUrl = '/dashboard';
+    try {
+      const stateObj = state ? JSON.parse(decodeURIComponent(state)) : {};
+      if (stateObj.callbackUrl) {
+        redirectUrl = stateObj.callbackUrl;
+      }
+    } catch (e) {
+      console.error('Error parsing state:', e);
+    }
+
+    // Redirect to the original URL or dashboard
+    const response = NextResponse.redirect(
+      `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}${redirectUrl}`
+    );
+
     // Set the session cookie
     response.cookies.set({
       name: 'auth-session',
-      value: session.id,
+      value: user.sessionToken || '',
       httpOnly: true,
+      path: '/',
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
-      path: '/',
-      maxAge: 60 * 60 * 24 * 7, // 1 week
+      maxAge: 30 * 24 * 60 * 60, // 30 days
     });
 
     return response;
   } catch (error) {
     console.error('Error in Google callback:', error);
     return NextResponse.redirect(
-      `${process.env.NEXT_PUBLIC_APP_URL}/signin?error=server_error`
+      `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/signin?error=server_error`
     );
   }
 }
+
+// Handle POST requests the same way as GET for compatibility
+export { GET as POST };

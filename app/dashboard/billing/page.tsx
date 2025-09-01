@@ -1,6 +1,6 @@
 "use client";
 
-import { useAuth } from "@clerk/nextjs";
+import { useAuth } from "@/hooks/use-auth";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { BillingPortalButton } from "@/components/billing/billing-portal-button";
@@ -10,8 +10,8 @@ import { Loader2, Zap, CreditCard, Calendar, AlertCircle } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 export default function BillingPage() {
-  const { userId } = useAuth();
-  const { balance, isLoading, error } = useCredits();
+  const { user, isLoading } = useAuth();
+  const { balance, isLoading: creditsLoading, error } = useCredits();
   
   // In a real app, you would fetch this from your API
   const subscription = {
@@ -20,14 +20,6 @@ export default function BillingPage() {
     plan: 'Pro',
     isTrial: false,
   };
-
-  if (!userId) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <p>Please sign in to view billing information.</p>
-      </div>
-    );
-  }
 
   if (isLoading) {
     return (

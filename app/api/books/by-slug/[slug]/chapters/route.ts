@@ -6,234 +6,142 @@ import { requireAuth } from '@/lib/auth/api-auth';
 // Create a Neon client
 const sql = neon(process.env.DATABASE_URL!);
 
-// Define types for our database tables
-interface User {
-  id: string;
-  clerk_id: string;
-}
+// Route Segment Config
+export const dynamic = 'force-dynamic';
+export const dynamicParams = true;
+export const revalidate = 0;
 
-interface Book {
-  id: string;
-  user_id: string;
-  title: string;
-  slug: string;
-  description: string | null;
-  cover_image_url: string | null;
-  published_at: Date | null;
-  created_at: Date;
-  updated_at: Date;
-  genre: string | null;
-  language: string | null;
-  isbn: string | null;
-  view_count: number;
-  is_published: boolean;
-  is_featured: boolean;
-}
+export const fetchCache = 'force-no-store';
+export const runtime = 'nodejs';
 
-interface Chapter {
-  id: string;
-  book_id: string;
-  title: string;
-  content: string | null;
-  parent_chapter_id: string | null;
-  "order": number;
-  level: number;
-  word_count: number | null;
-  reading_time: number | null;
-  created_at: Date;
-  updated_at: Date;
-  excerpt: string | null;
-}
-
-/**
- * GET /api/books/by-slug/[slug]/chapters
- * Get all chapters for a book by slug
- */
+// GET: Get all chapters for a book by slug
 export async function GET(
   request: Request,
-  context: { params: Promise<{ slug: string }> }
+  context: { params: { slug: string } }
 ) {
   try {
-    const { slug } = await context.params;
+    const { user: authUser, error } = await requireAuth();
+    if (error) return error;
     
-    // Ensure user is authenticated with Clerk
-    const user = await currentUser();
-    if (!user) {
+    if (!authUser) {
       return NextResponse.json(
         { error: 'Authentication required' }, 
         { status: 401 }
       );
     }
 
-    // Find user using raw SQL with proper type safety
-    const [dbUser] = (await sql`
-      SELECT id, clerk_id 
-      FROM users 
-      WHERE clerk_id = ${user.id} 
-      LIMIT 1`
-    ) as User[];
-
-    if (!dbUser) {
-      return NextResponse.json({ error: 'User not found in database' }, { status: 404 });
+    const { slug } = context.params;
+    if (!slug) {
+      return NextResponse.json(
+        { error: 'Book slug is required' },
+        { status: 400 }
+      );
     }
 
-    // Verify the book exists and belongs to the user
-    const [book] = (await sql`
-      SELECT * 
+    // Get the book by slug and user ID
+    const [book] = await sql`
+      SELECT id 
       FROM books 
       WHERE slug = ${slug} 
-        AND user_id = ${dbUser.id} 
-      LIMIT 1`
-    ) as Book[];
+        AND user_id = ${authUser.id} 
+      LIMIT 1`;
 
     if (!book) {
-      return NextResponse.json({ error: 'Book not found' }, { status: 404 });
+      return NextResponse.json(
+        { error: 'Book not found' },
+        { status: 404 }
+      );
     }
 
     // Get all chapters for the book
-    const allChapters = (await sql`
+    const chapters = await sql`
       SELECT * 
       FROM chapters 
-      WHERE book_id = ${book.id}
-      ORDER BY "order" ASC`
-    ) as Chapter[];
+      WHERE book_id = ${book.id} 
+      ORDER BY \`order\` ASC`;
 
-    // Define the chapter type with children
-    type ChapterWithChildren = Chapter & {
-      children: ChapterWithChildren[];
-    };
-
-    // Create a type-safe filter function
-    const filterChapters = (chaptersList: Chapter[], parentId: string | null) => {
-      return chaptersList.filter(chapter => 
-        (parentId === null && !chapter.parent_chapter_id) || 
-        (chapter.parent_chapter_id === parentId)
-      );
-    };
-
-    // Build the chapter tree
-    const buildChapterTree = (chaptersList: Chapter[], parentId: string | null = null): ChapterWithChildren[] => {
-      return filterChapters(chaptersList, parentId).map(chapter => ({
-        ...chapter,
-        children: buildChapterTree(chaptersList, chapter.id)
-      }));
-    };
-
-    const chapterTree = buildChapterTree(allChapters);
-    return NextResponse.json(chapterTree);
+    return NextResponse.json(chapters);
   } catch (error) {
-    console.error('Error in GET /api/books/by-slug/[slug]/chapters:', error);
+    console.error('Error fetching chapters:', error);
     return NextResponse.json(
-      { 
-        error: 'An unexpected error occurred',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      }, 
+      { error: 'Internal server error' },
       { status: 500 }
     );
   }
 }
 
-/**
- * POST /api/books/by-slug/[slug]/chapters
- * Create a new chapter for a book by slug
- */
+// POST: Create a new chapter for a book by slug
 export async function POST(
   request: Request,
-  context: { params: Promise<{ slug: string }> }
+  context: { params: { slug: string } }
 ) {
   try {
-    const { slug } = await context.params;
+    const { user: authUser, error } = await requireAuth();
+    if (error) return error;
     
-    // Ensure user is authenticated with Clerk
-    const user = await currentUser();
-    if (!user) {
+    if (!authUser) {
       return NextResponse.json(
         { error: 'Authentication required' }, 
         { status: 401 }
       );
     }
 
-    // Find user using raw SQL with proper type safety
-    const [dbUser] = (await sql`
-      SELECT id, clerk_id 
-      FROM users 
-      WHERE clerk_id = ${user.id} 
-      LIMIT 1`
-    ) as User[];
-
-    if (!dbUser) {
-      return NextResponse.json({ error: 'User not found in database' }, { status: 404 });
-    }
-
-    // Verify the book exists and belongs to the user
-    const [book] = (await sql`
-      SELECT id, user_id 
-      FROM books 
-      WHERE slug = ${slug} 
-        AND user_id = ${dbUser.id} 
-      LIMIT 1`
-    ) as { id: string; user_id: string }[];
-
-    if (!book) {
-      return NextResponse.json({ error: 'Book not found' }, { status: 404 });
-    }
-
-    const body = await request.json();
-    const { title, content, parentChapterId, order, level } = body as {
-      title: string;
-      content?: string;
-      parentChapterId?: string | null;
-      order?: number;
-      level?: number;
-    };
-
-    if (!title) {
+    const { slug } = context.params;
+    if (!slug) {
       return NextResponse.json(
-        { error: 'Chapter title is required' }, 
+        { error: 'Book slug is required' },
         { status: 400 }
       );
     }
 
-    // Calculate word count and reading time
-    const wordCount = content ? content.trim().split(/\s+/).length : 0;
-    const readingTime = content ? Math.ceil(wordCount / 200) : 0; // Assuming 200 words per minute
-    const excerpt = content ? content.substring(0, 160) : null; // First 160 chars as excerpt
+    // Get the book by slug and user ID
+    const [book] = await sql`
+      SELECT id 
+      FROM books 
+      WHERE slug = ${slug} 
+        AND user_id = ${authUser.id} 
+      LIMIT 1`;
+
+    if (!book) {
+      return NextResponse.json(
+        { error: 'Book not found' },
+        { status: 404 }
+      );
+    }
+
+    // Get the request body
+    const body = await request.json();
+    const { title, content, parentChapterId, order } = body;
+
+    if (!title) {
+      return NextResponse.json(
+        { error: 'Chapter title is required' },
+        { status: 400 }
+      );
+    }
 
     // Create the new chapter
-    const [newChapter] = (await sql`
-      INSERT INTO chapters (
-        book_id, 
-        title, 
-        content, 
-        parent_chapter_id, 
-        "order", 
-        level, 
-        word_count, 
-        reading_time, 
-        excerpt
-      )
+    const [newChapter] = await sql`
+      INSERT INTO chapters 
+        (book_id, title, content, parent_chapter_id, \`order\`, level, word_count, reading_time, excerpt)
       VALUES (
         ${book.id}, 
         ${title}, 
-        ${content ?? null}, 
-        ${parentChapterId ?? null}, 
-        ${order ?? 0}, 
-        ${level ?? 0}, 
-        ${wordCount}, 
-        ${readingTime}, 
-        ${excerpt}
+        ${content || null}, 
+        ${parentChapterId || null}, 
+        ${order || 0}, 
+        ${parentChapterId ? 1 : 0}, 
+        ${content ? content.split(/\s+/).length : 0}, 
+        ${content ? Math.ceil(content.split(/\s+/).length / 200) : null}, 
+        ${content ? content.substring(0, 200) : null}
       )
-      RETURNING *`
-    ) as Chapter[];
+      RETURNING *`;
 
     return NextResponse.json(newChapter, { status: 201 });
   } catch (error) {
-    console.error('Error in POST /api/books/by-slug/[slug]/chapters:', error);
+    console.error('Error creating chapter:', error);
     return NextResponse.json(
-      { 
-        error: 'An unexpected error occurred',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      }, 
+      { error: 'Internal server error' },
       { status: 500 }
     );
   }

@@ -40,23 +40,23 @@ function BookHeader({ book, slug }: { book: Book & { id: string }; slug: string 
  * @param params - The route parameters containing the book slug
  */
 export default function BookDetailPage({ params, searchParams }: PageProps) {
-  const { user, loading, getToken } = useAuth();
+  const { user, isLoading: isAuthLoading, getToken } = useAuth();
   const router = useRouter();
   const { slug } = params;
   const [book, setBook] = useState<Book & { id: string } | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isBookLoading, setIsBookLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!loading && !user) {
+    if (!isAuthLoading && !user) {
       router.push('/signin');
     }
-  }, [user, loading, router]);
+  }, [user, isAuthLoading, router]);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        setIsLoading(true);
+        setIsBookLoading(true);
         const token = await getToken();
         if (!token) {
           throw new Error('No authentication token found');
@@ -85,7 +85,7 @@ export default function BookDetailPage({ params, searchParams }: PageProps) {
         console.error('Error in fetchData:', err);
         setError(err instanceof Error ? err.message : 'Failed to load book data');
       } finally {
-        setIsLoading(false);
+        setIsBookLoading(false);
       }
     };
     
@@ -97,7 +97,7 @@ export default function BookDetailPage({ params, searchParams }: PageProps) {
     }
   }, [slug, getToken, router]);
 
-  if (isLoading) {
+  if (isAuthLoading || isBookLoading) {
     return (
       <div className="container mx-auto w-full p-6">
         <div className="flex items-center justify-center h-64">

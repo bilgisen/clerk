@@ -18,17 +18,6 @@ declare module '@/lib/auth/verifySecret' {
   export function verifySecretToken(token: string): Promise<boolean>;
 }
 
-declare module '@clerk/nextjs/server' {
-  export interface AuthObject {
-    userId: string | null;
-    sessionId: string | null;
-    getToken: () => Promise<string | null>;
-  }
-  
-  export function auth(): AuthObject;
-  export function currentUser(): Promise<any>;
-}
-
 // CSS Modules
 declare module '*.module.css' {
   const classes: { [key: string]: string };

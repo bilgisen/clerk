@@ -15,8 +15,13 @@ export const env = createEnv({
     DATABASE_URL: z.string().url(),
     
     // Authentication
-    CLERK_SECRET_KEY: z.string().min(1),
-    GHA_OIDC_AUDIENCE: z.string().url().default('https://editor.bookshall.com/api/ci'),
+    AUTH_SECRET: z.string().min(1),
+    AUTH_URL: z.string().url().default("http://localhost:3000"),
+    JWT_SECRET: z.string().min(1),
+    
+    // Google OAuth
+    GOOGLE_CLIENT_ID: z.string().min(1),
+    GOOGLE_CLIENT_SECRET: z.string().min(1),
     
     // Polar.sh
     POLAR_ACCESS_TOKEN: z.string().min(1).optional(),
@@ -38,13 +43,11 @@ export const env = createEnv({
    * `NEXT_PUBLIC_`.
    */
   client: {
-    // Clerk
-    NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: z.string().min(1),
-    
     // Polar.sh
     NEXT_PUBLIC_POLAR_API_URL: z.string().url().default("https://api.polar.sh"),
-    NEXT_PUBLIC_POLAR_PRICE_STARTER: z.string().optional(),
-    NEXT_PUBLIC_POLAR_PRICE_PRO: z.string().optional(),
+    NEXT_PUBLIC_POLAR_PRICE_STARTER: z.string().default("$9"),
+    NEXT_PUBLIC_POLAR_PRICE_PRO: z.string().default("$29"),
+    NEXT_PUBLIC_POLAR_PRICE_ENTERPRISE: z.string().default("$99"),
   },
   
   /**
@@ -54,20 +57,25 @@ export const env = createEnv({
   runtimeEnv: {
     // Server
     DATABASE_URL: process.env.DATABASE_URL,
-    CLERK_SECRET_KEY: process.env.CLERK_SECRET_KEY,
-    GHA_OIDC_AUDIENCE: process.env.GHA_OIDC_AUDIENCE,
+    
+    // Authentication
+    AUTH_SECRET: process.env.AUTH_SECRET,
+    AUTH_URL: process.env.AUTH_URL,
+    JWT_SECRET: process.env.JWT_SECRET,
+    
+    // Google OAuth
+    GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID,
+    GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
     
     // R2 Storage
     R2_UPLOAD_IMAGE_ACCESS_KEY_ID: process.env.R2_UPLOAD_IMAGE_ACCESS_KEY_ID,
     R2_UPLOAD_IMAGE_SECRET_ACCESS_KEY: process.env.R2_UPLOAD_IMAGE_SECRET_ACCESS_KEY,
     R2_UPLOAD_IMAGE_BUCKET_NAME: process.env.R2_UPLOAD_IMAGE_BUCKET_NAME,
+    R2_UPLOAD_IMAGE_ENDPOINT: process.env.R2_UPLOAD_IMAGE_ENDPOINT,
     CLOUDFLARE_ACCOUNT_ID: process.env.CLOUDFLARE_ACCOUNT_ID,
-    POLAR_ACCESS_TOKEN: process.env.POLAR_ACCESS_TOKEN,
-    POLAR_WEBHOOK_SECRET: process.env.POLAR_WEBHOOK_SECRET,
-    NODE_ENV: process.env.NODE_ENV,
     
-    // Client
-    NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
+    // Node Environment
+    NODE_ENV: process.env.NODE_ENV,
     NEXT_PUBLIC_POLAR_API_URL: process.env.NEXT_PUBLIC_POLAR_API_URL,
     NEXT_PUBLIC_POLAR_PRICE_STARTER: process.env.NEXT_PUBLIC_POLAR_PRICE_STARTER,
     NEXT_PUBLIC_POLAR_PRICE_PRO: process.env.NEXT_PUBLIC_POLAR_PRICE_PRO,

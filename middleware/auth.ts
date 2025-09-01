@@ -1,67 +1,41 @@
-import { NextResponse } from 'next/server';
-import type { NextRequest } from 'next/server';
-import { auth, currentUser } from '@clerk/nextjs/server';
-import type { User as ClerkUser } from '@clerk/nextjs/dist/types/server';
-import { verifyGitHubOidcToken } from './github-oidc';
+import { NextResponse, type NextRequest } from 'next/server';
+import { getServerAuth } from '@/lib/auth/better-auth';
 
-export type AuthType = 'clerk' | 'github-oidc' | 'unauthorized';
-
-interface ClerkSession {
-  userId: string | null;
-  sessionId: string | null;
-  getToken: () => Promise<string | null>;
+declare module 'next/server' {
+  interface NextRequest {
+    authContext?: AuthContextUnion;
+  }
 }
 
-// Define a type that represents the shape of Clerk user data we want to expose
-type ClerkUserClaims = {
-  id: string;
-  externalId: string | null;
-  // Add other Clerk user properties as needed
-  [key: string]: unknown;
-};
-
-export interface ClerkAuthContext {
-  type: 'clerk';
+// Auth Context Types
+export interface SessionAuthContext {
+  type: 'session';
   userId: string;
   sessionId: string;
-  claims: ClerkUserClaims;
-}
-
-export interface GitHubOidcAuthContext {
-  type: 'github-oidc';
-  userId: string;
-  claims: Record<string, unknown>;
-  repository: string;
-  repositoryOwner: string;
-  actor: string;
-  ref: string;
-  sha: string;
-  workflow: string;
-  runId: string;
+  email: string;
+  role?: string;
+  name?: string;
+  image?: string | null;
+  emailVerified?: boolean;
 }
 
 export interface UnauthorizedContext {
   type: 'unauthorized';
 }
 
-export type AuthContextUnion = ClerkAuthContext | GitHubOidcAuthContext | UnauthorizedContext;
+export type AuthContextUnion = SessionAuthContext | UnauthorizedContext;
 
-// Type guards
-const isClerkAuthContext = (context: AuthContextUnion): context is ClerkAuthContext => 
-  context.type === 'clerk';
-
-const isGitHubOidcAuthContext = (context: AuthContextUnion): context is GitHubOidcAuthContext => 
-  context.type === 'github-oidc';
-
-const isUnauthorizedContext = (context: AuthContextUnion): context is UnauthorizedContext =>
-  context.type === 'unauthorized';
-
-export interface HandlerWithAuth {
-  (req: NextRequest, context: { 
-    params?: Record<string, string>; 
-    authContext: AuthContextUnion;
-  }): Promise<NextResponse>;
+// Base type for auth context
+export interface BaseAuthContext<TParams = Record<string, string>> {
+  params?: TParams;
+  authContext: AuthContextUnion;
 }
+
+// Handler type that works with any params
+export type HandlerWithAuth<TParams = Record<string, string>> = (
+  request: NextRequest,
+  context: BaseAuthContext<TParams>
+) => Promise<NextResponse>;
 
 // Helper to create consistent error responses
 function createErrorResponse(
@@ -75,7 +49,8 @@ function createErrorResponse(
       error: {
         code,
         message,
-        ...(details && { details }),
+        details,
+        timestamp: new Date().toISOString(),
       },
     }),
     {
@@ -85,84 +60,45 @@ function createErrorResponse(
   );
 }
 
-// GitHub OIDC Auth Middleware
-export function withGithubOidcAuth(handler: HandlerWithAuth) {
-  return async function (req: NextRequest, context: { params?: Record<string, string> } = {}) {
-    const { params } = context;
-    const authHeader = req.headers.get('authorization');
-    
-    if (!authHeader?.startsWith('Bearer ')) {
-      return createErrorResponse(401, 'missing_token', 'Missing or invalid authorization header');
-    }
-
+// Session-based Auth Middleware
+export function withSessionAuth<TParams = Record<string, string>>(
+  handler: HandlerWithAuth<TParams>
+) {
+  return async (request: NextRequest, { params }: { params: TParams }) => {
     try {
-      const token = authHeader.split(' ')[1];
-      const claims = await verifyGitHubOidcToken(token);
+      // Get the session from the request
+      const auth = await getServerAuth(request);
       
-      // Create auth context with proper type assertions
-      const authContext: GitHubOidcAuthContext = {
-        type: 'github-oidc',
-        userId: typeof claims.sub === 'string' ? claims.sub : 'unknown',
-        claims,
-        repository: typeof claims.repository === 'string' ? claims.repository : 'unknown/repo',
-        repositoryOwner: typeof claims.repository_owner === 'string' ? claims.repository_owner : 'unknown',
-        actor: typeof claims.actor === 'string' ? claims.actor : 'unknown',
-        ref: typeof claims.ref === 'string' ? claims.ref : 'unknown',
-        sha: typeof claims.sha === 'string' ? claims.sha : 'unknown',
-        workflow: typeof claims.workflow === 'string' ? claims.workflow : 'unknown',
-        runId: typeof claims.run_id === 'string' ? claims.run_id : 'unknown',
-      };
-
-      return handler(req, { params, authContext });
-    } catch (error) {
-      console.error('GitHub OIDC verification failed:', error);
-      return createErrorResponse(401, 'invalid_token', 'Invalid or expired token');
-    }
-  };
-}
-
-// Clerk Auth Middleware
-export function withClerkAuth(handler: HandlerWithAuth) {
-  return async function (req: NextRequest, context: { params?: Record<string, string> } = {}) {
-    try {
-      const session = await auth();
-      const user = await currentUser();
-      
-      // Validate session and user
-      if (!session?.userId || !user) {
-        return createErrorResponse(
-          401, 
-          'unauthorized', 
-          'Authentication required',
-          { sessionExists: !!session, userExists: !!user }
-        );
+      if (!auth?.user) {
+        // Redirect to sign-in page with the current URL as the callback
+        const signInUrl = new URL('/sign-in', request.url);
+        signInUrl.searchParams.set('callbackUrl', request.url);
+        return NextResponse.redirect(signInUrl);
       }
 
-      // Create a safe claims object with the properties we need
-      const { id, externalId, ...rest } = user;
-      const userClaims: ClerkUserClaims = {
-        id,
-        externalId,
-        ...rest,
+      // Add auth context to the request
+      const authContext: SessionAuthContext = {
+        type: 'session',
+        userId: auth.user.id,
+        sessionId: auth.user.id, // Using user ID as session ID for now
+        email: auth.user.email,
+        role: auth.user.role || 'user',
+        name: auth.user.name || auth.user.email?.split('@')[0] || 'User',
       };
+      
+      // Add auth context to the request
+      (request as any).authContext = authContext;
 
-      const authContext: ClerkAuthContext = {
-        type: 'clerk',
-        userId: user.id,
-        sessionId: session.sessionId || `temp_${Date.now()}`,
-        claims: userClaims,
-      };
+      request.authContext = authContext;
 
-      return handler(req, { 
-        ...context, 
-        authContext 
-      });
+      // Call the handler with the authenticated request
+      return handler(request, { params, authContext });
     } catch (error) {
-      console.error('Clerk auth failed:', error);
+      console.error('Auth middleware error:', error);
       return createErrorResponse(
-        401, 
-        'authentication_failed', 
-        'Authentication failed',
+        500,
+        'AUTH_ERROR',
+        'Authentication error',
         { error: error instanceof Error ? error.message : 'Unknown error' }
       );
     }
@@ -170,41 +106,52 @@ export function withClerkAuth(handler: HandlerWithAuth) {
 }
 
 // Optional Auth Middleware
-export function withOptionalAuth(handler: HandlerWithAuth) {
-  return async function (req: NextRequest, context: { params?: Record<string, string> } = {}) {
+export function withOptionalAuth<TParams = Record<string, string>>(
+  handler: HandlerWithAuth<TParams>
+) {
+  return async (request: NextRequest, { params }: { params: TParams }) => {
     try {
-      const session = await auth();
-      const user = await currentUser();
+      // Try to get the session
+      const auth = await getServerAuth(request);
       
-      let authContext: AuthContextUnion = { type: 'unauthorized' };
-
-      if (session?.userId && user) {
-        // Create a properly typed claims object
-        const { id, externalId, ...rest } = user;
-        const userClaims: ClerkUserClaims = {
-          id,
-          externalId,
-          ...rest,
-        };
-        
-        authContext = { 
-          type: 'clerk', 
-          userId: user.id,
-          sessionId: session.sessionId || `temp_${Date.now()}`,
-          claims: userClaims
-        };
+      if (!auth?.user) {
+        const authContext: UnauthorizedContext = { type: 'unauthorized' };
+        request.authContext = authContext;
+        return handler(request, { params, authContext });
       }
 
-      return handler(req, { 
-        ...context, 
-        authContext 
-      });
+      // Add auth context to the request
+      const authContext: SessionAuthContext = {
+        type: 'session',
+        userId: auth.user.id,
+        sessionId: auth.user.id,
+        email: auth.user.email,
+        role: auth.user.role || 'user',
+        name: auth.user.name || auth.user.email?.split('@')[0] || 'User',
+      };
+      
+      // Add auth context to the request
+      (request as any).authContext = authContext;
+      return handler(request, { params, authContext });
     } catch (error) {
-      console.error('Optional auth check failed, continuing as unauthorized:', error);
-      return handler(req, { 
-        ...context, 
-        authContext: { type: 'unauthorized' } 
-      });
+      console.error('Auth middleware error:', error);
+      const authContext: UnauthorizedContext = { type: 'unauthorized' };
+      request.authContext = authContext;
+      return handler(request, { params, authContext });
     }
   };
+}
+
+// Type guard for session auth context
+export function isSessionAuthContext(
+  context: AuthContextUnion
+): context is SessionAuthContext {
+  return context.type === 'session';
+}
+
+// Type guard for unauthorized context
+export function isUnauthorizedContext(
+  context: AuthContextUnion
+): context is UnauthorizedContext {
+  return context.type === 'unauthorized';
 }
