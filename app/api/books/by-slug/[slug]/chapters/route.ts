@@ -1,5 +1,5 @@
 // app/api/books/by-slug/[slug]/chapters/route.ts
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
 import { requireAuth } from '@/lib/auth/api-auth';
 
@@ -16,11 +16,11 @@ export const runtime = 'nodejs';
 
 // GET: Get all chapters for a book by slug
 export async function GET(
-  request: Request,
+  request: NextRequest,
   context: { params: { slug: string } }
 ) {
   try {
-    const { user: authUser, error } = await requireAuth();
+    const { user: authUser, error } = await requireAuth(request);
     if (error) return error;
     
     if (!authUser) {
@@ -72,11 +72,11 @@ export async function GET(
 
 // POST: Create a new chapter for a book by slug
 export async function POST(
-  request: Request,
+  request: NextRequest,
   context: { params: { slug: string } }
 ) {
   try {
-    const { user: authUser, error } = await requireAuth();
+    const { user: authUser, error } = await requireAuth(request);
     if (error) return error;
     
     if (!authUser) {

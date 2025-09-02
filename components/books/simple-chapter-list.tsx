@@ -8,7 +8,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Eye, Pencil, Trash2 } from "lucide-react";
 import { useRouter } from 'next/navigation';
-import { toast } from "sonner";
+import toast from "sonner";
 
 // Define the chapter structure based on your API response
 interface Chapter {

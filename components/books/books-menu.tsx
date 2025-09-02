@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { MoreVertical, Loader2 } from "lucide-react";
-import { toast } from "sonner";
+import toast from "sonner";
 
 interface BooksMenuProps {
   slug: string;  // Book slug for navigation

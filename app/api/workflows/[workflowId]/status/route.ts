@@ -1,5 +1,6 @@
-import { NextResponse } from 'next/server';
-import { db } from '@/db';
+import { NextRequest, NextResponse } from 'next/server';
+import { db } from '@/db/drizzle';
+import { books } from '@/db/schema';
 import { requireAuth } from '@/lib/auth/api-auth';
 
 // Initialize Octokit with dynamic import
@@ -19,16 +20,16 @@ if (process.env.GITHUB_TOKEN) {
 }
 
 export async function GET(
-  request: Request,
-  context: { params: { workflowId: string } }
+  request: NextRequest,
+  { params }: { params: { workflowId: string } }
 ) {
-  const { workflowId } = context.params;
+  const { workflowId } = params;
   try {
     // Authenticate the user
-    const { user, error } = await requireAuth();
+    const { user: authUser, error } = await requireAuth(request);
     if (error) return error;
     
-    if (!user) {
+    if (!authUser) {
       return NextResponse.json(
         { error: 'Unauthorized' },
         { status: 401 }
@@ -42,20 +43,24 @@ export async function GET(
       );
     }
     
-    // Get the book by workflow ID
+    // Find the book associated with this workflow
     const book = await db.query.books.findFirst({
-      where: (books: { workflowId: string }, { eq }: any) => eq(books.workflowId, workflowId as string)
+      where: (books, { eq }) => eq(books.workflowId, workflowId),
     });
     
+    // Early return if book is not found
     if (!book) {
       return NextResponse.json(
         { error: 'Book not found for this workflow' },
         { status: 404 }
       );
     }
+    
+    // Store in a new constant to help TypeScript with type narrowing
+    const foundBook = book;
 
     // Check if the user has access to this book
-    if (book.userId !== user?.id) {
+    if (foundBook.userId !== authUser?.id) {
       return NextResponse.json(
         { error: 'Unauthorized' },
         { status: 403 }
@@ -63,11 +68,11 @@ export async function GET(
     }
     
     // If the book already has an EPUB URL, return it
-    if (book.epubUrl) {
+    if (foundBook.epubUrl) {
       return NextResponse.json({
-        status: 'completed',
-        epubUrl: book.epubUrl,
-        updatedAt: book.updatedAt
+        status: foundBook.publishedAt ? 'completed' : 'pending',
+        epubUrl: foundBook.epubUrl,
+        updatedAt: foundBook.updatedAt
       });
     }
     
@@ -105,17 +110,20 @@ export async function GET(
       console.error('Error checking GitHub workflow status:', error);
       // Fall back to the book's publish status if we can't check GitHub
       return NextResponse.json({
-        status: book.publishStatus?.toLowerCase() || 'unknown',
+        status: foundBook.publishedAt ? 'completed' : 'pending',
         error: 'Failed to check workflow status',
-        updatedAt: book.updatedAt
+        updatedAt: foundBook.updatedAt
       });
     }
 
+    // At this point, we know foundBook is defined
+    const bookStatus = foundBook.publishedAt ? 'completed' : 'pending';
+    
     // Return the status and any relevant data
     return NextResponse.json({
-      status: book.publishStatus?.toLowerCase() || 'unknown',
-      epubUrl: book.epubUrl,
-      updatedAt: book.updatedAt
+      status: bookStatus,
+      epubUrl: foundBook.epubUrl,
+      updatedAt: foundBook.updatedAt
     });
 
   } catch (error) {

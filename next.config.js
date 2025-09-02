@@ -5,8 +5,9 @@ if (!process.env.NEXT_RUNTIME) {
   globalThis.crypto = require("crypto").webcrypto;
 }
 
-const clerkConfig = {
-  domain: "clerk.editor.bookshall.com",
+// Better Auth configuration
+const authConfig = {
+  // Add any auth-specific configuration here if needed
 };
 
 /** @type {import('next').NextConfig} */
@@ -16,6 +17,45 @@ const nextConfig = {
   
   // Enable React's Strict Mode
   reactStrictMode: false,
+  
+  // Configure webpack to handle Node.js built-in modules
+  webpack: (config, { isServer, isEdgeRuntime }) => {
+    // Don't include certain modules in the client bundle or Edge Runtime
+    if (!isServer || isEdgeRuntime) {
+      config.resolve.fallback = {
+        ...config.resolve.fallback,
+        fs: false,
+        net: false,
+        tls: false,
+        dns: false,
+        child_process: false,
+        pg: false,
+        'pg-native': false,
+        'pg-query-stream': false,
+        'pg-protocol': false,
+        // AWS SDK dependencies
+        '@aws-sdk/credential-providers': false,
+        '@aws-sdk/client-s3': false,
+        'aws-sdk': false,
+        // Other problematic modules
+        'drizzle-orm': false,
+        'drizzle-orm/node-postgres': false,
+      };
+    }
+    
+    // Exclude certain modules from being processed by webpack
+    if (isEdgeRuntime) {
+      config.externals = config.externals || [];
+      config.externals.push(
+        'better-auth',
+        'pg',
+        'drizzle-orm',
+        'drizzle-orm/node-postgres'
+      );
+    }
+    
+    return config;
+  },
 
   typescript: {
     ignoreBuildErrors: false,
@@ -162,12 +202,18 @@ const nextConfig = {
 
   experimental: {
     externalDir: true,
-    // Disable Edge Runtime for better-auth
-    serverComponentsExternalPackages: ['better-auth'],
+    // Ensure server components are properly marked
+    serverComponentsExternalPackages: [
+      'better-auth', 
+      'pg', 
+      'drizzle-orm', 
+      'drizzle-orm/node-postgres',
+      '@aws-sdk/credential-providers',
+      '@aws-sdk/client-s3'
+    ],
   },
   
   // Configure which pages should use Edge Runtime
-  // We'll exclude better-auth related routes from Edge
   experimental: {
     runtime: 'nodejs',
     serverComponents: true,
@@ -175,15 +221,14 @@ const nextConfig = {
   },
 
   env: {
-    NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:
-      process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
-    COMBINED_JWT_PRIVATE_KEY: process.env.COMBINED_JWT_PRIVATE_KEY,
-    COMBINED_JWT_PUBLIC_KEY: process.env.COMBINED_JWT_PUBLIC_KEY,
-    COMBINED_JWT_AUD: process.env.COMBINED_JWT_AUD || "clerk-js",
     REDIS_URL: process.env.REDIS_URL,
     SESSION_SECRET: process.env.SESSION_SECRET,
-    NEXT_PUBLIC_CLERK_FRONTEND_API: clerkConfig.domain,
-    CLERK_SECRET_KEY: process.env.CLERK_SECRET_KEY,
+    BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET,
+    BASE_URL: process.env.BASE_URL,
+    GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID,
+    GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
+    GITHUB_CLIENT_ID: process.env.GITHUB_CLIENT_ID,
+    GITHUB_CLIENT_SECRET: process.env.GITHUB_CLIENT_SECRET,
   },
 };
 

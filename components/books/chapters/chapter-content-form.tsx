@@ -5,7 +5,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm, Controller, type SubmitHandler, type UseFormReturn } from "react-hook-form";
 import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
-import { toast } from "sonner";
+import toast from "sonner";
 
 import { chapterFormSchema } from "@/schemas/chapter-schema";
 import type { ChapterFormValues } from "@/schemas/chapter-schema";

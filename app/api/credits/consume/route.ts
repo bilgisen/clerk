@@ -1,5 +1,5 @@
 // app/api/credits/consume/route.ts
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth/api-auth";
 import { creditService } from "@/lib/services/credits/credit-service";
 import { z } from "zod";
@@ -36,9 +36,9 @@ function calculateCost(action: string, words?: number): number {
   return baseCost;
 }
 
-export async function POST(req: Request) {
+export async function POST(request: NextRequest) {
   try {
-    const { user: authUser, error } = await requireAuth();
+    const { user: authUser, error } = await requireAuth(request);
     if (error) return error;
     
     if (!authUser) {
@@ -46,7 +46,7 @@ export async function POST(req: Request) {
     }
 
     // Parse and validate the request body
-    const body = await req.json();
+    const body = await request.json();
     const validation = consumeRequestSchema.safeParse(body);
     
     if (!validation.success) {

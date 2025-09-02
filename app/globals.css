@@ -33,7 +33,7 @@
   --radius: 0.625rem;
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.723 0.219 149.579); /* Using Clerk's primary color */
+  --sidebar-primary: oklch(0.6 0.25 250); /* Application primary color */
   --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-accent: oklch(0.97 0 0);
   --sidebar-accent-foreground: oklch(0.205 0 0);
@@ -48,8 +48,8 @@
   --card-foreground: oklch(0.985 0 0);
   --popover: oklch(0.145 0 0);
   --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.723 0.219 149.579); /* Using Clerk's primary color */
-  --primary-foreground: oklch(0.205 0 0);
+  --primary: oklch(0.6 0.25 250); /* Application primary color */
+  --primary-foreground: oklch(0.985 0 0);
   --secondary: oklch(0.269 0 0);
   --secondary-foreground: oklch(0.985 0 0);
   --muted: oklch(0.269 0 0);
@@ -68,7 +68,7 @@
   --chart-5: oklch(0.645 0.246 16.439);
   --sidebar: oklch(0.205 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.723 0.219 149.579); /* Using Clerk's primary color */
+  --sidebar-primary: oklch(0.6 0.25 250); /* Application primary color */
   --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-accent: oklch(0.269 0 0);
   --sidebar-accent-foreground: oklch(0.985 0 0);

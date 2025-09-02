@@ -1,7 +1,7 @@
 // app/api/credits/summary/route.ts
 import 'server-only';
 
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth/api-auth";
 import { creditService } from "@/lib/services/credits/credit-service";
 import { db } from "@/lib/db/server";
@@ -12,12 +12,12 @@ import { eq } from "drizzle-orm";
 // Remove the edge runtime as it might cause issues with database connections
 export const dynamic = 'force-dynamic';
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   try {
     console.log('[Credits/Summary] Starting summary request');
     
     // Get authenticated user
-    const { user: authUser, error } = await requireAuth();
+    const { user: authUser, error } = await requireAuth(request);
     if (error) return error;
     
     if (!authUser) {

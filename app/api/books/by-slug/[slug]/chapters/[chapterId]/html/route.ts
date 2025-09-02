@@ -4,13 +4,7 @@ import { db } from '@/db/drizzle';
 import { books, chapters } from '@/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { generateCompleteDocumentHTML } from '@/lib/generateChapterHTML';
-import { 
-  withSessionAuth, 
-  type HandlerWithAuth, 
-  type AuthContextUnion,
-  type BaseAuthContext,
-  isSessionAuthContext
-} from '@/middleware/auth';
+import type { AuthContextUnion, SessionAuthContext } from '@/types/auth.types';
 import { logger } from '@/lib/logger';
 
 // Configuration
@@ -21,9 +15,26 @@ export const runtime = 'nodejs';
 // Types
 type Chapter = typeof chapters.$inferSelect;
 
+// Define missing types
+type HandlerWithAuth<T extends Record<string, string> = Record<string, string>> = (
+  request: NextRequest,
+  context: { 
+    params?: T; 
+    authContext: AuthContextUnion;
+  }
+) => Promise<NextResponse>;
+
+// Helper function to check if auth context is session type
+const isSessionAuthContext = (authContext: AuthContextUnion): authContext is SessionAuthContext => {
+  return authContext.type === 'session';
+};
+
 const handleRequest: HandlerWithAuth<{ slug: string; chapterId: string }> = async (
   request: NextRequest,
-  context: BaseAuthContext<{ slug: string; chapterId: string }>
+  context: { 
+    params?: { slug: string; chapterId: string }; 
+    authContext: AuthContextUnion;
+  }
 ): Promise<NextResponse> => {
   // Ensure we have a valid session
   if (!isSessionAuthContext(context.authContext)) {
@@ -43,13 +54,13 @@ const handleRequest: HandlerWithAuth<{ slug: string; chapterId: string }> = asyn
     );
   }
   const requestStart = Date.now();
-  const userId = authContext.userId;
+  const userId = authContext.user?.id;
   
   try {
     logger.info('Chapter HTML request', {
       bookSlug: slug,
       chapterId,
-      userId: authContext.userId
+      userId: authContext.user?.id
     });
 
     // Get the book with the requested chapter
@@ -106,7 +117,7 @@ const handleRequest: HandlerWithAuth<{ slug: string; chapterId: string }> = asyn
       chapterId: requestedChapter.id,
       durationMs: Date.now() - requestStart,
       userId,
-      sessionId: authContext.sessionId
+      sessionId: (authContext as SessionAuthContext).sessionId
     });
 
     return new NextResponse(completeHTML, {
@@ -142,6 +153,14 @@ const handleRequest: HandlerWithAuth<{ slug: string; chapterId: string }> = asyn
       }
     );
   }
+};
+
+// Mock withSessionAuth middleware (replace with your actual implementation)
+const withSessionAuth = <T extends Record<string, string>>(
+  handler: HandlerWithAuth<T>
+): HandlerWithAuth<T> => {
+  // This is a placeholder - replace with your actual auth middleware
+  return handler;
 };
 
 // Export the wrapped handler

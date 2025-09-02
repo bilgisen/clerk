@@ -7,19 +7,19 @@ import { Loader2 } from 'lucide-react';
 
 export default function SSOCallbackPage() {
   const router = useRouter();
-  const { isAuthenticated, loading } = useAuth();
+  const { user, isLoading } = useAuth();
 
   useEffect(() => {
-    if (loading) return;
+    if (isLoading) return;
 
-    if (isAuthenticated) {
+    if (user) {
       // Redirect to dashboard after successful SSO
       router.push('/dashboard');
     } else {
       // If not authenticated, redirect to sign-in page
       router.push('/sign-in');
     }
-  }, [isAuthenticated, loading, router]);
+  }, [user, isLoading, router]);
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-background">

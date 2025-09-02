@@ -1,5 +1,5 @@
 // app/api/books/by-slug/[slug]/chapters/[chapterId]/route.ts
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
 import { requireAuth } from '@/lib/auth/api-auth';
 
@@ -19,11 +19,11 @@ export const runtime = 'nodejs';
 
 // GET: Get a single chapter by ID for a book by slug
 export async function GET(
-  request: Request,
+  request: NextRequest,
   context: { params: { slug: string; chapterId: string } }
 ) {
   try {
-    const { user: authUser, error } = await requireAuth();
+    const { user: authUser, error } = await requireAuth(request);
     if (error) return error;
     
     if (!authUser) {
@@ -75,11 +75,11 @@ export async function GET(
 
 // PATCH: Update a chapter
 export async function PATCH(
-  request: Request,
+  request: NextRequest,
   context: { params: { slug: string; chapterId: string } }
 ) {
   try {
-    const { user: authUser, error } = await requireAuth();
+    const { user: authUser, error } = await requireAuth(request);
     if (error) return error;
     
     if (!authUser) {
@@ -133,11 +133,11 @@ export async function PATCH(
 
 // DELETE: Delete a chapter
 export async function DELETE(
-  _req: Request,
+  request: NextRequest,
   context: { params: { slug: string; chapterId: string } }
 ) {
   try {
-    const { user: authUser, error } = await requireAuth();
+    const { user: authUser, error } = await requireAuth(request);
     if (error) return error;
     
     if (!authUser) {

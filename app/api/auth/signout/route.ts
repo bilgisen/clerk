@@ -1,40 +1,51 @@
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
 import { auth } from '@/lib/auth/better-auth';
+import { cookies } from 'next/headers';
 
 export async function POST() {
   try {
-    // Clear the session cookie
-    const response = NextResponse.json(
-      { message: 'Signed out successfully' },
-      { 
-        status: 200,
-        headers: {
-          'Set-Cookie': `auth-session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; ${process.env.NODE_ENV === 'production' ? 'Secure; SameSite=Lax' : 'SameSite=Lax'}`
-        }
+    const cookieStore = cookies();
+    
+    // Call the auth signout endpoint
+    await auth.api.signOut({
+      headers: {
+        cookie: cookieStore.toString()
       }
+    });
+
+    // Create response with cleared cookies
+    const response = NextResponse.json(
+      { success: true },
+      { status: 200 }
     );
 
-    // If you need to invalidate the session on the server side as well
-    try {
-      await auth.api.signOut();
-    } catch (error) {
-      console.error('Error invalidating session on server:', error);
-      // Continue even if server-side invalidation fails
-    }
+    // Clear the session cookies
+    response.cookies.set({
+      name: 'auth-token',
+      value: '',
+      expires: new Date(0),
+      path: '/',
+    });
+    
+    response.cookies.set({
+      name: '__Secure-auth.session-token',
+      value: '',
+      expires: new Date(0),
+      path: '/',
+      secure: true,
+      httpOnly: true,
+      sameSite: 'lax' as const,
+    });
 
     return response;
   } catch (error) {
-    console.error('Error signing out:', error);
+    console.error('Sign out error:', error);
     return NextResponse.json(
-      { error: 'Internal server error' },
-      { 
-        status: 500,
-        headers: { 'Content-Type': 'application/json' }
-      }
+      { success: false, error: 'Failed to sign out' },
+      { status: 500 }
     );
   }
 }
 
-// Disable caching for this route
+// Prevent caching of this route
 export const dynamic = 'force-dynamic';

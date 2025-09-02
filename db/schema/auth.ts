@@ -8,13 +8,17 @@ export const sessions = pgTable('sessions', {
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   token: text('token').notNull(),
+  ipAddress: text('ip_address'),
+  userAgent: text('user_agent'),
   data: jsonb('data'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull()
 }, (table) => ({
   userIdIdx: { columns: [table.userId] },
   tokenIdx: { columns: [table.token] },
-  expiresAtIdx: { columns: [table.expiresAt] }
+  expiresAtIdx: { columns: [table.expiresAt] },
+  ipAddressIdx: { columns: [table.ipAddress] },
+  userAgentIdx: { columns: [table.userAgent] }
 }));
 
 // Verification tokens table

@@ -1,30 +1,47 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAuth } from '@/lib/auth/better-auth';
+import authClient from '@/lib/auth/auth-client';
 import { rateLimit, getClientIp } from '@/lib/redis/rate-limit';
 
-type Handler = (req: NextRequest, context: { params: any }) => Promise<NextResponse>;
+type Handler = (req: NextRequest, context: { params: any, user?: any }) => Promise<NextResponse>;
 
+/**
+ * Middleware to protect API routes with authentication
+ */
 export function withAuth(handler: Handler) {
   return async (req: NextRequest, context: { params: any }) => {
     try {
-      // Check authentication
-      const auth = await getAuth();
-      if (!auth) {
+      // Get the authenticated user from the auth client
+      const { data: session } = await authClient.getSession({ required: true });
+      const user = session?.user;
+      
+      if (!user) {
         return NextResponse.json(
-          { error: 'Unauthorized' },
-          { status: 401 }
+          { 
+            error: 'Unauthorized',
+            message: 'You must be signed in to access this resource'
+          },
+          { 
+            status: 401,
+            headers: { 'Content-Type': 'application/json' }
+          }
         );
       }
 
-      // Add user to request context
-      const response = await handler(req, context);
+      // Pass the user to the handler via context
+      const response = await handler(req, { ...context, user });
       return response;
       
     } catch (error) {
       console.error('API Error:', error);
       return NextResponse.json(
-        { error: 'Internal Server Error' },
-        { status: 500 }
+        { 
+          error: 'Internal Server Error',
+          message: 'An unexpected error occurred'
+        },
+        { 
+          status: 500,
+          headers: { 'Content-Type': 'application/json' }
+        }
       );
     }
   };

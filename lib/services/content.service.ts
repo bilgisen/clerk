@@ -1,26 +1,49 @@
 import { auth } from "@/lib/auth/better-auth";
 import { randomUUID } from 'crypto';
+import type { Headers } from 'next/headers';
 
 export type EbookFormat = 'epub' | 'mobi' | 'pdf' | 'html' | 'docx';
 
-interface ContentGenerationParams {
+export interface ContentGenerationParams {
   title: string;
   content: string;
   format: EbookFormat;
   metadata?: Record<string, any>;
+  headers?: Headers;
 }
 
 export class ContentService {
-  private static async getAuthenticatedUserId() {
-    const session = await auth();
-    if (!session?.userId) {
+  /**
+   * Get the authenticated user ID from request headers
+   * @param headers Request headers containing the session cookie
+   * @returns The authenticated user ID
+   * @throws Error if user is not authenticated
+   */
+  private static async getAuthenticatedUserId(headers?: Headers): Promise<string> {
+    if (!headers) {
+      throw new Error('Request headers are required for authentication');
+    }
+
+    const session = await auth.api.getSession({ headers });
+    
+    if (!session?.user?.id) {
       throw new Error('Authentication required');
     }
-    return session.userId;
+    
+    return session.user.id;
   }
 
+  /**
+   * Generate content with the given parameters
+   * @param params Content generation parameters including request headers
+   * @returns Object containing content ID and status
+   */
   static async generateContent(params: ContentGenerationParams) {
-    const userId = await this.getAuthenticatedUserId();
+    if (!params.headers) {
+      throw new Error('Request headers are required for authentication');
+    }
+    
+    const userId = await this.getAuthenticatedUserId(params.headers);
     const contentId = `content_${randomUUID()}`;
     
     // Validate content

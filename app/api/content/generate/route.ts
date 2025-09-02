@@ -1,13 +1,8 @@
+// app/api/content/generate/route.ts
 import { NextResponse } from 'next/server';
-import { 
-  withSessionAuth, 
-  isSessionAuthContext,
-  type AuthContextUnion,
-  type SessionAuthContext,
-  type UnauthorizedContext
-} from '@/middleware/auth';
-import { randomUUID } from 'crypto';
 import type { NextRequest } from 'next/server';
+import { auth } from '@/lib/auth/better-auth'; // Adjust path based on where your better-auth instance is initialized
+import { randomUUID } from 'crypto';
 
 // Types
 type EbookFormat = 'pdf' | 'docx' | 'html';
@@ -39,16 +34,11 @@ class ContentService {
   }) {
     const { title, content, format = 'pdf', metadata, userId } = params;
     const sessionId = randomUUID();
-    
+
     try {
-      // In a real implementation, you would:
-      // 1. Save the content to your database
-      // 2. Queue a background job for processing
-      // 3. Return a reference to the job
-      
-      // For now, we'll simulate a successful job creation
+      // Simulate async processing
       await new Promise(resolve => setTimeout(resolve, 500));
-      
+
       return {
         success: true,
         contentId: randomUUID(),
@@ -63,48 +53,26 @@ class ContentService {
   }
 }
 
-interface HandlerContext {
-  authContext: AuthContextUnion;
-  params?: Record<string, string>;
-}
+// POST handler
+export async function POST(request: NextRequest) {
+  const session = await auth.api.getSession({
+    headers: request.headers,
+  });
 
-// Handler
-export const POST = withSessionAuth(async (request: NextRequest, { authContext }: HandlerContext) => {
-  if (!isSessionAuthContext(authContext)) {
-    return new NextResponse(
-      JSON.stringify({ success: false, error: 'Unauthorized' }),
-      { status: 401, headers: { 'Content-Type': 'application/json' } }
-    );
-  }
-  if (request.method !== 'POST') {
-    return new NextResponse(
-      JSON.stringify({ 
-        success: false, 
-        error: 'Method not allowed' 
-      }),
-      { 
-        status: 405, 
-        headers: { 
-          'Content-Type': 'application/json',
-          'Allow': 'POST'
-        } 
-      }
+  if (!session?.user) {
+    return NextResponse.json(
+      { success: false, error: 'Unauthorized' },
+      { status: 401 }
     );
   }
 
   try {
     const body = await request.json() as GenerateRequest;
-    
+
     if (!body.title || !body.content) {
-      return new NextResponse(
-        JSON.stringify({ 
-          success: false, 
-          error: 'Title and content are required' 
-        }),
-        { 
-          status: 400, 
-          headers: { 'Content-Type': 'application/json' } 
-        }
+      return NextResponse.json(
+        { success: false, error: 'Title and content are required' },
+        { status: 400 }
       );
     }
 
@@ -113,32 +81,17 @@ export const POST = withSessionAuth(async (request: NextRequest, { authContext }
       content: body.content,
       format: body.format || 'pdf',
       metadata: body.metadata,
-      userId: authContext.userId,
+      userId: session.user.id, // Accessing user ID from session
     });
 
-    return new NextResponse(
-      JSON.stringify(result),
-      { 
-        status: 202, 
-        headers: { 
-          'Content-Type': 'application/json',
-          'Cache-Control': 'no-store'
-        } 
-      }
-    );
+    return NextResponse.json(result, { status: 202 });
   } catch (error) {
     console.error('Content generation error:', error);
     const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-    
-    return new NextResponse(
-      JSON.stringify({ 
-        success: false,
-        error: errorMessage 
-      }),
-      { 
-        status: 500,
-        headers: { 'Content-Type': 'application/json' }
-      }
+
+    return NextResponse.json(
+      { success: false, error: errorMessage },
+      { status: 500 }
     );
   }
-});
+}

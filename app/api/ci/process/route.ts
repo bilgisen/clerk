@@ -1,13 +1,7 @@
 // app/api/ci/process/route.ts
 import { NextResponse } from 'next/server';
-import { 
-  withSessionAuth, 
-  type SessionAuthContext, 
-  isSessionAuthContext,
-  type AuthContextUnion,
-  type UnauthorizedContext
-} from '@/middleware/auth';
 import type { NextRequest } from 'next/server';
+import authClient, { type SessionData } from '@/lib/auth/auth-client';
 
 // The auth context is passed in the handler context, not on the request
 
@@ -81,17 +75,21 @@ async function processContent({
 // Body: { contentId: string, mode?: string }
 
 interface HandlerContext {
-  authContext: AuthContextUnion;
+  auth: { user: SessionData['user'] | null }; // better-auth typically uses 'auth' property
   params?: Record<string, string>;
 }
 
-export const POST = withSessionAuth(async (request: NextRequest, { authContext }: HandlerContext) => {
-  if (!isSessionAuthContext(authContext)) {
+export const POST = async (request: NextRequest, { params }: { params?: Record<string, string> }) => {
+  const { data: session, error } = await authClient.getSession();
+  
+  // Check if there was an error or no session
+  if (error || !session?.user) {
     return NextResponse.json(
       { error: 'Unauthorized' },
       { status: 401 }
     );
   }
+  
   // Check rate limiting and idempotency
   const idempotencyKey = request.headers.get('idempotency-key');
   if (!idempotencyKey) {
@@ -135,7 +133,7 @@ export const POST = withSessionAuth(async (request: NextRequest, { authContext }
       contentId: body.contentId,
       mode: body.mode || 'default',
       context: {
-        userId: isSessionAuthContext(authContext) ? authContext.userId : 'unknown',
+        userId: session.user.id, // Use the session data from authClient.getSession()
       },
     });
     
@@ -150,7 +148,7 @@ export const POST = withSessionAuth(async (request: NextRequest, { authContext }
       { status: 500 }
     );
   }
-});
+}
 
 // GET /api/ci/process/health
 // Public health check endpoint

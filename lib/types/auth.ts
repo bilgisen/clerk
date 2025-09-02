@@ -1,15 +1,15 @@
 import { JwtPayload } from 'jsonwebtoken';
-
-export type AuthType = 'session';
-
-export interface SessionAuthContext {
-  type: AuthType;
-  userId: string;
-  email?: string;
-  sessionId: string;
-}
+import { 
+  AuthContextUnion, 
+  SessionAuthContext, 
+  AuthType 
+} from '@/types/auth.types';
 
 export type AuthContext = SessionAuthContext;
+
+export interface AuthRequest extends Request {
+  authContext: AuthContextUnion;
+}
 
 export interface SessionClaims {
   sub: string;

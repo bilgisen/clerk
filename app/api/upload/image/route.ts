@@ -6,7 +6,7 @@ export const runtime = 'nodejs';
 
 export async function POST(request: NextRequest) {
   try {
-    const { user, error } = await requireAuth();
+    const { user, error } = await requireAuth(request);
     if (error) return error;
     if (!user) {
       return new NextResponse('Unauthorized', { status: 401 });

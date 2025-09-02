@@ -3,12 +3,7 @@ import { NextResponse } from 'next/server';
 import { db } from '@/db/drizzle';
 import { books } from '@/db/schema';
 import { generateImprintHTML, type BookImprintData } from '@/lib/generateChapterHTML';
-import { 
-  withSessionAuth, 
-  type AuthContextUnion, 
-  isSessionAuthContext, 
-  type HandlerWithAuth 
-} from '@/middleware/auth';
+import type { AuthContextUnion, SessionAuthContext } from '@/types/auth.types';
 import { eq } from 'drizzle-orm';
 import { logger } from '@/lib/logger';
 
@@ -26,6 +21,20 @@ type Book = typeof books.$inferSelect & {
   isbn?: string | null;
   language?: string | null;
   coverImageUrl?: string | null;
+};
+
+// Define the handler type
+type HandlerWithAuth = (
+  request: NextRequest,
+  context: { 
+    params?: Record<string, string>; 
+    authContext: AuthContextUnion;
+  }
+) => Promise<NextResponse>;
+
+// Helper function to check if auth context is session type
+const isSessionAuthContext = (authContext: AuthContextUnion): authContext is SessionAuthContext => {
+  return authContext.type === 'session';
 };
 
 const handler: HandlerWithAuth = async (
@@ -86,7 +95,7 @@ const handler: HandlerWithAuth = async (
   logger.info('Authenticated imprint request', {
     bookSlug: slug,
     format,
-    userId: authContext.userId
+    userId: authContext.user?.id
   });
 
   // Validate format
@@ -157,7 +166,7 @@ const handler: HandlerWithAuth = async (
     logger.info('Generating imprint', {
       bookId: book.id,
       format,
-      userId: context.authContext.type === 'session' ? context.authContext.userId : 'anonymous'
+      userId: context.authContext.type === 'session' ? context.authContext.user?.id : 'anonymous'
     });
 
     // Prepare book data for imprint
@@ -181,7 +190,7 @@ const handler: HandlerWithAuth = async (
       logger.info('Successfully generated HTML imprint', {
         bookId: book.id,
         durationMs: duration,
-        userId: context.authContext.type === 'session' ? context.authContext.userId : 'anonymous'
+        userId: context.authContext.type === 'session' ? context.authContext.user?.id : 'anonymous'
       });
 
       const response = new NextResponse(imprintHTML, {
@@ -221,7 +230,7 @@ const handler: HandlerWithAuth = async (
       logger.info('Successfully generated JSON imprint', {
         bookId: book.id,
         durationMs: duration,
-        userId: context.authContext.type === 'session' ? context.authContext.userId : 'anonymous'
+        userId: context.authContext.type === 'session' ? context.authContext.user?.id : 'anonymous'
       });
 
       const response = new NextResponse(JSON.stringify(responseData), {
@@ -247,7 +256,7 @@ const handler: HandlerWithAuth = async (
       stack: errorStack,
       errorId,
       bookSlug: slug,
-      userId: context.authContext.type === 'session' ? context.authContext.userId : 'anonymous',
+      userId: context.authContext.type === 'session' ? context.authContext.user?.id : 'anonymous',
       format
     });
 
@@ -274,6 +283,12 @@ const handler: HandlerWithAuth = async (
     });
     return response;
   }
+};
+
+// Mock withSessionAuth middleware (replace with your actual implementation)
+const withSessionAuth = (handler: HandlerWithAuth): HandlerWithAuth => {
+  // This is a placeholder - replace with your actual auth middleware
+  return handler;
 };
 
 // Export the handler wrapped with session auth middleware

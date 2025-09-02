@@ -1,6 +1,5 @@
 import "./globals.css";
 import { ThemeProvider } from "next-themes";
-import { Providers } from "@/providers/session-provider";
 
 export const metadata = {
   title: "Bookshall - Document Management System",
@@ -14,16 +13,14 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className="min-h-screen bg-background">
-        <Providers>
-          <ThemeProvider 
-            attribute="class" 
-            defaultTheme="system" 
-            enableSystem
-            disableTransitionOnChange
-          >
-            {children}
-          </ThemeProvider>
-        </Providers>
+        <ThemeProvider 
+          attribute="class" 
+          defaultTheme="system" 
+          enableSystem
+          disableTransitionOnChange
+        >
+          {children}
+        </ThemeProvider>
       </body>
     </html>
   );

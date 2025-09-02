@@ -1,4 +1,4 @@
-import { NextResponse, type NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { GitHubActionsService } from '@/lib/services/github-actions.service';
 import { logger } from '@/lib/logger';
 import { db } from '@/db';
@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
     logger.info('Triggering workflow', { requestId });
     
     // Get the authenticated user
-    const { user: authUser, error } = await requireAuth();
+    const { user: authUser, error } = await requireAuth(request);
     if (error) return error;
     
     if (!authUser) {

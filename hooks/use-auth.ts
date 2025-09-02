@@ -1,135 +1,140 @@
-import { useState, useEffect, useCallback } from 'react';
+'use client';
+
 import { useRouter } from 'next/navigation';
+import { useEffect, useState, useCallback } from 'react';
 
 export interface User {
   id: string;
   email: string;
-  name?: string;
+  name?: string | null;
   image?: string | null;
   role?: string;
-  emailVerified?: boolean;
+  emailVerified?: boolean | null;
 }
 
-interface AuthState {
-  user: User | null;
+export interface ExtendedUser extends User {
+  firstName?: string | null;
+  lastName?: string | null;
+  imageUrl?: string | null;
+  lastActiveAt?: string | Date | null;
+  lastLoginAt?: string | Date | null;
+}
+
+type AuthReturnType = {
+  user: ExtendedUser | null;
   isLoading: boolean;
+  isLoaded: boolean;
+  userId?: string | null;
   error: string | null;
-}
+  signIn: (provider?: string) => Promise<void>;
+  signOut: () => Promise<void>;
+  getSession: () => Promise<{ user: ExtendedUser | null }>;
+  getToken: () => Promise<string | null>;
+};
 
-export function useAuth() {
+export function useAuth(): AuthReturnType {
+  const [user, setUser] = useState<User | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const router = useRouter();
-  const [state, setState] = useState<AuthState>({
-    user: null,
-    isLoading: true,
-    error: null,
-  });
 
-  // Get current session
-  const getSession = useCallback(async () => {
-    try {
-      const response = await fetch('/api/auth/session');
-      
-      if (!response.ok) {
-        throw new Error('Failed to get session');
-      }
-      
-      const data = await response.json();
-      const user = data?.user || null;
-      
-      setState(prev => ({
-        ...prev,
-        user,
-        isLoading: false,
-        error: null,
-      }));
-      
-      return user;
-    } catch (error) {
-      console.error('Error getting session:', error);
-      setState(prev => ({
-        ...prev,
-        user: null,
-        isLoading: false,
-        error: error instanceof Error ? error.message : 'Failed to get session',
-      }));
-      return null;
-    }
-  }, []);
-
-  // Initialize auth state
+  // Fetch session on mount
   useEffect(() => {
-    getSession();
-  }, [getSession]);
-
-  // Sign out function
-  const signOut = useCallback(async () => {
-    try {
-      const response = await fetch('/api/auth/signout', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-      
-      if (!response.ok) {
-        throw new Error('Failed to sign out');
+    const fetchSession = async () => {
+      try {
+        setIsLoading(true);
+        const response = await fetch('/api/auth/session');
+        if (response.ok) {
+          const data = await response.json();
+          setUser(data.user || null);
+        } else {
+          setUser(null);
+        }
+      } catch (err) {
+        console.error('Error fetching session:', err);
+        setError('Failed to fetch session');
+        setUser(null);
+      } finally {
+        setIsLoading(false);
       }
-      
-      setState({
-        user: null,
-        isLoading: false,
-        error: null,
-      });
-      
-      router.push('/sign-in');
-    } catch (error) {
-      console.error('Error signing out:', error);
-      setState(prev => ({
-        ...prev,
-        error: error instanceof Error ? error.message : 'Failed to sign out',
-      }));
-    }
-  }, [router]);
+    };
 
-  // Sign in with Google
-  const signInWithGoogle = useCallback(async (options?: { redirectTo?: string }) => {
-    try {
-      const redirectTo = options?.redirectTo || '/dashboard';
-      const callbackUrl = `${window.location.origin}${redirectTo}`;
-      
-      // Redirect to the sign-in endpoint with the provider
-      window.location.href = `/api/auth/signin/google?callbackUrl=${encodeURIComponent(callbackUrl)}`;
-    } catch (error) {
-      console.error('Error signing in with Google:', error);
-      setState(prev => ({
-        ...prev,
-        error: error instanceof Error ? error.message : 'Failed to sign in with Google',
-      }));
-      throw error;
-    }
+    fetchSession();
   }, []);
 
-  // Get authentication token
   const getToken = useCallback(async (): Promise<string | null> => {
     try {
       const response = await fetch('/api/auth/token');
       if (!response.ok) {
-        throw new Error('Failed to get auth token');
+        return null;
       }
-      const { token } = await response.json();
-      return token;
+      const data = await response.json();
+      return data.token || null;
     } catch (error) {
-      console.error('Error getting auth token:', error);
+      console.error('Error getting token:', error);
       return null;
     }
   }, []);
 
+  const signIn = useCallback(async (provider?: string) => {
+    try {
+      setIsLoading(true);
+      const redirectTo = window.location.pathname;
+      const callbackUrl = `${window.location.origin}/api/auth/callback?redirectTo=${encodeURIComponent(redirectTo)}`;
+      
+      if (provider) {
+        window.location.href = `/api/auth/signin/${provider}?callbackUrl=${encodeURIComponent(callbackUrl)}`;
+      } else {
+        window.location.href = `/api/auth/signin?callbackUrl=${encodeURIComponent(callbackUrl)}`;
+      }
+    } catch (err) {
+      console.error('Error during sign in:', err);
+      setError('Failed to sign in');
+      throw err;
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  const signOut = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      await fetch('/api/auth/signout', { method: 'POST' });
+      setUser(null);
+      router.push('/signin');
+    } catch (err) {
+      console.error('Error signing out:', err);
+      setError('Failed to sign out');
+      throw err;
+    } finally {
+      setIsLoading(false);
+    }
+  }, [router]);
+
+  const getSession = useCallback(async () => {
+    try {
+      const response = await fetch('/api/auth/session');
+      if (response.ok) {
+        const data = await response.json();
+        setUser(data.user || null);
+        return { user: data.user || null };
+      }
+      return { user: null };
+    } catch (err) {
+      console.error('Error getting session:', err);
+      return { user: null };
+    }
+  }, []);
+
   return {
-    ...state,
-    isAuthenticated: !!state.user,
+    user,
+    isLoading,
+    isLoaded: !isLoading,
+    userId: user?.id,
+    error,
+    signIn,
     signOut,
-    signInWithGoogle,
+    getSession,
     getToken,
-    refresh: getSession,
   };
 }

@@ -43,9 +43,13 @@ declare global {
       // Node Environment
       NODE_ENV: 'development' | 'production' | 'test';
       
-      // Clerk Authentication
-      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: string;
-      CLERK_SECRET_KEY: string;
+      // Authentication
+      BETTER_AUTH_SECRET: string;
+      BASE_URL: string;
+      
+      // OAuth Providers
+      GOOGLE_CLIENT_ID: string;
+      GOOGLE_CLIENT_SECRET: string;
       
       // Database
       DATABASE_URL: string;

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useAuth } from "@/hooks/use-auth";
+import { useAuth } from "@/hooks/use-auth-client";
 
 // Types
 type CreditSummary = {
@@ -25,10 +25,16 @@ type SpendCreditsOptions = {
 
 // Fetch credit summary
 async function fetchCreditSummary(signal?: AbortSignal): Promise<CreditSummary> {
-  const response = await fetch('/api/credits/summary', { signal });
+  const response = await fetch('/api/credits/summary', { 
+    signal,
+    credentials: 'include' // Include cookies for authentication
+  });
+  
   if (!response.ok) {
-    throw new Error('Failed to fetch credit summary');
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.message || 'Failed to fetch credit summary');
   }
+  
   return response.json();
 }
 
@@ -42,6 +48,7 @@ async function spendCreditsRequest(
     headers: {
       'Content-Type': 'application/json',
     },
+    credentials: 'include', // Include cookies for authentication
     body: JSON.stringify({
       action,
       ref,
@@ -60,7 +67,8 @@ async function spendCreditsRequest(
 }
 
 export function useCredits() {
-  const { isLoaded, userId } = useAuth();
+  const { user, isAuthenticated, loading } = useAuth();
+  const authLoading = loading; // Alias for consistency with existing code
   const queryClient = useQueryClient();
 
   // Get credit summary
@@ -70,10 +78,12 @@ export function useCredits() {
     error: summaryError,
     refetch: refetchSummary,
   } = useQuery<CreditSummary>({
-    queryKey: ['credits', 'summary'],
+    queryKey: ['credits', 'summary', user?.id],
     queryFn: ({ signal }) => fetchCreditSummary(signal),
-    enabled: isLoaded && !!userId,
+    enabled: !authLoading && isAuthenticated,
     refetchOnWindowFocus: false,
+    retry: 1,
+    staleTime: 5 * 60 * 1000, // 5 minutes
   });
 
   // Get current balance
@@ -91,7 +101,7 @@ export function useCredits() {
 
   // Check if user has enough credits
   const hasEnoughCredits = (required: number): boolean => {
-    if (!isLoaded || !userId) return false;
+    if (authLoading || !isAuthenticated) return false;
     return balance >= required;
   };
 
@@ -102,7 +112,7 @@ export function useCredits() {
       'publish.epub': 5,
       'publish.pdf': 5,
       'publish.audio': Math.ceil((words || 0) / 1000) * 1, // 1 credit per 1000 words
-    };
+    } as const;
     
     return costs[action] || 0;
   };
@@ -111,7 +121,7 @@ export function useCredits() {
     // State
     balance,
     recentActivities,
-    isLoading: isLoadingSummary,
+    isLoading: isLoadingSummary || authLoading,
     error: summaryError,
     
     // Actions
@@ -127,22 +137,34 @@ export function useCredits() {
 }
 
 // Hook to check if user has enough credits for an action
-export function useHasEnoughCredits(action: SpendCreditsOptions['action'], words?: number) {
-  const { balance, isLoading } = useCredits();
+export function useHasEnoughCredits(
+  action: SpendCreditsOptions['action'], 
+  words?: number
+) {
+  const { balance, isLoading, error } = useCredits();
   
-  if (isLoading) return { hasEnough: false, isLoading: true };
+  const cost = getActionCost(action, words);
   
-  const cost = {
+  return { 
+    hasEnough: !isLoading && balance >= cost,
+    isLoading,
+    cost,
+    balance,
+    error,
+  };
+}
+
+// Helper function to calculate action cost
+function getActionCost(
+  action: SpendCreditsOptions['action'], 
+  words?: number
+): number {
+  const costs = {
     'book.create': 10,
     'publish.epub': 5,
     'publish.pdf': 5,
     'publish.audio': Math.ceil((words || 0) / 1000) * 1, // 1 credit per 1000 words
-  }[action] || 0;
+  } as const;
   
-  return { 
-    hasEnough: balance >= cost, 
-    isLoading: false,
-    cost,
-    balance,
-  };
+  return costs[action] || 0;
 }

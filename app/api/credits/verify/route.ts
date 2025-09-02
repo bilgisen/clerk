@@ -1,17 +1,17 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db/server';
 import { creditLedger } from '@/db/schema/credits';
 import { and, eq } from 'drizzle-orm';
 import { requireAuth } from '@/lib/auth/api-auth';
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
     const { checkoutId } = await request.json();
     
-    const { user, error } = await requireAuth();
+    const { user: authUser, error } = await requireAuth(request);
     if (error) return error;
     
-    if (!user) {
+    if (!authUser) {
       return NextResponse.json(
         { success: false, error: 'Unauthorized' },
         { status: 401 }
@@ -31,7 +31,7 @@ export async function POST(request: Request) {
       .from(creditLedger)
       .where(
         and(
-          eq(creditLedger.userId, user.id),
+          eq(creditLedger.userId, authUser?.id || ''),
           eq(creditLedger.ref, checkoutId)
         )
       )
@@ -40,7 +40,7 @@ export async function POST(request: Request) {
     if (!existingCredit) {
       // Only add credits if this checkout hasn't been processed before
       await db.insert(creditLedger).values({
-        userId: user.id,
+        userId: authUser.id,
         amount: 100, // Adjust based on your credit system
         reason: 'purchase',
         ref: checkoutId,

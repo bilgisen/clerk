@@ -13,11 +13,14 @@ export const env = createEnv({
   server: {
     // Database
     DATABASE_URL: z.string().url(),
+    DATABASE_URL_UNPOOLED: z.string().url(),
     
     // Authentication
-    AUTH_SECRET: z.string().min(1),
-    AUTH_URL: z.string().url().default("http://localhost:3000"),
-    JWT_SECRET: z.string().min(1),
+    BETTER_AUTH_SECRET: z.string().min(1),
+    BASE_URL: z.string().url().default("http://localhost:3000"),
+    
+    // JWT (if used separately)
+    JWT_SECRET: z.string().min(1).optional(),
     
     // Google OAuth
     GOOGLE_CLIENT_ID: z.string().min(1),
@@ -43,6 +46,9 @@ export const env = createEnv({
    * `NEXT_PUBLIC_`.
    */
   client: {
+    // App URL
+    NEXT_PUBLIC_APP_URL: z.string().url().default("http://localhost:3000"),
+    
     // Polar.sh
     NEXT_PUBLIC_POLAR_API_URL: z.string().url().default("https://api.polar.sh"),
     NEXT_PUBLIC_POLAR_PRICE_STARTER: z.string().default("$9"),

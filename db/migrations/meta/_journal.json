@@ -5,22 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1756475343188,
-      "tag": "0000_conscious_sauron",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1756644152067,
-      "tag": "0001_eminent_doctor_strange",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1756649923217,
-      "tag": "0002_busy_spiral",
+      "when": 1756755977264,
+      "tag": "0000_lyrical_hiroim",
       "breakpoints": true
     }
   ]

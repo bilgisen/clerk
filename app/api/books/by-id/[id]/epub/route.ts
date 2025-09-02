@@ -2,32 +2,26 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/db/drizzle';
 import { books } from '@/db/schema';
 import { eq } from 'drizzle-orm';
-import { 
-  withSessionAuth, 
-  type AuthContextUnion, 
-  type BaseAuthContext,
-  type HandlerWithAuth,
-  isSessionAuthContext
-} from '@/middleware/auth';
 import { logger } from '@/lib/logger';
 import { z } from 'zod';
 
-// Schema for request body validation
+import authClient, { getSession } from '@/lib/auth/auth-client';
+
 const UpdateEpubSchema = z.object({
   epubUrl: z.string().url('Valid EPUB URL is required')
 });
 
-// POST /api/books/by-id/[id]/epub
-// Protected by session auth. Called after uploading EPUB to R2.
-// Body: { epubUrl: string }
-const handler: HandlerWithAuth<{ id: string }> = async (
+export async function POST(
   req: NextRequest,
-  context: BaseAuthContext<{ id: string }>
-) => {
+  { params }: { params: { id: string } }
+) {
   try {
-    const { id } = context.params || {};
+    const { id } = params || {};
     
-    if (!isSessionAuthContext(context.authContext)) {
+    // Use the imported getSession function
+    const { data: session, error } = await getSession({ required: true });
+    
+    if (error || !session?.user) {
       return NextResponse.json(
         { error: 'unauthorized', message: 'Authentication required' },
         { status: 401 }
@@ -41,13 +35,11 @@ const handler: HandlerWithAuth<{ id: string }> = async (
       );
     }
 
-    // Log the EPUB update request for audit
     logger.info('EPUB update request', {
       bookId: id,
-      userId: context.authContext.userId
+      userId: session.user.id // ✅ no more "context"
     });
 
-    // Validate book ID format (should be a valid UUID)
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (!uuidRegex.test(id)) {
       logger.error('Invalid book ID format', { bookId: id });
@@ -57,19 +49,18 @@ const handler: HandlerWithAuth<{ id: string }> = async (
       );
     }
 
-    // Parse and validate request body
     let body;
     try {
       body = await req.json();
       const validation = UpdateEpubSchema.safeParse(body);
       
       if (!validation.success) {
-        logger.error('Validation error', { error: validation.error });
+        logger.error('Validation error', { error: validation.error.flatten() });
         return NextResponse.json(
           { 
             error: 'validation_error', 
             message: 'Invalid request body',
-            details: validation.error.format()
+            details: validation.error.flatten()
           }, 
           { status: 400 }
         );
@@ -84,7 +75,6 @@ const handler: HandlerWithAuth<{ id: string }> = async (
       );
     }
 
-    // Update the book with the new EPUB URL
     try {
       const [updated] = await db
         .update(books)
@@ -136,21 +126,3 @@ const handler: HandlerWithAuth<{ id: string }> = async (
     );
   }
 };
-
-// Export the handler wrapped with session auth middleware
-export const POST = withSessionAuth(handler);
-
-// Add handler type declaration
-declare global {
-  // eslint-disable-next-line @typescript-eslint/no-namespace
-  namespace NodeJS {
-    interface ProcessEnv {
-      R2_PUBLIC_URL: string;
-      R2_ACCESS_KEY_ID: string;
-      R2_SECRET_ACCESS_KEY: string;
-      R2_BUCKET_NAME: string;
-      R2_ENDPOINT: string;
-      R2_REGION: string;
-    }
-  }
-}

@@ -1,7 +1,5 @@
 import { NextRequest } from 'next/server';
-import { SessionAuthContext } from '@/lib/types/auth';
-
-export type AuthContextUnion = SessionAuthContext | { type: 'unauthorized' };
+import { AuthContextUnion } from './auth.types';
 
 export interface AuthRequest extends NextRequest {
   authContext: AuthContextUnion;

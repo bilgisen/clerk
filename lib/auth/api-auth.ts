@@ -1,35 +1,75 @@
-import { NextResponse } from 'next/server';
-import { getAuth } from './better-auth';
+import { auth } from './better-auth';
+import { NextResponse, type NextRequest } from 'next/server';
 
-export async function requireAuth() {
-  const authData = await getAuth();
-  
-  if (!authData?.user) {
-    return {
-      error: new NextResponse(
-        JSON.stringify({ error: 'Not authenticated' }), 
-        { status: 401, headers: { 'Content-Type': 'application/json' } }
-      ),
-      user: null,
-    };
-  }
-
-  return { user: authData.user, error: null };
+export interface AuthUser {
+  id: string;
+  email: string;
+  name: string;
+  image?: string | null;
+  role: string;
 }
 
-export async function requireAdmin() {
-  const { user, error } = await requireAuth();
+// Return type for `requireAuth()`
+export interface AuthResult {
+  user?: AuthUser;
+  error?: NextResponse;
+}
+
+/**
+ * requireAuth
+ * Checks if a user is authenticated using Better Auth.
+ * @param request NextRequest or Request from the API route
+ */
+export async function requireAuth(request: NextRequest | Request): Promise<AuthResult> {
+  try {
+    // Get session from headers
+    const sessionData = await auth.api.getSession({
+      headers: request.headers,
+    });
+
+    const user = sessionData?.user;
+
+    if (!user || !user.id) {
+      return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) };
+    }
+
+    // Map session user to AuthUser type
+    const authUser: AuthUser = {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      image: user.image ?? null,
+      role: user.role ?? 'user',
+    };
+
+    return { user: authUser };
+  } catch (err) {
+    console.error('Auth error:', err);
+    return { error: NextResponse.json({ error: 'Internal server error' }, { status: 500 }) };
+  }
+}
+
+export async function requireAdmin(request: NextRequest): Promise<AuthResult> {
+  const result = await requireAuth(request);
   
-  if (error) return { error, user: null };
-  if (user?.role !== 'admin') {
+  if (result.error) {
+    return { error: result.error };
+  }
+  
+  if (!result.user || result.user.role !== 'admin') {
     return {
-      error: new NextResponse(
-        JSON.stringify({ error: 'Not authorized' }), 
-        { status: 403, headers: { 'Content-Type': 'application/json' } }
+      error: NextResponse.json(
+        { error: 'Not authorized' }, 
+        { 
+          status: 403, 
+          headers: { 
+            'Content-Type': 'application/json',
+            'Cache-Control': 'no-store, max-age=0'
+          } 
+        }
       ),
-      user: null,
     };
   }
   
-  return { user, error: null };
+  return { user: result.user };
 }

@@ -1,65 +1,82 @@
+// hooks/use-session.ts
 'use client';
 
 import { useEffect, useState } from 'react';
-import { auth } from '@/lib/auth/better-auth';
+import authClient, { type SessionData } from '@/lib/auth/auth-client';
 
-interface UserSession {
-  id: string;
-  email: string;
-  name?: string;
-  image?: string;
-  role?: string;
+interface UseSessionReturn {
+  user: SessionData['user'] | null;
+  session: SessionData | null;
+  status: 'loading' | 'authenticated' | 'unauthenticated';
+  error: Error | null;
+  isLoading: boolean;
+  signOut: () => Promise<void>;
 }
 
-export function useSession() {
-  const [session, setSession] = useState<UserSession | null>(null);
-  const [loading, setLoading] = useState(true);
+export function useSession(): UseSessionReturn {
+  const [session, setSession] = useState<SessionData | null>(null);
+  const [user, setUser] = useState<SessionData['user'] | null>(null);
   const [error, setError] = useState<Error | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const getSession = async () => {
+    const fetchSession = async () => {
       try {
-        setLoading(true);
-        const session = await auth.getSession();
-        setSession(session?.user || null);
+        setIsLoading(true);
+
+        const { data: session, error: sessionError } = await authClient.getSession();
+        
+        if (sessionError) {
+          throw sessionError;
+        }
+
+        if (session) {
+          setSession(session);
+          setUser(session.user || null);
+        } else {
+          setSession(null);
+          setUser(null);
+        }
       } catch (err) {
-        console.error('Session error:', err);
-        setError(err instanceof Error ? err : new Error('Failed to fetch session'));
+        console.error('Error in useSession:', err);
+        setError(err instanceof Error ? err : new Error('An unknown error occurred'));
         setSession(null);
+        setUser(null);
       } finally {
-        setLoading(false);
+        setIsLoading(false);
       }
     };
 
-    getSession();
+    fetchSession();
 
-    // Set up session change listener if available
-    const unsubscribe = auth.onAuthStateChange((user) => {
-      setSession(user);
-      setLoading(false);
-    });
+    const refreshInterval = setInterval(fetchSession, 5 * 60 * 1000);
 
-    return () => {
-      if (unsubscribe) unsubscribe();
-    };
+    return () => clearInterval(refreshInterval);
   }, []);
 
   const signOut = async () => {
     try {
-      await auth.signOut();
+      const { error } = await authClient.signOut();
+      if (error) {
+        throw error;
+      }
       setSession(null);
+      setUser(null);
       window.location.href = '/';
     } catch (err) {
-      console.error('Sign out error:', err);
-      throw err;
+      console.error('Error signing out:', err);
+      const errorObj = err instanceof Error ? err : new Error('Failed to sign out');
+      setError(errorObj);
+      throw errorObj;
     }
   };
 
   return {
+    user,
     session,
-    loading,
+    status: isLoading ? 'loading' : user ? 'authenticated' : 'unauthenticated',
     error,
+    isLoading,
     signOut,
-    isAuthenticated: !!session,
   };
 }

@@ -1,29 +1,20 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { getServerAuth } from '@/lib/auth/better-auth';
+import { auth } from '@/lib/auth/better-auth';
+import { cookies } from 'next/headers';
+import type { AuthContextUnion, SessionAuthContext } from '@/types/auth.types';
+
+// Re-export types from auth.types.ts for backward compatibility
+export type { AuthContextUnion, SessionAuthContext } from '@/types/auth.types';
+
+type UnauthorizedContext = {
+  type: 'unauthorized';
+};
 
 declare module 'next/server' {
   interface NextRequest {
-    authContext?: AuthContextUnion;
+    authContext: AuthContextUnion;
   }
 }
-
-// Auth Context Types
-export interface SessionAuthContext {
-  type: 'session';
-  userId: string;
-  sessionId: string;
-  email: string;
-  role?: string;
-  name?: string;
-  image?: string | null;
-  emailVerified?: boolean;
-}
-
-export interface UnauthorizedContext {
-  type: 'unauthorized';
-}
-
-export type AuthContextUnion = SessionAuthContext | UnauthorizedContext;
 
 // Base type for auth context
 export interface BaseAuthContext<TParams = Record<string, string>> {
@@ -64,43 +55,44 @@ function createErrorResponse(
 export function withSessionAuth<TParams = Record<string, string>>(
   handler: HandlerWithAuth<TParams>
 ) {
-  return async (request: NextRequest, { params }: { params: TParams }) => {
+  return async function (request: NextRequest, context: { params: TParams }) {
     try {
-      // Get the session from the request
-      const auth = await getServerAuth(request);
+      // Create a new request with cookies for auth
+      const authRequest = new Request(request.url, {
+        headers: {
+          cookie: request.headers.get('cookie') || '',
+        },
+      });
       
-      if (!auth?.user) {
-        // Redirect to sign-in page with the current URL as the callback
-        const signInUrl = new URL('/sign-in', request.url);
-        signInUrl.searchParams.set('callbackUrl', request.url);
-        return NextResponse.redirect(signInUrl);
+      // Get the session using the auth handler
+      const response = await auth.handler(authRequest);
+      const session = await response.json();
+      
+      if (!session?.user) {
+        return createErrorResponse(401, 'UNAUTHORIZED', 'You must be signed in');
       }
 
-      // Add auth context to the request
-      const authContext: SessionAuthContext = {
+      // Attach auth context to request
+      request.authContext = {
         type: 'session',
-        userId: auth.user.id,
-        sessionId: auth.user.id, // Using user ID as session ID for now
-        email: auth.user.email,
-        role: auth.user.role || 'user',
-        name: auth.user.name || auth.user.email?.split('@')[0] || 'User',
+        user: {
+          id: session.user.id,
+          email: session.user.email,
+          firstName: session.user.firstName || undefined,
+          lastName: session.user.lastName || undefined,
+          imageUrl: session.user.imageUrl || undefined,
+          emailVerified: session.user.emailVerified,
+          role: (session.user as any).role || 'MEMBER',
+          permissions: (session.user as any).permissions || ['read:books']
+        },
+        sessionId: session.session?.id || 'unknown',
+        createdAt: new Date().toISOString()
       };
-      
-      // Add auth context to the request
-      (request as any).authContext = authContext;
 
-      request.authContext = authContext;
-
-      // Call the handler with the authenticated request
-      return handler(request, { params, authContext });
+      return handler(request, { params: context.params, authContext: request.authContext });
     } catch (error) {
       console.error('Auth middleware error:', error);
-      return createErrorResponse(
-        500,
-        'AUTH_ERROR',
-        'Authentication error',
-        { error: error instanceof Error ? error.message : 'Unknown error' }
-      );
+      return createErrorResponse(500, 'INTERNAL_ERROR', 'Authentication failed');
     }
   };
 }
@@ -109,35 +101,45 @@ export function withSessionAuth<TParams = Record<string, string>>(
 export function withOptionalAuth<TParams = Record<string, string>>(
   handler: HandlerWithAuth<TParams>
 ) {
-  return async (request: NextRequest, { params }: { params: TParams }) => {
+  return async function (request: NextRequest, context: { params: TParams }) {
     try {
-      // Try to get the session
-      const auth = await getServerAuth(request);
+      // Create a new request with cookies for auth
+      const authRequest = new Request(request.url, {
+        headers: {
+          cookie: request.headers.get('cookie') || '',
+        },
+      });
       
-      if (!auth?.user) {
-        const authContext: UnauthorizedContext = { type: 'unauthorized' };
-        request.authContext = authContext;
-        return handler(request, { params, authContext });
+      // Get the session using the auth handler
+      const response = await auth.handler(authRequest);
+      const session = await response.json();
+      
+      if (session?.user) {
+        request.authContext = {
+          type: 'session',
+          user: {
+            id: session.user.id,
+            email: session.user.email,
+            firstName: session.user.firstName || undefined,
+            lastName: session.user.lastName || undefined,
+            imageUrl: session.user.imageUrl || undefined,
+            emailVerified: session.user.emailVerified,
+            role: (session.user as any).role || 'MEMBER',
+            permissions: (session.user as any).permissions || ['read:books']
+          },
+          sessionId: session.session?.id || 'unknown',
+          createdAt: new Date().toISOString()
+        };
+      } else {
+        request.authContext = { type: 'unauthorized' };
       }
 
-      // Add auth context to the request
-      const authContext: SessionAuthContext = {
-        type: 'session',
-        userId: auth.user.id,
-        sessionId: auth.user.id,
-        email: auth.user.email,
-        role: auth.user.role || 'user',
-        name: auth.user.name || auth.user.email?.split('@')[0] || 'User',
-      };
-      
-      // Add auth context to the request
-      (request as any).authContext = authContext;
-      return handler(request, { params, authContext });
+      return handler(request, { params: context.params, authContext: request.authContext });
     } catch (error) {
-      console.error('Auth middleware error:', error);
-      const authContext: UnauthorizedContext = { type: 'unauthorized' };
-      request.authContext = authContext;
-      return handler(request, { params, authContext });
+      console.error('Optional auth middleware error:', error);
+      // For optional auth, we still proceed but with unauthorized context
+      request.authContext = { type: 'unauthorized' };
+      return handler(request, { params: context.params, authContext: request.authContext });
     }
   };
 }

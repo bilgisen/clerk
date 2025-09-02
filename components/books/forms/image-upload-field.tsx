@@ -1,7 +1,7 @@
 // components/forms/image-upload-field.tsx
 "use client";
 
-import { toast } from "sonner";
+import toast from "sonner";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import Image from "next/image";

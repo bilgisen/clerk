@@ -15,7 +15,8 @@ export default function Home() {
   const [error, setError] = useState('');
   const [isSignUp, setIsSignUp] = useState(false);
   const router = useRouter();
-  const { session, loading: sessionLoading } = useSession();
+  const { user: session, status } = useSession();
+  const sessionLoading = status === 'loading';
 
   // Redirect if already authenticated
   if (sessionLoading) {

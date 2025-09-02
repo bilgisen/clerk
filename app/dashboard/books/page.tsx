@@ -53,7 +53,7 @@ export default function BooksPageWrapper() {
   useEffect(() => {
     setIsClient(true);
     
-    if (loading) return;
+    if (authLoading) return;
     
     if (!user) {
       router.push('/signin');
@@ -61,7 +61,7 @@ export default function BooksPageWrapper() {
     }
     
     fetchBooks();
-  }, [loading, user, router]);
+  }, [authLoading, user, router]);
 
   if (!isClient) {
     return (

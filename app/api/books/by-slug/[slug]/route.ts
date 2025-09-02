@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
 import { requireAuth } from '@/lib/auth/api-auth';
 
@@ -34,11 +34,11 @@ interface Book {
  * Get a single book by slug for the authenticated user
  */
 export async function GET(
-  request: Request,
+  request: NextRequest,
   context: { params: Promise<{ slug: string }> }
 ) {
   try {
-    const { user: authUser, error } = await requireAuth();
+    const { user: authUser, error } = await requireAuth(request);
     if (error) return error;
     
     if (!authUser) {
@@ -79,11 +79,11 @@ export async function GET(
  * Delete a book by slug
  */
 export async function DELETE(
-  request: Request,
+  request: NextRequest,
   context: { params: Promise<{ slug: string }> }
 ) {
   try {
-    const { user: authUser, error } = await requireAuth();
+    const { user: authUser, error } = await requireAuth(request);
     if (error) return error;
     
     if (!authUser) {

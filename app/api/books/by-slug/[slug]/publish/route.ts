@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { creditService } from '@/lib/services/credits/credit-service';
 import { db } from '@/db';
 import { users } from '@/db/schema';
@@ -6,7 +6,7 @@ import { requireAuth } from '@/lib/auth/api-auth';
 import { eq } from 'drizzle-orm';
 
 export async function POST(
-  request: Request,
+  request: NextRequest,
   context: { params: { slug: string } }
 ) {
   // Dynamic import for ES module
@@ -16,7 +16,7 @@ export async function POST(
   const { slug } = context.params;
   try {
     // Get the current user session
-    const { user: authUser, error } = await requireAuth();
+    const { user: authUser, error } = await requireAuth(request);
     if (error) return error;
     
     if (!authUser) {
